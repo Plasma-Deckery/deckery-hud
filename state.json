@@ -1,0 +1,29 @@
+{
+  "context": {
+    "config_stack": ["Steam Deck"],
+    "layout": 0
+  },
+  "bindings": {
+    "BTN_DPAD_UP":    { "action": ["KEY_UP"],          "origin": "Steam Deck" },
+    "BTN_DPAD_DOWN":  { "action": ["KEY_DOWN"],        "origin": "Steam Deck" },
+    "BTN_DPAD_LEFT":  { "action": ["KEY_LEFT"],        "origin": "Steam Deck" },
+    "BTN_DPAD_RIGHT": { "action": ["KEY_RIGHT"],       "origin": "Steam Deck" },
+    "BTN_SOUTH":      { "action": ["KEY_ENTER"],       "origin": "Steam Deck" },
+    "BTN_EAST":       { "action": ["KEY_ESC"],         "origin": "Steam Deck" },
+    "BTN_NORTH":      { "action": ["KEY_BACKSPACE"],   "origin": "Steam Deck" },
+    "BTN_WEST":       { "action": ["KEY_SPACE"],       "origin": "Steam Deck" },
+    "BTN_TL":         { "action": ["KEY_LEFTCTRL"],    "origin": "Steam Deck" },
+    "BTN_TR":         { "action": ["KEY_LEFTALT"],     "origin": "Steam Deck" },
+    "BTN_TL2":        { "action": ["BTN_RIGHT"],       "origin": "Steam Deck" },
+    "BTN_TR2":        { "action": ["BTN_LEFT"],        "origin": "Steam Deck" },
+    "BTN_SELECT":     { "action": ["KEY_TAB"],         "origin": "Steam Deck" },
+    "BTN_START":      { "action": ["KEY_LEFTMETA"],    "origin": "Steam Deck" },
+    "BTN_THUMBR":     { "action": ["BTN_LEFT"],        "origin": "Steam Deck" },
+    "BTN_GRIPL2":     { "action": ["KEY_LEFTMETA"],    "origin": "Steam Deck" },
+    "BTN_GRIPL":      { "action": ["KEY_LEFTSHIFT"],   "origin": "Steam Deck" },
+    "BTN_GRIPR2":     { "action": ["KEY_PAGEDOWN"],    "origin": "Steam Deck" },
+    "BTN_GRIPR":      { "action": ["KEY_PAGEUP"],      "origin": "Steam Deck" },
+    "BTN_TL-BTN_GRIPR2": { "action": ["KEY_LEFTCTRL", "KEY_PAGEDOWN"], "origin": "Steam Deck" }
+  },
+  "modifier_active": {}
+}
