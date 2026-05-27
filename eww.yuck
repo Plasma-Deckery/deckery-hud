@@ -1,0 +1,142 @@
+; Deckery HUD — Steam Deck Button Overlay
+; Reads /tmp/makima-state.json (or falls back to dev state.json)
+
+(defpoll state :interval "200ms"
+  `cat /tmp/makima-state.json 2>/dev/null || cat ~/Programming/deckery-hud/state.json`)
+
+; ── Button widget ─────────────────────────────────────────────────────────────
+(defwidget btn [name binding origin]
+  (box :class {origin == "base" ? "btn base" : "btn override"}
+       :orientation "vertical" :space-evenly false :spacing 2
+    (label :class "btn-name" :text name :xalign 0.5)
+    (label :class "btn-binding" :text binding :xalign 0.5 :wrap true :limit-width 12)))
+
+; ── Full HUD layout ───────────────────────────────────────────────────────────
+(defwidget deckery-hud-widget []
+  (box :class "hud-root" :orientation "vertical" :space-evenly false :spacing 8
+
+    ; Title bar
+    (box :class "hud-header" :orientation "horizontal" :space-evenly false :spacing 8
+      (label :class "hud-title" :text "Deckery")
+      (label :class "hud-config" :hexpand true
+        :text {jq(state, '.context.config_stack | join(" → ")')})
+      (button :class "hud-close"
+              :onclick "eww --config /home/philipp/Programming/deckery-hud close deckery-hud"
+        (label :text "✕")))
+
+    ; Main controller layout (3 columns: left / center / right)
+    (box :class "hud-body" :orientation "horizontal" :space-evenly true :spacing 12
+
+      ; ── LEFT SIDE ──────────────────────────────────────────
+      (box :class "side-left" :orientation "vertical" :space-evenly false :spacing 6
+
+        (box :orientation "horizontal" :space-evenly true :spacing 4
+          (btn :name "L2"
+               :binding {jq(state, '.bindings.BTN_TL2.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_TL2.origin')})
+          (btn :name "L1"
+               :binding {jq(state, '.bindings.BTN_TL.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_TL.origin')}))
+
+        (box :class "dpad" :orientation "vertical" :space-evenly false :spacing 2
+          (label :class "section-title" :text "D-Pad" :xalign 0.5)
+          (box :orientation "horizontal" :space-evenly true
+            (label :text "   ")
+            (btn :name "↑"
+                 :binding {jq(state, '.bindings.BTN_DPAD_UP.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_DPAD_UP.origin')})
+            (label :text "   "))
+          (box :orientation "horizontal" :space-evenly true
+            (btn :name "←"
+                 :binding {jq(state, '.bindings.BTN_DPAD_LEFT.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_DPAD_LEFT.origin')})
+            (label :class "dpad-center" :text "✛")
+            (btn :name "→"
+                 :binding {jq(state, '.bindings.BTN_DPAD_RIGHT.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_DPAD_RIGHT.origin')}))
+          (box :orientation "horizontal" :space-evenly true
+            (label :text "   ")
+            (btn :name "↓"
+                 :binding {jq(state, '.bindings.BTN_DPAD_DOWN.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_DPAD_DOWN.origin')})
+            (label :text "   ")))
+
+        (box :class "paddles" :orientation "horizontal" :space-evenly true :spacing 4
+          (btn :name "L4"
+               :binding {jq(state, '.bindings.BTN_GRIPL2.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_GRIPL2.origin')})
+          (btn :name "L5"
+               :binding {jq(state, '.bindings.BTN_GRIPL.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_GRIPL.origin')})))
+
+      ; ── CENTER ─────────────────────────────────────────────
+      (box :class "side-center" :orientation "vertical" :space-evenly false :spacing 6
+        (box :orientation "horizontal" :space-evenly true :spacing 4
+          (btn :name "☰ View"
+               :binding {jq(state, '.bindings.BTN_SELECT.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_SELECT.origin')})
+          (btn :name "⊙ Steam"
+               :binding "—"
+               :origin "base")
+          (btn :name "≡ Menu"
+               :binding {jq(state, '.bindings.BTN_START.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_START.origin')}))
+
+        (box :class "modifier-section" :orientation "vertical" :space-evenly false :spacing 4
+          (label :class "section-title" :text "Active Combos" :xalign 0.5)
+          (label :class "combo-entry" :wrap true :xalign 0.0
+            :text {jq(state, '[.modifier_active | to_entries[] | "\(.key): \(.value.action | join("+"))"] | if length == 0 then "none" else join("\n") end')})))
+
+      ; ── RIGHT SIDE ─────────────────────────────────────────
+      (box :class "side-right" :orientation "vertical" :space-evenly false :spacing 6
+
+        (box :orientation "horizontal" :space-evenly true :spacing 4
+          (btn :name "R1"
+               :binding {jq(state, '.bindings.BTN_TR.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_TR.origin')})
+          (btn :name "R2"
+               :binding {jq(state, '.bindings.BTN_TR2.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_TR2.origin')}))
+
+        (box :class "abxy" :orientation "vertical" :space-evenly false :spacing 2
+          (label :class "section-title" :text "Buttons" :xalign 0.5)
+          (box :orientation "horizontal" :space-evenly true
+            (label :text "   ")
+            (btn :name "Y"
+                 :binding {jq(state, '.bindings.BTN_WEST.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_WEST.origin')})
+            (label :text "   "))
+          (box :orientation "horizontal" :space-evenly true
+            (btn :name "X"
+                 :binding {jq(state, '.bindings.BTN_NORTH.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_NORTH.origin')})
+            (label :text "   ")
+            (btn :name "B"
+                 :binding {jq(state, '.bindings.BTN_EAST.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_EAST.origin')}))
+          (box :orientation "horizontal" :space-evenly true
+            (label :text "   ")
+            (btn :name "A"
+                 :binding {jq(state, '.bindings.BTN_SOUTH.action | join("+")')}
+                 :origin {jq(state, '.bindings.BTN_SOUTH.origin')})
+            (label :text "   ")))
+
+        (box :class "paddles" :orientation "horizontal" :space-evenly true :spacing 4
+          (btn :name "R4"
+               :binding {jq(state, '.bindings.BTN_GRIPR2.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_GRIPR2.origin')})
+          (btn :name "R5"
+               :binding {jq(state, '.bindings.BTN_GRIPR.action | join("+")')}
+               :origin {jq(state, '.bindings.BTN_GRIPR.origin')}))))))
+
+; ── Window definition ─────────────────────────────────────────────────────────
+(defwindow deckery-hud
+  :monitor 0
+  :geometry (geometry
+    :x "50%"  :y "50%"
+    :width "80%"  :height "320px"
+    :anchor "center")
+  :stacking "overlay"
+  :exclusive false
+  :focusable false
+  (deckery-hud-widget))
