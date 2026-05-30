@@ -19,25 +19,27 @@ Datei: `/tmp/makima-state.json`
 
 ## `context`
 
-| Feld               | Typ            | Beschreibung |
-|--------------------|----------------|--------------|
-| `config_stack`     | `string[]`     | Aktive Config-Ebenen, z.B. `["Steam Deck", "Firefox"]` |
-| `held_modifiers`   | `string[]`     | Gerade gehaltene Modifier-Buttons, z.B. `["BTN_TL"]` |
-| `active_buttons`   | `string[]`     | Alle gerade physisch gedrückten Buttons |
-| `active_outputs`   | `string[]`     | Aggregierte evdev-Codes die gerade gehalten werden |
-| `paused`           | `bool`         | Makima pausiert (HUD übernimmt Input) |
-| `layout`           | `int`          | Intern; HUD ignoriert dieses Feld |
+| Feld                  | Typ            | Beschreibung |
+|-----------------------|----------------|--------------|
+| `config_stack`        | `string[]`     | Aktive Config-Ebenen, z.B. `["Steam Deck", "Firefox"]` |
+| `held_modifiers`      | `string[]`     | Gerade gehaltene Modifier-Buttons, z.B. `["BTN_TL"]` |
+| `active_buttons`      | `string[]`     | Alle gerade physisch gedrückten Buttons |
+| `active_outputs`      | `string[]`     | Aggregierte evdev-Codes die gerade gehalten werden |
+| `available_modifiers` | `string[]`     | Modifier-Buttons die im aktuellen Zustand als nächster Schritt sinnvoll wären (d.h. Combo-Bindings freischalten würden). Leer wenn keine weiteren Modifier existieren. |
+| `paused`              | `bool`         | Makima pausiert (HUD übernimmt Input) |
+| `layout`              | `int`          | Intern; HUD ignoriert dieses Feld |
 
 ---
 
 ## `bindings[key]`
 
-| Feld     | Typ          | Beschreibung |
-|----------|--------------|--------------|
-| `action` | `string[]`   | evdev-Codes der Aktion |
-| `kind`   | `string`     | `"remap"` o.ä.; HUD ignoriert aktuell |
-| `label`  | `string\|null` | Optionaler Freitext-Label für die Aktion (HUD nutzt ihn statt `_fmt(action)` wenn gesetzt) |
-| `origin` | `string`     | Name der Config-Ebene, aus der die Binding stammt |
+| Feld       | Typ            | Beschreibung |
+|------------|----------------|--------------|
+| `action`   | `string[]`     | evdev-Codes oder Shell-Befehle der Aktion |
+| `kind`     | `string`       | `"remap"` · `"command"` · `"movement"` |
+| `label`    | `string\|null` | Optionaler Freitext-Label (HUD nutzt ihn statt `_fmt(action)` wenn gesetzt) |
+| `origin`   | `string`       | Name der Config-Ebene, aus der die Binding stammt |
+| `no_pause` | `bool`         | `true` wenn die Binding auch im Pause-Modus ausgeführt wird (nur bei `kind: "command"`) |
 
 ---
 
@@ -64,24 +66,26 @@ HUD blendet anhand von `ts` nach 1,5 s aus.
 
 ---
 
-## `context.available_modifiers` — NEU (noch nicht implementiert)
+## `context.available_modifiers`
 
-Liste der Button-Codes, die im aktuellen Modifier-Zustand als *nächster* Modifier
-drückbar wären und dabei Combo-Bindings freischalten würden.
+Liste der Modifier-Buttons, die im aktuellen Zustand als nächster Schritt
+mindestens eine Combo-Binding freischalten würden.
 
 ```json
 "context": {
-  "available_modifiers": ["BTN_TL", "BTN_TL2"]
+  "available_modifiers": ["BTN_TL", "BTN_TR"]
 }
 ```
 
 **Verhalten:**
-- Kein Modifier gehalten → zeigt alle Top-Level-Modifier-Buttons
-- L1 gehalten → zeigt Buttons die L1+X-Combos haben (z.B. R1 wenn L1+R1 existiert)
+- Kein Modifier gehalten → alle Modifier die in irgendeiner Combo vorkommen
+  (auch wenn sie einen weiteren Modifier benötigen — für Discoverability)
+- L1 gehalten → Modifier die zusammen mit L1 eine Combo freischalten (z.B. BTN_TR wenn L1+R1+* existiert)
 - Leer (`[]`) wenn im aktuellen Zustand keine weiteren Modifier sinnvoll sind
 
 **HUD-Nutzung:** Buttons aus dieser Liste, die *nicht* in `held_modifiers` sind,
 bekommen in der Callout-Legende einen kleinen amber Punkt als Discoverable-Indikator.
+Der Punkt verschwindet sobald der Modifier gehalten wird (dann wird die ganze Zeile amber).
 
 ---
 
