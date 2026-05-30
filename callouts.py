@@ -6,7 +6,7 @@ Owns _BTNS, _SORT_Y, _SHOW_ALL, and all callout drawing logic.
 import math
 
 from layout import _FX, _FY, _FS, _BX, _BY, _BS, _AX_L, _AX_R
-from helpers import _K, _fmt, _txt
+from helpers import _K, _fmt, _txt, _txt_size, C_MOD, C_LAYER
 
 # ── Display option ────────────────────────────────────────────────────────────
 # True  → show all buttons, unbound = dimmed with "—"
@@ -38,13 +38,13 @@ _BTNS = {
     # Back — left side: L1/L2 shoulder area (top of back SVG) + paddles
     "BTN_TL2":        ( 52,  58, "left",  "L2",   "back"),
     "BTN_TL":         ( 78,  22, "left",  "L1",   "back"),
-    "BTN_GRIPL":      (143, 217, "left",  "L5",   "back"),
-    "BTN_GRIPL2":     (143, 298, "left",  "L4",   "back"),
+    "BTN_GRIPL":      (143, 217, "left",  "L4",   "back"),
+    "BTN_GRIPL2":     (143, 298, "left",  "L5",   "back"),
     # Back — right side: R1/R2 + paddles
     "BTN_TR":         (982,  22, "right", "R1",   "back"),
     "BTN_TR2":        (1008, 58, "right", "R2",   "back"),
-    "BTN_GRIPR":      (916, 217, "right", "R5",   "back"),
-    "BTN_GRIPR2":     (916, 298, "right", "R4",   "back"),
+    "BTN_GRIPR":      (916, 217, "right", "R4",   "back"),
+    "BTN_GRIPR2":     (916, 298, "right", "R5",   "back"),
 }
 
 # Sort-key overrides (SVG units) for legend ordering.
@@ -80,12 +80,14 @@ def _fmt_combo_key(combo_key):
 # ── Rendering ─────────────────────────────────────────────────────────────────
 
 def draw_callouts(cr, state):
-    held_mods    = state.get("context", {}).get("held_modifiers", [])
+    ctx          = state.get("context", {})
+    held_mods    = ctx.get("held_modifiers", [])
     mod_active   = state.get("modifier_active", {})
-    active_btns  = set(state.get("context", {}).get("active_buttons", []))
-    config_stack = state.get("context", {}).get("config_stack") or [""]
+    active_btns  = set(ctx.get("active_buttons", []))
+    config_stack = ctx.get("config_stack") or [""]
     base_layer   = config_stack[0]
     active_mods  = set(held_mods)
+    avail_mods   = set(ctx.get("available_modifiers", []))
 
     # bindings is always the display base — modifier_active overlays on top.
     # We never fully switch views; instead each button is classified into one
@@ -104,9 +106,10 @@ def draw_callouts(cr, state):
 
         is_combo  = combo_b is not None
         b         = combo_b if is_combo else base_b
-        has_action = bool(b and b.get("action"))
+        has_action = bool(b and (b.get("action") or b.get("label")))
         is_active  = btn_key in active_btns
-        is_mod     = btn_key in active_mods
+        is_mod      = btn_key in active_mods
+        is_avail_mod = btn_key in avail_mods and not is_mod
 
         if not has_action and not _SHOW_ALL and not is_active:
             continue
@@ -124,15 +127,15 @@ def draw_callouts(cr, state):
             # layer_override: binding comes from a non-base config (e.g. Firefox)
             # Only meaningful for base bindings; combo origin is shown via is_combo.
             layer_override = (not is_combo) and (b.get("origin", base_layer) != base_layer)
-            action = _fmt(b["action"])
+            action = b.get("label") or _fmt(b["action"])
         else:
             layer_override = False
             action = "—"
 
         # entry: (sort_y, dot_x, dot_y, name, action,
-        #         layer_override, bound, active, is_mod, is_combo)
+        #         layer_override, bound, active, is_mod, is_combo, is_avail_mod)
         entry = (sort_sc_y, sc_x, sc_y, name, action,
-                 layer_override, has_action, is_active, is_mod, is_combo)
+                 layer_override, has_action, is_active, is_mod, is_combo, is_avail_mod)
 
         if side == "left":
             (lf if view == "front" else lb).append(entry)
@@ -160,15 +163,18 @@ def _callouts(cr, entries, side, ax):
     t0  = mid - len(entries) * ROW / 2
 
     for i, (_, bx, by, name, action,
-            layer_override, bound, active, active_mod, is_combo) in enumerate(entries):
+            layer_override, bound, active, active_mod, is_combo, is_avail_mod) in enumerate(entries):
         ly = t0 + i * ROW + ROW / 2
 
         # ── Dot ──────────────────────────────────────────────────────────────
-        # Priority: modifier-held > combo-active > regular-active > bound > unbound
+        # Priority: modifier-held > combo-active > layer-override > active > bound > unbound
         amber = active_mod or is_combo
         if amber:
-            cr.set_source_rgba(1.0, 0.78, 0.2, 1.0)
+            cr.set_source_rgba(*C_MOD, 1.0)
             cr.arc(bx, by, DOT + 2 if active else DOT, 0, math.tau)
+        elif layer_override:
+            cr.set_source_rgba(*C_LAYER, 1.0)
+            cr.arc(bx, by, DOT, 0, math.tau)
         elif active:
             cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
             cr.arc(bx, by, DOT + 2, 0, math.tau)
@@ -179,7 +185,9 @@ def _callouts(cr, entries, side, ax):
 
         # ── Callout line ─────────────────────────────────────────────────────
         if amber:
-            cr.set_source_rgba(1.0, 0.78, 0.2, 0.85 if active else 0.5)
+            cr.set_source_rgba(*C_MOD, 0.85 if active else 0.5)
+        elif layer_override:
+            cr.set_source_rgba(*C_LAYER, 0.55)
         elif active:
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.85)
         elif bound:
@@ -197,7 +205,7 @@ def _callouts(cr, entries, side, ax):
         # Colour hierarchy:
         #   amber (1.0)  → modifier held or combo available
         #   white (1.0)  → regular button currently pressed
-        #   blue         → window-config override (not base layer)
+        #   teal         → window-config override (not base layer)
         #   dim white    → normal base binding
         #   very dim     → unbound
         if active_mod:
@@ -211,7 +219,7 @@ def _callouts(cr, entries, side, ax):
         elif not bound:
             col = (0.55, 0.55, 0.55, 0.4)     # very dim: unbound
         elif layer_override:
-            col = (0.4, 0.75, 1.0, 1.0)       # blue: window-config override
+            col = (*C_LAYER, 1.0)              # teal: window-config override
         else:
             col = (0.88, 0.88, 0.88, 1.0)     # normal base binding
         cr.set_source_rgba(*col)
@@ -220,3 +228,19 @@ def _callouts(cr, entries, side, ax):
             _txt(cr, ax - 6, ly, label, 10, ha="right", va="mid")
         else:
             _txt(cr, ax + 6, ly, label, 10, ha="left",  va="mid")
+
+        # ── Available-modifier diamond ────────────────────────────────────────
+        if is_avail_mod:
+            pw, _ = _txt_size(cr, label, 10)
+            r = 3
+            if side == "left":
+                dot_x = ax - 6 - pw - 8
+            else:
+                dot_x = ax + 6 + pw + 8
+            cr.set_source_rgba(*C_MOD, 0.85)
+            cr.move_to(dot_x,     ly - r)
+            cr.line_to(dot_x + r, ly)
+            cr.line_to(dot_x,     ly + r)
+            cr.line_to(dot_x - r, ly)
+            cr.close_path()
+            cr.fill()
