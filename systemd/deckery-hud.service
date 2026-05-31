@@ -1,0 +1,14 @@
+[Unit]
+Description=Deckery HUD overlay (persistent D-Bus service)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=de.plasma_deckery.hud
+ExecStart=%h/.local/bin/deckery-hud
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
