@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=de.plasma_deckery.hud
+SystemdService=deckery-hud.service
