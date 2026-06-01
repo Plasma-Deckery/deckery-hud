@@ -4,7 +4,7 @@ A Wayland overlay for the Steam Deck that shows what every button does right now
 
 Hold a modifier and the full combo layer appears instantly. The idea is simple: controls should be discoverable and explain themselves — for easier onboarding and faster recall.
 
-![Deckery HUD showing live button mappings on a Steam Deck diagram](docs/hud-screenshot.png)
+<video src="https://github.com/Plasma-Deckery/deckery-hud/releases/download/v0.1.0/Deckery.HUD.mp4" controls autoplay loop muted></video>
 
 ---
 
