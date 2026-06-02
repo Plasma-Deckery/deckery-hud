@@ -16,7 +16,7 @@ from center_strip import draw_center_strip
 from trackpads import draw_trackpads
 
 
-def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0):
+def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False):
     # Background
     cr.set_source_rgba(0.031, 0.031, 0.071, 0.88)
     _rrect(cr, 0, 0, HUD_W, HUD_H, 18)
@@ -28,7 +28,7 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0):
     _rrect(cr, 0, 0, HUD_W, HUD_H, 18)
     cr.stroke()
 
-    _draw_title(cr, state, hover_t)
+    _draw_title(cr, state, hover_t, osd_enabled)
     _draw_breadcrumbs(cr, state)
     _draw_svgs(cr, front_svg, back_svg)
     draw_trackpads(cr, state)
@@ -36,7 +36,7 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0):
     draw_callouts(cr, state)
 
 
-def _draw_title(cr, state, hover_t=0.0):
+def _draw_title(cr, state, hover_t=0.0, osd_enabled=False):
     ctx    = state.get("context") or {}
     stack  = ctx.get("config_stack") or ["—"]
     paused = ctx.get("paused", False)
@@ -72,8 +72,40 @@ def _draw_title(cr, state, hover_t=0.0):
     cr.set_source_rgba(r, g, b, txt_a)
     _txt(cr, HUD_W / 2, _TITLE_H / 2, label, 10, ha="center", va="mid")
 
-    # Close button ✕
-    cx, cy = HUD_W - 18, 15
+    # OSD toggle button — left of close button
+    # Gap to close circle left edge (HUD_W-28) matches close circle's right margin (8px)
+    _OSD_W, _OSD_H = 48, 20
+    _OSD_X = HUD_W - 28 - 8 - _OSD_W   # = HUD_W - 84
+    _OSD_Y = (_TITLE_H - _OSD_H) / 2   # vertically centred in title bar
+    if osd_enabled:
+        pill_col  = (0.27, 0.87, 0.44, 0.25)
+        label_col = (0.27, 0.87, 0.44, 0.9)
+    else:
+        pill_col  = (1, 1, 1, 0.08)
+        label_col = (1, 1, 1, 0.35)
+    _rrect(cr, _OSD_X, _OSD_Y, _OSD_W, _OSD_H, 4)
+    cr.set_source_rgba(*pill_col)
+    cr.fill()
+    # "OSD" text left-aligned with 8px padding
+    cr.set_source_rgba(*label_col)
+    _txt(cr, _OSD_X + 8, _TITLE_H / 2, "OSD", 8, ha="left", va="mid")
+    # Indicator dot — separate Cairo circle so it's properly vertically centred
+    dot_r = 3.0
+    dot_x = _OSD_X + _OSD_W - 8 - dot_r
+    dot_y = _TITLE_H / 2
+    if osd_enabled:
+        cr.set_source_rgba(*label_col)
+        cr.arc(dot_x, dot_y, dot_r, 0, math.tau)
+        cr.fill()
+    else:
+        cr.set_source_rgba(*label_col)
+        cr.set_line_width(1.0)
+        cr.new_sub_path()
+        cr.arc(dot_x, dot_y, dot_r, 0, math.tau)
+        cr.stroke()
+
+    # Close button ✕ — inset from corner so it sits in the flat part of the title bar
+    cx, cy = HUD_W - 22, _TITLE_H / 2
     cr.set_source_rgba(1, 1, 1, 0.18)
     cr.arc(cx, cy, 10, 0, math.tau)
     cr.fill()
