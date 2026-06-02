@@ -13,10 +13,12 @@ _LPAD = {"x": 98.86,  "y": 149.31, "w": 107.5, "h": 107.6}
 _RPAD = {"x": 818.07, "y": 149.31, "w": 107.5, "h": 107.6}
 
 # ── Stick centres — front SVG ─────────────────────────────────────────────────
-# Circles derived from the two concentric path arcs in steamdeckFront.svg:
-#   outer circle r ≈ 34.2, inner (travel) circle r ≈ 23.6
-_LSTICK = {"cx": 163.669, "cy": 90.009, "r_inner": 23.6, "r_outer": 34.2}
-_RSTICK = {"cx": 859.776, "cy": 90.559, "r_inner": 23.6, "r_outer": 34.2}
+# Three concentric circles per stick in steamdeckFront.svg:
+#   r_fixed  ≈ 47.2  opacity=0.3  decorative outer ring — stays fixed
+#   r_outer  ≈ 34.2              outer moving ring      ╮ move together;
+#   r_inner  ≈ 23.6              inner moving disk      ╯ travel = r_fixed - r_outer ≈ 13
+_LSTICK = {"cx": 163.669, "cy": 90.009, "r_fixed": 47.223, "r_outer": 34.167, "r_inner": 23.637}
+_RSTICK = {"cx": 859.776, "cy": 90.559, "r_fixed": 47.223, "r_outer": 34.167, "r_inner": 23.637}
 
 # Colours
 _C_ACTIVE = (1.0, 0.78, 0.2)    # amber — stick active / trigger pressed
@@ -61,6 +63,9 @@ def _draw_pad(cr, pad, bounds):
     cr.fill()
 
 
+# HUD background colour — used to erase the SVG's static inner circle
+_BG = (0.031, 0.031, 0.071)
+
 # ── Stick ─────────────────────────────────────────────────────────────────────
 
 def _draw_stick(cr, stick, geom):
@@ -69,30 +74,59 @@ def _draw_stick(cr, stick, geom):
     deadzone = stick.get("deadzone", 0.0)
     active   = stick.get("active", False)
 
-    # Convert SVG units to screen pixels
+    # SVG → screen
     cx      = _FX + geom["cx"] * _FS
     cy      = _FY + geom["cy"] * _FS
-    r_inner = geom["r_inner"] * _FS   # full travel radius in px
+    r_fixed = geom["r_fixed"] * _FS   # outer fixed ring — stays put
+    r_outer = geom["r_outer"] * _FS   # outer moving ring
+    r_inner = geom["r_inner"] * _FS   # inner moving disk
 
-    # ── Deadzone circle ───────────────────────────────────────────────────────
+    # Parallax travel:
+    #   r_inner travels fully — its edge reaches r_fixed at ±1.0
+    #   r_outer (middle) travels less — at ±1.0 the gap between them shrinks to 1/3 of rest gap
+    #   gap_rest = r_outer - r_inner
+    #   gap_at_1 = gap_rest / 3
+    #   → centre offset difference at ±1 = gap_rest * 2/3
+    #   r_outer (middle) travels fully — its edge reaches r_fixed at ±1.0
+    #   r_inner travels more — parallax (inner is "closer"), gap shrinks to half at ±1.0
+    t_outer = r_fixed - r_outer
+    t_inner = t_outer + (r_outer - r_inner) * 0.5
+
+    new_outer_cx = cx + x * t_outer
+    new_outer_cy = cy - y * t_outer   # +y = up on hardware
+    new_inner_cx = cx + x * t_inner
+    new_inner_cy = cy - y * t_inner
+
+    # ── Erase both SVG static circles (r_outer covers r_inner) ───────────────
+    cr.set_source_rgb(*_BG)
+    cr.arc(cx, cy, r_outer + 2.0, 0, math.tau)
+    cr.fill()
+
+    # ── Deadzone ring (subtle, centred on stick origin, stays fixed) ─────────
     if deadzone > 0:
-        dz_r = deadzone * r_inner
-        cr.set_source_rgba(1, 1, 1, 0.18)
+        dz_r = deadzone * r_fixed
+        cr.set_source_rgba(1, 1, 1, 0.20)
         cr.set_line_width(0.8)
         cr.arc(cx, cy, dz_r, 0, math.tau)
         cr.stroke()
 
-    # ── Position dot — only when active (outside deadzone) ───────────────────
-    if active:
-        dot_x = cx + x * r_inner
-        dot_y = cy - y * r_inner    # +y = up on hardware → up on screen
+    # ── Redraw both moving circles at their parallax positions ───────────────
+    stroke_rgba = (*_C_ACTIVE, 1.0) if active else (1, 1, 1, 1.0)
 
-        cr.set_source_rgba(*_C_ACTIVE, 1.0)
-        cr.arc(dot_x, dot_y, 3.0, 0, math.tau)
-        cr.fill()
+    # r_outer ring (moves further)
+    cr.set_source_rgb(*_BG)
+    cr.arc(new_outer_cx, new_outer_cy, r_outer, 0, math.tau)
+    cr.fill()
+    cr.set_source_rgba(*stroke_rgba)
+    cr.set_line_width(1.2)
+    cr.arc(new_outer_cx, new_outer_cy, r_outer, 0, math.tau)
+    cr.stroke()
 
-        cr.set_source_rgba(*_C_ACTIVE, 0.5)
-        cr.set_line_width(1.0)
-        cr.move_to(cx, cy)
-        cr.line_to(dot_x, dot_y)
-        cr.stroke()
+    # r_inner disk (moves less — parallax)
+    cr.set_source_rgb(*_BG)
+    cr.arc(new_inner_cx, new_inner_cy, r_inner, 0, math.tau)
+    cr.fill()
+    cr.set_source_rgba(*stroke_rgba)
+    cr.set_line_width(1.2)
+    cr.arc(new_inner_cx, new_inner_cy, r_inner, 0, math.tau)
+    cr.stroke()
