@@ -41,6 +41,14 @@ def makima_resume() -> None:
     makima_ipc("resume")
 
 
+def makima_analog_on() -> None:
+    makima_ipc("analog-state-export on")
+
+
+def makima_analog_off() -> None:
+    makima_ipc("analog-state-export off")
+
+
 # ── State loading ─────────────────────────────────────────────────────────────
 
 def load_state() -> dict:
