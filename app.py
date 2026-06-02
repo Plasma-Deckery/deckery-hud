@@ -10,7 +10,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gio, GLib
 
-from ipc import makima_pause, makima_resume
+from ipc import makima_pause, makima_resume, makima_analog_on, makima_analog_off
 from win import Win
 
 # ── D-Bus ─────────────────────────────────────────────────────────────────────
@@ -69,7 +69,8 @@ class App(Gtk.Application):
             self.show_hud()
 
     def do_shutdown(self):
-        """Always resume makima on exit — safety net for crash/kill."""
+        """Always resume makima and disable analog writes on exit."""
+        makima_analog_off()
         makima_resume()
         Gtk.Application.do_shutdown(self)
 
@@ -87,6 +88,7 @@ class App(Gtk.Application):
         if self._win is None:
             return
         makima_pause()
+        makima_analog_on()
         self._win.present()
 
     def hide_hud(self):
@@ -95,6 +97,7 @@ class App(Gtk.Application):
         # Reset input-region flag — layer shell recreates the surface on next present()
         self._win._region_set = False
         self._win.set_visible(False)
+        makima_analog_off()
         makima_resume()
 
     def toggle_hud(self):
