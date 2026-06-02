@@ -13,6 +13,7 @@ from layout import (HUD_W, HUD_H, _TITLE_H, _PAD, _FX, _FY, _FDW, _SVG_H, _BX, _
 from helpers import _rrect, _txt, _pill_row, C_MOD, C_LAYER
 from callouts import draw_callouts, _btn_short
 from center_strip import draw_center_strip
+from trackpads import draw_trackpads
 
 
 def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0):
@@ -30,6 +31,7 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0):
     _draw_title(cr, state, hover_t)
     _draw_breadcrumbs(cr, state)
     _draw_svgs(cr, front_svg, back_svg)
+    draw_trackpads(cr, state)
     draw_center_strip(cr, state)
     draw_callouts(cr, state)
 
