@@ -80,9 +80,9 @@ def _fmt_combo_key(combo_key):
 # ── Rendering ─────────────────────────────────────────────────────────────────
 
 def draw_callouts(cr, state):
-    ctx          = state.get("context", {})
+    ctx          = state.get("context") or {}
     held_mods    = ctx.get("held_modifiers", [])
-    mod_active   = state.get("modifier_active", {})
+    mod_active   = state.get("modifier_active") or {}
     active_btns  = set(ctx.get("active_buttons", []))
     config_stack = ctx.get("config_stack") or [""]
     base_layer   = config_stack[0]
@@ -95,7 +95,7 @@ def draw_callouts(cr, state):
     #   is_combo      → button overridden by an active modifier combo   (amber)
     #   layer_override → binding comes from a non-base config layer      (blue)
     #   regular        → normal base binding                             (white)
-    all_bindings = state.get("bindings", {})
+    all_bindings = state.get("bindings") or {}
 
     lf, lb = [], []   # left-front, left-back
     rf, rb = [], []   # right-front, right-back

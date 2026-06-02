@@ -26,8 +26,8 @@ _C_ACTIVE = (1.0, 0.78, 0.2)    # amber — stick active / trigger pressed
 
 def draw_trackpads(cr, state):
     """Entry point called from renderer."""
-    pads     = state.get("trackpads", {})
-    sticks   = state.get("sticks", {})
+    pads     = state.get("trackpads") or {}
+    sticks   = state.get("sticks")   or {}
     _draw_pad(cr, pads.get("lpad", {}), _LPAD)
     _draw_pad(cr, pads.get("rpad", {}), _RPAD)
     _draw_stick(cr, sticks.get("lstick", {}), _LSTICK)
