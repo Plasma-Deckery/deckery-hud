@@ -111,14 +111,19 @@ def _draw_stick(cr, stick, geom):
         cr.stroke()
 
     # ── Redraw both moving circles at their parallax positions ───────────────
-    stroke_rgba = (*_C_ACTIVE, 1.0) if active else (1, 1, 1, 1.0)
+    if active:
+        stroke_rgba = (1, 1, 1, 1.0)
+        lw = 1.5
+    else:
+        stroke_rgba = (1, 1, 1, 0.75)
+        lw = 1.0
 
     # r_outer ring (moves further)
     cr.set_source_rgb(*_BG)
     cr.arc(new_outer_cx, new_outer_cy, r_outer, 0, math.tau)
     cr.fill()
     cr.set_source_rgba(*stroke_rgba)
-    cr.set_line_width(1.2)
+    cr.set_line_width(lw)
     cr.arc(new_outer_cx, new_outer_cy, r_outer, 0, math.tau)
     cr.stroke()
 
@@ -127,6 +132,6 @@ def _draw_stick(cr, stick, geom):
     cr.arc(new_inner_cx, new_inner_cy, r_inner, 0, math.tau)
     cr.fill()
     cr.set_source_rgba(*stroke_rgba)
-    cr.set_line_width(1.2)
+    cr.set_line_width(lw)
     cr.arc(new_inner_cx, new_inner_cy, r_inner, 0, math.tau)
     cr.stroke()

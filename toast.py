@@ -19,13 +19,15 @@ _C_KEYS = (0.72, 0.55, 1.0)    # lavender — key tap
 _C_CMD  = (0.55, 0.90, 0.55)   # green    — command / exec
 
 
-def draw_toast(cr, sw, sh, toasts):
-    """Draw all in-flight toasts in screen coordinates."""
+def draw_toast(cr, sw, sh, toasts, start_y=None):
+    """Draw all in-flight toasts in screen coordinates.
+    start_y: override the Y origin (default: sh * _START_Y_FRAC).
+    """
     for la in toasts:
-        _draw_one(cr, sw, sh, la)
+        _draw_one(cr, sw, sh, la, start_y=start_y)
 
 
-def _draw_one(cr, sw, sh, la):
+def _draw_one(cr, sw, sh, la, start_y=None):
     ts  = la.get("ts", 0)
     age = time.time() - ts
     if age < 0 or age > _TOAST_TTL:
@@ -43,7 +45,8 @@ def _draw_one(cr, sw, sh, la):
         return
 
     # ── Position: rise starts immediately ────────────────────────────────────
-    cy = sh * _START_Y_FRAC - 73 - _RISE_PX * progress
+    base_y = start_y if start_y is not None else sh * _START_Y_FRAC
+    cy = base_y - 73 - _RISE_PX * progress
     cx = sw / 2
 
     # ── Label ─────────────────────────────────────────────────────────────────
