@@ -14,7 +14,7 @@ import os
 import time
 
 from ipc import makima_pause, makima_resume, load_state, _STATE, _FRONT_SVG, _BACK_SVG
-from layout import HUD_W, HUD_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE_H
+from layout import HUD_W, HUD_H, _TITLE_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE_H
 from renderer import draw_hud
 from toast import draw_toast
 from anim import HoverAnim
@@ -81,7 +81,7 @@ class Win(Gtk.ApplicationWindow):
 
         # Window starts hidden — App.show_hud() will present() and pause makima.
 
-    # ── Badge helpers ─────────────────────────────────────────────────────
+    # ── Hit-rect helpers ──────────────────────────────────────────────────
 
     def _badge_screen_rect(self):
         sw, sh = self._da.get_width(), self._da.get_height()
@@ -89,10 +89,17 @@ class Win(Gtk.ApplicationWindow):
         hy = (sh - HUD_H) / 2
         return hx + _PAUSE_X, hy + _PAUSE_Y, _PAUSE_W, _PAUSE_H
 
+    def _close_btn_screen_rect(self):
+        sw, sh = self._da.get_width(), self._da.get_height()
+        hx = (sw - HUD_W) / 2
+        hy = (sh - HUD_H) / 2
+        return hx + HUD_W - 44, hy, 44, _TITLE_H
+
     # ── Input handlers ────────────────────────────────────────────────────
 
     def _on_click(self, _gesture, _n, x, y):
         bx, by, bw, bh = self._badge_screen_rect()
+        cx, cy, cw, ch = self._close_btn_screen_rect()
         if bx <= x <= bx + bw and by <= y <= by + bh:
             paused = self._state.get("context", {}).get("paused", False)
             if paused:
@@ -102,9 +109,9 @@ class Win(Gtk.ApplicationWindow):
                 makima_pause()
                 self._state.setdefault("context", {})["paused"] = True
             self._da.queue_draw()
-        else:
-            # Click outside badge → hide (service stays alive)
+        elif cx <= x <= cx + cw and cy <= y <= cy + ch:
             self.get_application().hide_hud()
+        # else: dead zone — ignore
 
     def _on_motion(self, _ctrl, x, y):
         bx, by, bw, bh = self._badge_screen_rect()
@@ -152,7 +159,7 @@ class Win(Gtk.ApplicationWindow):
             self._region_set = True
             hx = (sw - HUD_W) // 2
             hy = (sh - HUD_H) // 2
-            close_btn = cairo.RectangleInt(hx + HUD_W - 36, hy, 36, 36)
+            close_btn = cairo.RectangleInt(hx + HUD_W - 44, hy, 44, _TITLE_H)
             badge     = cairo.RectangleInt(
                 int(hx + _PAUSE_X), int(hy + _PAUSE_Y),
                 int(_PAUSE_W), int(_PAUSE_H))
@@ -164,10 +171,14 @@ class Win(Gtk.ApplicationWindow):
         cr.paint()
         cr.set_operator(cairo.Operator.OVER)
 
-        cr.save()
-        cr.translate((sw - HUD_W) / 2, (sh - HUD_H) / 2)
-        draw_hud(cr, self._front, self._back, self._state,
-                 hover_t=self._pause_anim.value)
-        cr.restore()
+        try:
+            cr.save()
+            cr.translate((sw - HUD_W) / 2, (sh - HUD_H) / 2)
+            draw_hud(cr, self._front, self._back, self._state,
+                     hover_t=self._pause_anim.value)
+            cr.restore()
 
-        draw_toast(cr, sw, sh, self._active_toasts)
+            draw_toast(cr, sw, sh, self._active_toasts)
+        except Exception as e:
+            print(f"[draw] exception: {e}", flush=True)
+            import traceback; traceback.print_exc()

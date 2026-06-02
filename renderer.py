@@ -37,7 +37,7 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0):
 
 
 def _draw_title(cr, state, hover_t=0.0):
-    ctx    = state.get("context", {})
+    ctx    = state.get("context") or {}
     stack  = ctx.get("config_stack") or ["—"]
     paused = ctx.get("paused", False)
 
@@ -99,7 +99,7 @@ def _draw_breadcrumbs(cr, state):
     Stack[1+] = context layers → teal.
     Modifiers → amber.
     """
-    ctx   = state.get("context", {})
+    ctx   = state.get("context") or {}
     stack = ctx.get("config_stack") or ["—"]
     mods  = [_btn_short(m) for m in ctx.get("held_modifiers", [])]
 
