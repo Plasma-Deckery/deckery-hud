@@ -13,7 +13,10 @@ _C_ACT = (0.333, 0.867, 1.0)  # system actuator / active output — cyan #55DDFF
 
 def draw_center_strip(cr, state):
     ctx     = state.get("context") or {}
-    outputs = ctx.get("active_outputs", [])
+    raw    = ctx.get("active_outputs") or []
+    # entries are either plain strings or {key, silent, ...} dicts — extract key name
+    def _key(e): return e.get("key", "") if isinstance(e, dict) else e
+    outputs = [_key(e) for e in raw if _key(e)]
 
     mids_y = _STRIP_Y + _STRIP_H / 2
 
