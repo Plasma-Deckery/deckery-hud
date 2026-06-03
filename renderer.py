@@ -17,16 +17,21 @@ from trackpads import draw_trackpads
 
 
 def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False):
+    # Drop shadow — multi-pass approximation of Gaussian blur
+    _shadow_steps = 12
+    for i in range(_shadow_steps, 0, -1):
+        t     = i / _shadow_steps          # 1.0 (outermost) → ~0.08 (innermost)
+        spread = i * 3.5
+        alpha  = 0.055 * (1.0 - t ** 0.6)
+        cr.set_source_rgba(0, 0, 0, alpha)
+        _rrect(cr, -spread, -spread + i * 1.2,
+               HUD_W + spread * 2, HUD_H + spread * 2, 18 + spread)
+        cr.fill()
+
     # Background
     cr.set_source_rgba(0.031, 0.031, 0.071, 0.88)
     _rrect(cr, 0, 0, HUD_W, HUD_H, 18)
     cr.fill()
-
-    # Border
-    cr.set_source_rgba(1, 1, 1, 0.12)
-    cr.set_line_width(1.0)
-    _rrect(cr, 0, 0, HUD_W, HUD_H, 18)
-    cr.stroke()
 
     _draw_title(cr, state, hover_t, osd_enabled)
     _draw_breadcrumbs(cr, state)
@@ -75,7 +80,7 @@ def _draw_title(cr, state, hover_t=0.0, osd_enabled=False):
     # OSD toggle button — left of close button
     # Gap to close circle left edge (HUD_W-28) matches close circle's right margin (8px)
     _OSD_W, _OSD_H = 48, 20
-    _OSD_X = HUD_W - 28 - 8 - _OSD_W   # = HUD_W - 84
+    _OSD_X = HUD_W - 28 - 16 - _OSD_W   # gap between OSD pill and close button
     _OSD_Y = (_TITLE_H - _OSD_H) / 2   # vertically centred in title bar
     if osd_enabled:
         pill_col  = (0.27, 0.87, 0.44, 0.25)
