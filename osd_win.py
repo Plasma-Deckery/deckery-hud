@@ -105,23 +105,18 @@ class OsdWin(Gtk.ApplicationWindow):
         cr.set_operator(cairo.Operator.OVER)
 
         ctx     = self._state.get("context", {})
-        outputs = ctx.get("active_outputs", []) or []
+        raw     = ctx.get("active_outputs", []) or []
 
-        # Suppress outputs from bindings marked silent = true (e.g. mouse clicks).
-        # Build a reverse map: action keys of silent bindings → excluded from display.
-        silent_outputs = set()
-        for b in (self._state.get("bindings") or {}).values():
-            if b.get("silent") and isinstance(b.get("action"), list):
-                silent_outputs.update(b["action"])
-        if silent_outputs:
-            outputs = [k for k in outputs if k not in silent_outputs]
+        # active_outputs entries are either plain strings or {key, silent, ...} dicts.
+        def _key(e):   return e.get("key", "") if isinstance(e, dict) else e
+        def _silent(e): return e.get("silent", False) if isinstance(e, dict) else False
 
-        # Suppress keys already shown by a recent last_action toast (avoid duplicates).
+        # Filter: drop silent outputs, drop keys shown by a recent toast.
         la     = self._state.get("last_action") or {}
         la_age = time.time() - la.get("ts", 0.0)
-        if la_age < _SUPPRESS_S and isinstance(la.get("value"), list):
-            toasted = set(la["value"])
-            outputs = [k for k in outputs if k not in toasted]
+        toasted = set(la["value"]) if la_age < _SUPPRESS_S and isinstance(la.get("value"), list) else set()
+
+        outputs = [_key(e) for e in raw if not _silent(e) and _key(e) not in toasted]
 
         # ── Active outputs — same as center strip, bottom-center ──────────
         if outputs:
