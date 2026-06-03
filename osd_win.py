@@ -107,8 +107,16 @@ class OsdWin(Gtk.ApplicationWindow):
         ctx     = self._state.get("context", {})
         outputs = ctx.get("active_outputs", []) or []
 
+        # Suppress outputs from bindings marked silent = true (e.g. mouse clicks).
+        # Build a reverse map: action keys of silent bindings → excluded from display.
+        silent_outputs = set()
+        for b in (self._state.get("bindings") or {}).values():
+            if b.get("silent") and isinstance(b.get("action"), list):
+                silent_outputs.update(b["action"])
+        if silent_outputs:
+            outputs = [k for k in outputs if k not in silent_outputs]
+
         # Suppress keys already shown by a recent last_action toast (avoid duplicates).
-        # Use last_action from state directly — no timing dependency on _active_toasts.
         la     = self._state.get("last_action") or {}
         la_age = time.time() - la.get("ts", 0.0)
         if la_age < _SUPPRESS_S and isinstance(la.get("value"), list):
