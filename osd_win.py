@@ -18,6 +18,7 @@ from toast import draw_toast
 
 _TOAST_TTL_MS   = 1500
 _TOAST_FRAME_MS = 33
+_SUPPRESS_S     = 0.4   # how long to hide pills that are covered by the toast
 
 _C_ACT = (0.333, 0.867, 1.0)   # cyan — same as center strip
 
@@ -104,7 +105,15 @@ class OsdWin(Gtk.ApplicationWindow):
         cr.set_operator(cairo.Operator.OVER)
 
         ctx     = self._state.get("context", {})
-        outputs = ctx.get("active_outputs", [])
+        outputs = ctx.get("active_outputs", []) or []
+
+        # Suppress keys already shown by a recent last_action toast (avoid duplicates).
+        # Use last_action from state directly — no timing dependency on _active_toasts.
+        la     = self._state.get("last_action") or {}
+        la_age = time.time() - la.get("ts", 0.0)
+        if la_age < _SUPPRESS_S and isinstance(la.get("value"), list):
+            toasted = set(la["value"])
+            outputs = [k for k in outputs if k not in toasted]
 
         # ── Active outputs — same as center strip, bottom-center ──────────
         if outputs:
@@ -122,4 +131,4 @@ class OsdWin(Gtk.ApplicationWindow):
 
         # ── Toast — rises from bottom-center ─────────────────────────────
         if self._active_toasts:
-            draw_toast(cr, sw, sh, self._active_toasts, start_y=sh)
+            draw_toast(cr, sw, sh, self._active_toasts, start_y=sh + 30)
