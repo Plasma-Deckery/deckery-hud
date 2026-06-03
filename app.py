@@ -38,7 +38,7 @@ class App(Gtk.Application):
         )
         self._win          = None
         self._osd_win     = None
-        self._osd_enabled = False
+        self._osd_enabled = True
         self._state        = {}
         self._monitor      = None
         self._reg_id       = 0
@@ -75,6 +75,8 @@ class App(Gtk.Application):
         self._state    = load_state()
         self._win      = Win(application=self)
         self._osd_win = OsdWin(application=self)
+        self._osd_win.on_state(self._state)
+        self._osd_win.present()
 
         # Shared FileMonitor — dispatches state to both windows
         _tmp = Gio.File.new_for_path("/tmp")
