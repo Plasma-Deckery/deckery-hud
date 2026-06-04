@@ -12,12 +12,23 @@ Hold a modifier and the full combo layer appears instantly. The idea is simple: 
 
 ## What it does
 
+### HUD overlay
+Toggle open (default: L3) to pause remapping and inspect your full button layout:
+
 - Renders two Steam Deck silhouettes (front + back) with callout lines to button labels
 - Updates live from `/tmp/makima-state.json` — written atomically by [makima-deckery](https://github.com/Plasma-Deckery/makima-deckery) on every input event
 - Pauses makima remapping while open (dry-run mode: see what buttons do without triggering anything)
-- Center strip shows the active modifier state and the last emitted key event
+- Center strip shows the active modifier state and the currently held output keys
 - Dot colours: **amber** = modifier held, **white** = button active, **gray** = unbound
 - Small amber dot on buttons that would unlock a combo if held next (discoverable modifiers)
+
+### OSD (On-Screen Display)
+Always-on transparent overlay — active even when the HUD is closed:
+
+- Shows currently held output keys as cyan pills at the bottom of the screen
+- Fires a toast notification on every action (key combo, command, exec)
+- Fully input-transparent — no clicks, no interference with anything underneath
+- `silent = true` bindings (e.g. mouse clicks) are suppressed from the OSD but still visible in the HUD center strip
 
 ---
 
