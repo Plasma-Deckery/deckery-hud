@@ -26,39 +26,73 @@ _C_ACTIVE = (1.0, 0.78, 0.2)    # amber — stick active / trigger pressed
 
 def draw_trackpads(cr, state):
     """Entry point called from renderer."""
-    pads     = state.get("trackpads") or {}
-    sticks   = state.get("sticks")   or {}
-    _draw_pad(cr, pads.get("lpad", {}), _LPAD)
-    _draw_pad(cr, pads.get("rpad", {}), _RPAD)
+    pads    = state.get("trackpads") or {}
+    sticks  = state.get("sticks")   or {}
+    gesture = (pads.get("gesture") or {}).get("touching", False)
+    _draw_pad(cr, pads.get("left")  or {}, _LPAD, gesture)
+    _draw_pad(cr, pads.get("right") or {}, _RPAD, gesture)
     _draw_stick(cr, sticks.get("lstick", {}), _LSTICK)
     _draw_stick(cr, sticks.get("rstick", {}), _RSTICK)
 
 
 # ── Trackpad ──────────────────────────────────────────────────────────────────
 
-def _draw_pad(cr, pad, bounds):
+def _rrect(cr, x, y, w, h, r):
+    """Rounded rectangle path (reused from renderer concept)."""
+    cr.new_sub_path()
+    cr.arc(x + r,     y + r,     r, math.pi,       3 * math.pi / 2)
+    cr.arc(x + w - r, y + r,     r, 3 * math.pi / 2, 0)
+    cr.arc(x + w - r, y + h - r, r, 0,              math.pi / 2)
+    cr.arc(x + r,     y + h - r, r, math.pi / 2,   math.pi)
+    cr.close_path()
+
+
+_AMBER = (1.0, 0.78, 0.2)
+
+
+def _draw_pad(cr, pad, bounds, gesture=False):
     touching = pad.get("touching", False)
     pressed  = pad.get("pressed", False)
-
-    if not touching and not pressed:
-        return
-
-    rx = pad.get("x", 0.0)   # already -1.0…+1.0
-    ry = pad.get("y", 0.0)
 
     # SVG → screen
     sx = _FX + bounds["x"] * _FS
     sy = _FY + bounds["y"] * _FS
     sw = bounds["w"] * _FS
     sh = bounds["h"] * _FS
+    r  = 6 * _FS   # corner radius matching the SVG shape
 
-    # Touch dot — maps ±1.0 to half the pad's pixel width/height
+    # ── Fill overlay — sits inside the existing SVG shape, no new border ────────
+    # gesture → amber glow; individual touch/press → white glow; idle → nothing
+    if gesture:
+        cr.set_source_rgba(*_AMBER, 0.18)
+        _rrect(cr, sx, sy, sw, sh, r)
+        cr.fill()
+    elif touching or pressed:
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.10)
+        _rrect(cr, sx, sy, sw, sh, r)
+        cr.fill()
+
+    # ── Position dot ─────────────────────────────────────────────────────────
+    # gesture=True  → amber dot at pad coords (touching=False but coords valid)
+    # touching/press → white dot at pad coords
+    if not touching and not pressed and not gesture:
+        return
+
+    rx = pad.get("x", 0.0)   # already -1.0…+1.0
+    ry = pad.get("y", 0.0)
+
     cx = sx + sw / 2 + rx * (sw / 2)
     cy = sy + sh / 2 - ry * (sh / 2)   # y inverted: +1 = top
 
-    dot_r = 5.0 if pressed else 3.5
-    dot_a = 1.0 if pressed else 0.75
-    cr.set_source_rgba(1, 1, 1, dot_a)
+    if gesture:
+        cr.set_source_rgba(*_AMBER, 0.9)
+        dot_r = 3.5
+    elif pressed:
+        cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
+        dot_r = 5.0
+    else:
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.85)
+        dot_r = 3.5
     cr.arc(cx, cy, dot_r, 0, math.tau)
     cr.fill()
 

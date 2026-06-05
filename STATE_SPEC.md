@@ -94,3 +94,62 @@ Der Punkt verschwindet sobald der Modifier gehalten wird (dann wird die ganze Ze
 Wird von makima befüllt, wenn mindestens ein Modifier gehalten wird.
 Enthält die resultierenden Bindings für den aktuellen Modifier-State.
 Schema identisch zu `bindings`.
+
+---
+
+## `trackpads`
+
+Enthält den aktuellen Zustand beider Trackpads und des kombinierten Gesture-Devices.
+Nur vorhanden wenn der HUD analog state export aktiv ist (`analog on` via IPC).
+
+```json
+"trackpads": {
+  "left": {
+    "mode":     "disabled",
+    "x":        0.0,
+    "y":        0.0,
+    "touching": false,
+    "pressed":  false
+  },
+  "right": {
+    "mode":     "trackball",
+    "x":        0.42,
+    "y":       -0.1,
+    "touching": true,
+    "pressed":  false
+  },
+  "gesture": {
+    "enabled":  true,
+    "touching": false
+  }
+}
+```
+
+### `trackpads.left` / `trackpads.right`
+
+| Feld       | Typ     | Beschreibung |
+|------------|---------|--------------|
+| `mode`     | `string` | Aktueller Modus: `"disabled"` · `"mt-trackpad"` · `"trackball"` (aus Config) oder `"gestures"` wenn `gesture.touching = true` |
+| `x`        | `float`  | Normalisierte X-Position, −1.0 … +1.0. Immer aktuell, auch während Gesture Session |
+| `y`        | `float`  | Normalisierte Y-Position, −1.0 … +1.0 (oben = positiv). Immer aktuell |
+| `touching` | `bool`   | Finger auf dem Pad **und** das individuelle Device sendet gerade. **`false` während `gesture.touching = true`** — auch wenn physisch ein Finger drauf ist |
+| `pressed`  | `bool`   | Physischer Click (Pad gedrückt) |
+
+### `trackpads.gesture`
+
+| Feld       | Typ    | Beschreibung |
+|------------|--------|--------------|
+| `enabled`  | `bool` | `combined_gesture_device = true` in der Config — statisch |
+| `touching` | `bool` | Gesture-Session aktiv: beide Pads waren gleichzeitig berührt, noch nicht beide geliftet |
+
+### Gesture-Modus: Rendering-Logik
+
+Wenn `gesture.touching = true`:
+- `left.touching` und `right.touching` sind **beide `false`** (individuelle Devices senden nicht)
+- Die aktuellen Fingerpositionen stehen weiterhin in `left.x/y` und `right.x/y`
+- HUD rendert beide Finger als zusammengehörige Geste, keine unabhängigen Pad-Indikatoren
+
+```
+gesture.touching = false  →  left.touching / right.touching normal auswerten
+gesture.touching = true   →  left.x/y und right.x/y für Zwei-Finger-Visualisierung nutzen
+```
