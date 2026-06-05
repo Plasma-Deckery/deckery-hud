@@ -133,9 +133,9 @@ def draw_callouts(cr, state):
             action = "—"
 
         # entry: (sort_y, dot_x, dot_y, name, action,
-        #         layer_override, bound, active, is_mod, is_combo, is_avail_mod)
+        #         layer_override, bound, active, is_mod, is_combo, is_avail_mod, show_dot)
         entry = (sort_sc_y, sc_x, sc_y, name, action,
-                 layer_override, has_action, is_active, is_mod, is_combo, is_avail_mod)
+                 layer_override, has_action, is_active, is_mod, is_combo, is_avail_mod, True)
 
         if side == "left":
             (lf if view == "front" else lb).append(entry)
@@ -144,6 +144,25 @@ def draw_callouts(cr, state):
 
     for group in (lf, lb, rf, rb):
         group.sort()
+
+    # ── Trackpad mode entries — appended AFTER sort so they don't skew centering ─
+    pads    = state.get("trackpads") or {}
+    lpad    = pads.get("left")  or {}
+    rpad    = pads.get("right") or {}
+    gesture = (pads.get("gesture") or {}).get("touching", False)
+    lpad_mode  = (lpad.get("mode") or "—").replace("-", " ").title()
+    rpad_mode  = (rpad.get("mode") or "—").replace("-", " ").title()
+    lpad_touch = lpad.get("touching", False)
+    rpad_touch = rpad.get("touching", False)
+    # gesture → amber (active_mod=True) for both; individual touch → white (active=True)
+    lpad_active = lpad_touch or gesture
+    rpad_active = rpad_touch or gesture
+    _lpad_dot = (_FX + (98.86  + 107.5 / 2) * _FS, _FY + (149.31 + 107.6) * _FS)
+    _rpad_dot = (_FX + (818.07 + 107.5 / 2) * _FS, _FY + (149.31 + 107.6) * _FS)
+    _ROW = 22
+    # active_mod=gesture → amber legend; active → white legend; show_dot=False always
+    lf.append(((lf[-1][0] if lf else _FY) + _ROW, *_lpad_dot, "LPad", lpad_mode, False, True, lpad_active, gesture, False, False, False))
+    rf.append(((rf[-1][0] if rf else _FY) + _ROW, *_rpad_dot, "RPad", rpad_mode, False, True, rpad_active, gesture, False, False, False))
 
     _callouts(cr, lf, "left",  _AX_L)
     _callouts(cr, lb, "left",  _AX_L)
@@ -163,25 +182,27 @@ def _callouts(cr, entries, side, ax):
     t0  = mid - len(entries) * ROW / 2
 
     for i, (_, bx, by, name, action,
-            layer_override, bound, active, active_mod, is_combo, is_avail_mod) in enumerate(entries):
+            layer_override, bound, active, active_mod, is_combo, is_avail_mod, *rest) in enumerate(entries):
+        show_dot = rest[0] if rest else True
         ly = t0 + i * ROW + ROW / 2
 
         # ── Dot ──────────────────────────────────────────────────────────────
         # Priority: modifier-held > combo-active > layer-override > active > bound > unbound
         amber = active_mod or is_combo
-        if amber:
-            cr.set_source_rgba(*C_MOD, 1.0)
-            cr.arc(bx, by, DOT + 2 if active else DOT, 0, math.tau)
-        elif layer_override:
-            cr.set_source_rgba(*C_LAYER, 1.0)
-            cr.arc(bx, by, DOT, 0, math.tau)
-        elif active:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
-            cr.arc(bx, by, DOT + 2, 0, math.tau)
-        else:
-            cr.set_source_rgba(1, 1, 1, 0.6 if bound else 0.2)
-            cr.arc(bx, by, DOT, 0, math.tau)
-        cr.fill()
+        if show_dot:
+            if amber:
+                cr.set_source_rgba(*C_MOD, 1.0)
+                cr.arc(bx, by, DOT + 2 if active else DOT, 0, math.tau)
+            elif layer_override:
+                cr.set_source_rgba(*C_LAYER, 1.0)
+                cr.arc(bx, by, DOT, 0, math.tau)
+            elif active:
+                cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
+                cr.arc(bx, by, DOT + 2, 0, math.tau)
+            else:
+                cr.set_source_rgba(1, 1, 1, 0.6 if bound else 0.2)
+                cr.arc(bx, by, DOT, 0, math.tau)
+            cr.fill()
 
         # ── Callout line ─────────────────────────────────────────────────────
         if amber:
