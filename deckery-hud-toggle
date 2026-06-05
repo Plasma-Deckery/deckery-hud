@@ -1,0 +1,6 @@
+#!/bin/bash
+# Toggle HUD visibility via D-Bus.
+gdbus call --session \
+  --dest de.plasma_deckery.hud \
+  --object-path /de/plasma_deckery/hud \
+  --method de.plasma_deckery.hud.Toggle

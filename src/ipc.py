@@ -10,10 +10,9 @@ import os
 import socket
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-# _DIR is the directory containing this file — works wherever the project lives.
-_DIR      = os.path.dirname(os.path.abspath(__file__))
+# _DIR is the project root (one level above src/).
+_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATE    = "/tmp/makima-state.json"
-_FALLBACK = os.path.join(_DIR, "state.json")
 
 _FRONT_SVG = os.path.join(_DIR, "assets", "steamdeckFront.svg")
 _BACK_SVG  = os.path.join(_DIR, "assets", "steamdeckBack.svg")
@@ -52,10 +51,9 @@ def makima_analog_off() -> None:
 # ── State loading ─────────────────────────────────────────────────────────────
 
 def load_state() -> dict:
-    for path in (_STATE, _FALLBACK):
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except Exception:
-            pass
+    try:
+        with open(_STATE) as f:
+            return json.load(f)
+    except Exception:
+        pass
     return {"context": {"config_stack": ["—"]}, "bindings": {}, "modifier_active": {}}
