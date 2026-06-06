@@ -4,15 +4,13 @@
 
 set -e
 REPO="$(dirname "$(readlink -f "$0")")"
+PACKAGES="python python-gobject gtk4-layer-shell librsvg pango"
+
 echo "Repo: $REPO"
 
-# ── 1. Distrobox container ────────────────────────────────────────────────────
-if distrobox list | grep -q '^| deckery '; then
-    echo "Container 'deckery' already exists — skipping"
-else
-    echo "Creating distrobox container 'deckery'..."
-    distrobox assemble create --file "$REPO/distrobox.ini"
-fi
+# ── 1. Distrobox container + packages ────────────────────────────────────────
+distrobox assemble create --file "$REPO/distrobox.ini"
+distrobox enter deckery -- sudo pacman -S --needed --noconfirm $PACKAGES
 
 # ── 2. Symlink scripts into ~/.local/bin ──────────────────────────────────────
 mkdir -p "$HOME/.local/bin"
@@ -28,4 +26,5 @@ echo "Linked systemd service"
 # ── 4. Enable and start ───────────────────────────────────────────────────────
 systemctl --user daemon-reload
 systemctl --user enable --now deckery-hud.service
-echo "Service enabled and started"
+systemctl --user restart deckery-hud.service
+echo "Service enabled and restarted"
