@@ -36,12 +36,13 @@ class App(Gtk.Application):
             application_id=_DBUS_NAME,
             flags=Gio.ApplicationFlags.IS_SERVICE,
         )
-        self._win          = None
-        self._osd_win     = None
-        self._osd_enabled = True
-        self._state        = {}
-        self._monitor      = None
-        self._reg_id       = 0
+        self._win               = None
+        self._osd_win           = None
+        self._osd_enabled       = True
+        self._remapping_enabled = True
+        self._state             = {}
+        self._monitor           = None
+        self._reg_id            = 0
 
     # ── GApplication lifecycle ────────────────────────────────────────────
 
@@ -131,8 +132,9 @@ class App(Gtk.Application):
         self._win._region_set = False
         self._win.set_visible(False)
         makima_analog_off()
-        makima_resume()
-        if self._osd_enabled:
+        if self._remapping_enabled:
+            makima_resume()
+        if self._osd_enabled and self._remapping_enabled:
             self._osd_win.present()
 
     def toggle_hud(self):
@@ -142,6 +144,19 @@ class App(Gtk.Application):
             self.hide_hud()
         else:
             self.show_hud()
+
+    def toggle_remapping(self):
+        """Called from Win title bar toggle button.
+        Disabling: pauses makima if not already paused, blocks resume on HUD close.
+        Enabling: only removes the block — no resume, HUD close handles that."""
+        self._remapping_enabled = not self._remapping_enabled
+        if not self._remapping_enabled:
+            paused = self._state.get("context", {}).get("paused", False)
+            if not paused:
+                makima_pause()
+                self._state.setdefault("context", {})["paused"] = True
+            self._osd_win.set_visible(False)
+        self._win.queue_draw_title()
 
     def toggle_osd(self):
         """Called from Win title bar toggle button."""
