@@ -12,7 +12,10 @@ from helpers import _pill_row, _fmt
 
 _TOAST_TTL    = 1.5    # total display time in seconds
 _HOLD_FRAC    = 0.35   # full opacity until this fraction of TTL, then (1-t)³ fade
-_START_Y_FRAC = 0.78   # starting y as fraction of screen height
+# _START_Y_FRAC is no longer used — win.py passes start_y=hud_bottom explicitly.
+# osd_win.py passes start_y=sh+30 (slides in from below screen edge).
+# Kept as fallback only.
+_START_Y_FRAC = 0.78
 _RISE_PX      = 48     # total upward travel in screen pixels over TTL
 
 _C_KEYS = (0.72, 0.55, 1.0)    # lavender — key tap
