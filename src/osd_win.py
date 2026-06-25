@@ -44,7 +44,6 @@ class OsdWin(Gtk.ApplicationWindow):
         self._active_toasts  = []
         self._last_action_ts = 0.0
         self._toast_source   = None
-        self._region_cleared = False
 
         # ── Drawing area ─────────────────────────────────────────────────
         da = Gtk.DrawingArea()
@@ -67,6 +66,8 @@ class OsdWin(Gtk.ApplicationWindow):
         if ts <= self._last_action_ts:
             return
         self._last_action_ts = ts
+        if la.get("silent"):
+            return
         self._active_toasts.append(dict(la))
         if self._toast_source is None:
             self._toast_source = GLib.timeout_add(_TOAST_FRAME_MS, self._on_toast_frame)
@@ -93,12 +94,11 @@ class OsdWin(Gtk.ApplicationWindow):
             cr.paint()
 
     def _draw_inner(self, cr, sw, sh):
-        # Set empty input region once — all touch/click events fall through
-        if not self._region_cleared:
-            self._region_cleared = True
-            surf = self.get_surface()
-            if surf:
-                surf.set_input_region(cairo.Region())
+        # Always clear input region — surface may be recreated after present(),
+        # e.g. when HUD hides and OSD is re-shown. set_input_region() is idempotent.
+        surf = self.get_surface()
+        if surf:
+            surf.set_input_region(cairo.Region())
 
         cr.set_operator(cairo.Operator.CLEAR)
         cr.paint()
