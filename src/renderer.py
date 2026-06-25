@@ -16,7 +16,7 @@ from center_strip import draw_center_strip
 from trackpads import draw_trackpads
 
 
-def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False):
+def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False, remapping_enabled=True):
     # Drop shadow — multi-pass approximation of Gaussian blur
     _shadow_steps = 12
     for i in range(_shadow_steps, 0, -1):
@@ -33,7 +33,7 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False):
     _rrect(cr, 0, 0, HUD_W, HUD_H, 18)
     cr.fill()
 
-    _draw_title(cr, state, hover_t, osd_enabled)
+    _draw_title(cr, state, hover_t, osd_enabled, remapping_enabled)
     _draw_breadcrumbs(cr, state)
     _draw_svgs(cr, front_svg, back_svg)
     draw_trackpads(cr, state)
@@ -41,7 +41,7 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False):
     draw_callouts(cr, state)
 
 
-def _draw_title(cr, state, hover_t=0.0, osd_enabled=False):
+def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=True):
     ctx    = state.get("context") or {}
     stack  = ctx.get("config_stack") or ["—"]
     paused = ctx.get("paused", False)
@@ -77,11 +77,43 @@ def _draw_title(cr, state, hover_t=0.0, osd_enabled=False):
     cr.set_source_rgba(r, g, b, txt_a)
     _txt(cr, HUD_W / 2, _TITLE_H / 2, label, 10, ha="center", va="mid")
 
+    # Remapping toggle button — left of OSD button
+    _RMP_W, _RMP_H = 48, 20
+    _OSD_W, _OSD_H = 48, 20
+    _OSD_X = HUD_W - 28 - 16 - _OSD_W
+    _RMP_X = _OSD_X - 8 - _RMP_W
+    _RMP_Y = (_TITLE_H - _RMP_H) / 2
+    _OSD_Y = (_TITLE_H - _OSD_H) / 2   # vertically centred in title bar
+
+    if remapping_enabled:
+        rmp_pill  = (1, 1, 1, 0.08)
+        rmp_label = (1, 1, 1, 0.35)
+        rmp_text  = "On"
+    else:
+        rmp_pill  = (0.95, 0.25, 0.25, 0.25)
+        rmp_label = (0.95, 0.25, 0.25, 0.9)
+        rmp_text  = "Off"
+    _rrect(cr, _RMP_X, _RMP_Y, _RMP_W, _RMP_H, 4)
+    cr.set_source_rgba(*rmp_pill)
+    cr.fill()
+    cr.set_source_rgba(*rmp_label)
+    _txt(cr, _RMP_X + 8, _TITLE_H / 2, rmp_text, 8, ha="left", va="mid")
+    dot_r = 3.0
+    rmp_dot_x = _RMP_X + _RMP_W - 8 - dot_r
+    rmp_dot_y = _TITLE_H / 2
+    if remapping_enabled:
+        cr.set_source_rgba(*rmp_label)
+        cr.set_line_width(1.0)
+        cr.new_sub_path()
+        cr.arc(rmp_dot_x, rmp_dot_y, dot_r, 0, math.tau)
+        cr.stroke()
+    else:
+        cr.set_source_rgba(*rmp_label)
+        cr.arc(rmp_dot_x, rmp_dot_y, dot_r, 0, math.tau)
+        cr.fill()
+
     # OSD toggle button — left of close button
     # Gap to close circle left edge (HUD_W-28) matches close circle's right margin (8px)
-    _OSD_W, _OSD_H = 48, 20
-    _OSD_X = HUD_W - 28 - 16 - _OSD_W   # gap between OSD pill and close button
-    _OSD_Y = (_TITLE_H - _OSD_H) / 2   # vertically centred in title bar
     if osd_enabled:
         pill_col  = (0.27, 0.87, 0.44, 0.25)
         label_col = (0.27, 0.87, 0.44, 0.9)

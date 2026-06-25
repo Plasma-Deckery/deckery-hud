@@ -83,21 +83,24 @@ class Win(Gtk.ApplicationWindow):
         hy = (sh - HUD_H) / 2
         return hx + _PAUSE_X, hy + _PAUSE_Y, _PAUSE_W, _PAUSE_H
 
-    def _close_btn_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
-        hx = (sw - HUD_W) / 2
-        hy = (sh - HUD_H) / 2
-        return hx + HUD_W - 44, hy, 44, _TITLE_H
-
     # ── Input handlers ────────────────────────────────────────────────────
 
     def _osd_btn_screen_rect(self):
         sw, sh = self._da.get_width(), self._da.get_height()
         hx = (sw - HUD_W) / 2
         hy = (sh - HUD_H) / 2
-        # OSD toggle button: 44×20px, left of close area
         bw, bh = 48, 20
-        bx = hx + HUD_W - 28 - 8 - bw    # 8px gap = close circle right margin
+        bx = hx + HUD_W - 28 - 16 - bw
+        by = hy + (_TITLE_H - bh) / 2
+        return bx, by, bw, bh
+
+    def _remap_btn_screen_rect(self):
+        sw, sh = self._da.get_width(), self._da.get_height()
+        hx = (sw - HUD_W) / 2
+        hy = (sh - HUD_H) / 2
+        bw, bh = 48, 20
+        osd_bx = hx + HUD_W - 28 - 16 - bw
+        bx = osd_bx - 8 - bw
         by = hy + (_TITLE_H - bh) / 2
         return bx, by, bw, bh
 
@@ -110,6 +113,7 @@ class Win(Gtk.ApplicationWindow):
     def _on_click(self, _gesture, _n, x, y):
         bx, by, bw, bh = self._badge_screen_rect()
         mx, my, mw, mh = self._osd_btn_screen_rect()
+        rx, ry, rw, rh = self._remap_btn_screen_rect()
         cx, cy, cw, ch = self._close_btn_screen_rect()
         if bx <= x <= bx + bw and by <= y <= by + bh:
             paused = self._state.get("context", {}).get("paused", False)
@@ -120,6 +124,8 @@ class Win(Gtk.ApplicationWindow):
                 makima_pause()
                 self._state.setdefault("context", {})["paused"] = True
             self._da.queue_draw()
+        elif rx <= x <= rx + rw and ry <= y <= ry + rh:
+            self.get_application().toggle_remapping()
         elif mx <= x <= mx + mw and my <= y <= my + mh:
             self.get_application().toggle_osd()
         elif cx <= x <= cx + cw and cy <= y <= cy + ch:
@@ -188,10 +194,13 @@ class Win(Gtk.ApplicationWindow):
                 int(hx + _PAUSE_X), int(hy + _PAUSE_Y),
                 int(_PAUSE_W), int(_PAUSE_H))
             mx, my, mw, mh = self._osd_btn_screen_rect()
-            mini_btn   = cairo.RectangleInt(int(mx), int(my), int(mw), int(mh))
+            rx, ry, rw, rh = self._remap_btn_screen_rect()
+            osd_btn   = cairo.RectangleInt(int(mx), int(my), int(mw), int(mh))
+            remap_btn = cairo.RectangleInt(int(rx), int(ry), int(rw), int(rh))
             region = cairo.Region(close_btn)
             region.union(cairo.Region(badge))
-            region.union(cairo.Region(mini_btn))
+            region.union(cairo.Region(osd_btn))
+            region.union(cairo.Region(remap_btn))
             self.get_surface().set_input_region(region)
 
         cr.set_operator(cairo.Operator.CLEAR)
@@ -200,9 +209,14 @@ class Win(Gtk.ApplicationWindow):
 
         cr.save()
         cr.translate((sw - HUD_W) / 2, (sh - HUD_H) / 2)
+        app = self.get_application()
         draw_hud(cr, self._front, self._back, self._state,
                  hover_t=self._pause_anim.value,
-                 osd_enabled=self.get_application()._osd_enabled)
+                 osd_enabled=app._osd_enabled,
+                 remapping_enabled=app._remapping_enabled)
         cr.restore()
 
-        draw_toast(cr, sw, sh, self._active_toasts)
+        # Toast origin: bottom edge of the HUD panel, shifted up by 40 px.
+        # This keeps the toast in the same visual spot on every screen size.
+        hud_bottom = (sh - HUD_H) / 2 + HUD_H - 40
+        draw_toast(cr, sw, sh, self._active_toasts, start_y=hud_bottom)
