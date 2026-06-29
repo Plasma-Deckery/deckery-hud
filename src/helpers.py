@@ -17,7 +17,7 @@ import math
 _K = {
     "KEY_LEFTCTRL":  "Ctrl",   "KEY_LEFTALT":   "Alt",   "KEY_LEFTSHIFT": "Shift",
     "KEY_LEFTMETA":  "Super",  "KEY_ENTER":     "Enter", "KEY_ESC":       "Esc",
-    "KEY_SPACE":     "Space",  "KEY_BACKSPACE": "⌫",     "KEY_TAB":       "Tab",
+    "KEY_SPACE":     "Space",  "KEY_BACKSPACE": '<span size="xx-large">⌫</span>', "KEY_TAB": "Tab",
     "KEY_UP":        "↑",      "KEY_DOWN":      "↓",     "KEY_LEFT":      "←",
     "KEY_RIGHT":     "→",      "KEY_PAGEUP":    "PgUp",  "KEY_PAGEDOWN":  "PgDn",
     "BTN_LEFT":      "LClick", "BTN_RIGHT":     "RClick",
@@ -81,6 +81,14 @@ def _txt_size(cr, text, size=12, bold=False):
     return lo.get_pixel_size()
 
 
+def _markup_size(cr, markup, size=12):
+    """Return (pixel_width, pixel_height) of Pango markup without drawing."""
+    lo = PangoCairo.create_layout(cr)
+    lo.set_font_description(Pango.FontDescription.from_string(f"Noto Sans {size}"))
+    lo.set_markup(markup, -1)
+    return lo.get_pixel_size()
+
+
 def _txt_markup(cr, x, y, markup, size=12, ha="left", va="top"):
     """Like _txt but accepts Pango markup (inline colours via <span foreground=…>)."""
     lo = PangoCairo.create_layout(cr)
@@ -123,7 +131,10 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     def _lo(text, markup_font):
         lo = PangoCairo.create_layout(cr)
         lo.set_font_description(Pango.FontDescription.from_string(markup_font))
-        lo.set_text(text, -1)
+        if '<span' in text:
+            lo.set_markup(text, -1)
+        else:
+            lo.set_text(text, -1)
         return lo, lo.get_pixel_size()
 
     # sep may be a single string (applied to all gaps) or a list (one per gap)
@@ -140,8 +151,8 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     # Measure all pill labels up front
     pill_los = [_lo(lbl, font_str) for lbl in labels]
 
-    # Pill height is uniform (driven by the shared font size)
-    _, (_, txt_h) = pill_los[0]
+    # Pill height is uniform (driven by the tallest pill's text, e.g. markup with xx-large)
+    txt_h = max(ph for (_, (_, ph)) in pill_los)
     ph = txt_h + 2 * PY
     r  = ph / 2
 

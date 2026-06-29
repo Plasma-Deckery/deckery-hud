@@ -25,6 +25,7 @@ _DBUS_XML  = """
     <method name="Toggle"/>
     <method name="Show"/>
     <method name="Hide"/>
+    <method name="ToggleOsd"/>
   </interface>
 </node>
 """
@@ -109,9 +110,10 @@ class App(Gtk.Application):
     # ── D-Bus method dispatch ─────────────────────────────────────────────
 
     def _on_dbus_call(self, conn, sender, obj_path, iface, method, params, invocation):
-        if   method == "Toggle": self.toggle_hud()
-        elif method == "Show":   self.show_hud()
-        elif method == "Hide":   self.hide_hud()
+        if   method == "Toggle":    self.toggle_hud()
+        elif method == "Show":      self.show_hud()
+        elif method == "Hide":      self.hide_hud()
+        elif method == "ToggleOsd": self.toggle_osd()
         invocation.return_value(GLib.Variant("()", ()))
 
     # ── Public API ────────────────────────────────────────────────────────

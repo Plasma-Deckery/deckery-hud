@@ -4,7 +4,7 @@
 
 set -e
 REPO="$(dirname "$(readlink -f "$0")")"
-PACKAGES="python python-gobject gtk4-layer-shell librsvg pango"
+PACKAGES="python python-gobject gtk4-layer-shell librsvg pango noto-fonts noto-fonts-extra"
 
 echo "Repo: $REPO"
 
