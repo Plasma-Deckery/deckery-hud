@@ -1,7 +1,9 @@
 [Unit]
 Description=Deckery HUD overlay (persistent D-Bus service)
 PartOf=graphical-session.target
+PartOf=deckery-tray.service
 After=graphical-session.target
+After=deckery-tray.service
 
 [Service]
 Type=dbus

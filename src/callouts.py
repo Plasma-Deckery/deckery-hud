@@ -6,7 +6,7 @@ Owns _BTNS, _SORT_Y, _SHOW_ALL, and all callout drawing logic.
 import math
 
 from layout import _FX, _FY, _FS, _BX, _BY, _BS, _AX_L, _AX_R
-from helpers import _K, _fmt, _txt, _txt_size, C_MOD, C_LAYER
+from helpers import _K, _fmt, _txt, _txt_markup, _txt_size, _markup_size, _pango_esc, C_MOD, C_LAYER
 
 # ── Display option ────────────────────────────────────────────────────────────
 # True  → show all buttons, unbound = dimmed with "—"
@@ -244,11 +244,24 @@ def _callouts(cr, entries, side, ax):
         else:
             col = (0.88, 0.88, 0.88, 1.0)     # normal base binding
         cr.set_source_rgba(*col)
-        label = f"{name}: {action}"
-        if side == "left":
-            _txt(cr, ax - 6, ly, label, 10, ha="right", va="mid")
+        if '<span' in action:
+            # Render name and markup action as separate calls so each is independently
+            # centered at ly — mixing sizes in one layout shifts the combined box.
+            name_str = f"{name}: "
+            name_w, _ = _txt_size(cr, name_str, 10)
+            action_w, _ = _markup_size(cr, action, 10)
+            if side == "left":
+                _txt_markup(cr, ax - 6,            ly, action,   10, ha="right", va="mid")
+                _txt(       cr, ax - 6 - action_w, ly, name_str, 10, ha="right", va="mid")
+            else:
+                _txt(       cr, ax + 6,            ly, name_str, 10, ha="left",  va="mid")
+                _txt_markup(cr, ax + 6 + name_w,   ly, action,   10, ha="left",  va="mid")
         else:
-            _txt(cr, ax + 6, ly, label, 10, ha="left",  va="mid")
+            label = f"{name}: {action}"
+            if side == "left":
+                _txt(cr, ax - 6, ly, label, 10, ha="right", va="mid")
+            else:
+                _txt(cr, ax + 6, ly, label, 10, ha="left",  va="mid")
 
         # ── Available-modifier diamond ────────────────────────────────────────
         if is_avail_mod:
