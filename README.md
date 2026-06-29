@@ -1,8 +1,8 @@
-# deckery-hud
+# Deckery HUD
 
-A Wayland overlay for the Steam Deck that shows what every button does right now. Part of [Plasma Deckery](https://github.com/Plasma-Deckery/deckery).
+A live overlay for visualising and exploring your button config. See what every button does right now — controls should be discoverable and explain themselves, for easier onboarding and faster recall.
 
-Hold a modifier and the full combo layer appears instantly. The idea is simple: controls should be discoverable and explain themselves — for easier onboarding and faster recall.
+Part of [Plasma Deckery](https://github.com/Plasma-Deckery/deckery).
 
 <video src="https://github.com/user-attachments/assets/657c990d-051e-4870-b3bc-a9059dd5fad0" controls autoplay loop muted></video>
 
@@ -12,61 +12,16 @@ Hold a modifier and the full combo layer appears instantly. The idea is simple: 
 
 ## What it does
 
-### HUD overlay
-Toggle open (default: L3) to pause remapping and inspect your full button layout:
+**HUD overlay** — press L3 to pause remapping and inspect your full button layout. Renders the Steam Deck with callout lines to every bound action, analog overlays for sticks and trackpads, and colour-coded dots showing modifier state.
 
-- Renders two Steam Deck silhouettes (front + back) with callout lines to button labels
-- Updates live from `/tmp/makima-state.json` — written atomically by [makima-deckery](https://github.com/Plasma-Deckery/makima-deckery) on every input event
-- Pauses makima remapping while open (dry-run mode: see what buttons do without triggering anything)
-- Center strip shows the active modifier state and the currently held output keys
-- Trackpad and stick positions rendered as analog overlays on the silhouette
-- Dot colours: **amber** = modifier held, **white** = button active, **gray** = unbound
-- Small amber dot on buttons that would unlock a combo if held next (discoverable modifiers)
+**OSD (On-Screen Display)** — always-on transparent overlay showing currently held output keys and toast notifications for every action. Fully input-transparent.
 
-### OSD (On-Screen Display)
-Always-on transparent overlay — active even when the HUD is closed:
-
-- Shows currently held output keys as cyan pills at the bottom of the screen
-- Fires a toast notification on every action (key combo, command, exec)
-- Fully input-transparent — no clicks, no interference with anything underneath
-- `silent = true` bindings (e.g. mouse clicks) are suppressed from the OSD but still visible in the HUD center strip
+→ [Full documentation](https://plasma-deckery.github.io/deckery/projects/deckery-hud/)
 
 ---
 
-## Setup
+## Installation
 
-Requires [distrobox](https://github.com/containers/distrobox).
+deckery-hud is installed and managed as part of the Deckery suite — no separate setup needed.
 
-```bash
-git clone https://github.com/Plasma-Deckery/deckery-hud
-cd deckery-hud
-bash install.sh
-```
-
-`install.sh` sets up the distrobox container, symlinks the scripts and systemd unit, and starts the service.
-
----
-
-## Architecture
-
-```
-makima-deckery ──► /tmp/makima-state.json
-                           │
-                      deckery-hud
-                    (GTK4, Layer Shell)
-                  persistent D-Bus service
-                           │
-               ┌───────────┴───────────┐
-             HUD window             OSD window
-          (shown on toggle)      (always visible)
-               └───────────┬───────────┘
-                            │
-                     renderer.py          makima IPC
-                   (SVG + Cairo/Pango)   pause / resume
-```
-
----
-
-## State format
-
-The HUD reads `/tmp/makima-state.json`. See [docs/STATE_SPEC.md](docs/STATE_SPEC.md) for the full contract between makima-deckery and the HUD.
+→ [Deckery Setup Guide](https://plasma-deckery.github.io/deckery/setup-guide/)
