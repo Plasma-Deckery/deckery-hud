@@ -4,12 +4,12 @@
 
 set -e
 REPO="$(dirname "$(readlink -f "$0")")"
-PACKAGES="python python-gobject gtk4-layer-shell librsvg pango noto-fonts noto-fonts-extra"
+PACKAGES="python python-gobject python-cairo gtk4-layer-shell librsvg pango noto-fonts noto-fonts-extra"
 
 echo "Repo: $REPO"
 
 # ── 1. Distrobox container + packages ────────────────────────────────────────
-distrobox assemble create --file "$REPO/distrobox.ini"
+distrobox create --name deckery --image archlinux:latest || true
 distrobox enter deckery -- sudo pacman -S --needed --noconfirm $PACKAGES
 
 # ── 2. Symlink scripts into ~/.local/bin ──────────────────────────────────────
