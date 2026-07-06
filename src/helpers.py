@@ -17,7 +17,7 @@ import math
 _K = {
     "KEY_LEFTCTRL":  "Ctrl",   "KEY_LEFTALT":   "Alt",   "KEY_LEFTSHIFT": "Shift",
     "KEY_LEFTMETA":  "Super",  "KEY_ENTER":     "Enter", "KEY_ESC":       "Esc",
-    "KEY_SPACE":     "Space",  "KEY_BACKSPACE": '<span size="xx-large">⌫</span>', "KEY_TAB": "Tab",
+    "KEY_SPACE":     "Space",  "KEY_BACKSPACE": "⌫",     "KEY_TAB":       "Tab",
     "KEY_UP":        "↑",      "KEY_DOWN":      "↓",     "KEY_LEFT":      "←",
     "KEY_RIGHT":     "→",      "KEY_PAGEUP":    "PgUp",  "KEY_PAGEDOWN":  "PgDn",
     "BTN_LEFT":      "LClick", "BTN_RIGHT":     "RClick",
@@ -62,7 +62,7 @@ def _txt(cr, x, y, text, size=12, bold=False, ha="left", va="top"):
     lo = PangoCairo.create_layout(cr)
     weight = "Bold" if bold else ""
     lo.set_font_description(
-        Pango.FontDescription.from_string(f"Noto Sans {weight} {size}"))
+        Pango.FontDescription.from_string(f"Adwaita Sans {weight} {size}"))
     lo.set_text(text, -1)
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
@@ -76,23 +76,15 @@ def _txt_size(cr, text, size=12, bold=False):
     lo = PangoCairo.create_layout(cr)
     weight = "Bold" if bold else ""
     lo.set_font_description(
-        Pango.FontDescription.from_string(f"Noto Sans {weight} {size}"))
+        Pango.FontDescription.from_string(f"Adwaita Sans {weight} {size}"))
     lo.set_text(text, -1)
-    return lo.get_pixel_size()
-
-
-def _markup_size(cr, markup, size=12):
-    """Return (pixel_width, pixel_height) of Pango markup without drawing."""
-    lo = PangoCairo.create_layout(cr)
-    lo.set_font_description(Pango.FontDescription.from_string(f"Noto Sans {size}"))
-    lo.set_markup(markup, -1)
     return lo.get_pixel_size()
 
 
 def _txt_markup(cr, x, y, markup, size=12, ha="left", va="top"):
     """Like _txt but accepts Pango markup (inline colours via <span foreground=…>)."""
     lo = PangoCairo.create_layout(cr)
-    lo.set_font_description(Pango.FontDescription.from_string(f"Noto Sans {size}"))
+    lo.set_font_description(Pango.FontDescription.from_string(f"Adwaita Sans {size}"))
     lo.set_markup(markup, -1)
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
@@ -125,16 +117,13 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     PX, PY    = 7, 2   # horizontal / vertical padding inside pill
     SEP_GAP   = 4      # space on each side of a separator glyph
     PILL_GAP  = 5      # gap between adjacent pills when sep is empty string
-    font_str  = f"Noto Sans Bold {size}"
-    sep_font  = f"Noto Sans {size}"
+    font_str  = f"Adwaita Sans Bold {size}"
+    sep_font  = f"Adwaita Sans {size}"
 
     def _lo(text, markup_font):
         lo = PangoCairo.create_layout(cr)
         lo.set_font_description(Pango.FontDescription.from_string(markup_font))
-        if '<span' in text:
-            lo.set_markup(text, -1)
-        else:
-            lo.set_text(text, -1)
+        lo.set_text(text, -1)
         return lo, lo.get_pixel_size()
 
     # sep may be a single string (applied to all gaps) or a list (one per gap)
@@ -151,8 +140,8 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     # Measure all pill labels up front
     pill_los = [_lo(lbl, font_str) for lbl in labels]
 
-    # Pill height is uniform (driven by the tallest pill's text, e.g. markup with xx-large)
-    txt_h = max(ph for (_, (_, ph)) in pill_los)
+    # Pill height is uniform (driven by the shared font size)
+    _, (_, txt_h) = pill_los[0]
     ph = txt_h + 2 * PY
     r  = ph / 2
 
