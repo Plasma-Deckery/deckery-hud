@@ -124,9 +124,12 @@ def draw_callouts(cr, state):
             sort_sc_y = _BY + _SORT_Y.get(btn_key, sy) * _BS
 
         if has_action:
-            # layer_override: binding comes from a non-base config (e.g. Firefox)
-            # Only meaningful for base bindings; combo origin is shown via is_combo.
-            layer_override = (not is_combo) and (b.get("origin", base_layer) != base_layer)
+            # layer_override: binding (base OR combo) comes from a non-base config
+            # (e.g. Firefox, Konsole). modifier_active entries carry "origin" just
+            # like base bindings, so this applies uniformly — a combo that's also
+            # app-specific must be flagged too, or the app-specific signal is lost
+            # for every combo (issue #1).
+            layer_override = b.get("origin", base_layer) != base_layer
             action = b.get("label") or _fmt(b["action"])
         else:
             layer_override = False
@@ -187,14 +190,29 @@ def _callouts(cr, entries, side, ax):
         ly = t0 + i * ROW + ROW / 2
 
         # ── Derive rendering state once ───────────────────────────────────────
-        # Each state defines dot_col, dot_r, line_col, text_col — rendered uniformly below.
-        # Priority: modifier-held > combo > layer-override > active > bound > unbound
-        amber = active_mod or is_combo
-        if amber:
+        # Priority: modifier-held/combo > layer-override > active > bound > unbound.
+        # Exception: when a binding is BOTH modifier-activated AND an app-specific
+        # override, colour stays teal (origin wins) and modifier-activation is
+        # shown as a yellow underline instead of overriding the colour outright
+        # (issue #1) — this is the only place the two dimensions actually conflict.
+        amber     = active_mod or is_combo
+        conflict  = amber and layer_override
+        # Shared alpha for the modifier-driven tiers (conflict + pure amber) —
+        # full when the modifier itself is held or a pressed combo, dimmer when
+        # just "available". Computed once so both branches below (and the
+        # underline accent further down) can't drift out of sync.
+        mod_alpha = 1.0 if (active_mod or (is_combo and active)) else 0.75
+
+        if conflict:
+            dot_col  = (*C_LAYER, 1.0)
+            dot_r    = DOT + 2 if (active or active_mod) else DOT
+            line_col = (*C_LAYER, 0.85 if (active or active_mod) else 0.55)
+            text_col = (*C_LAYER, mod_alpha)
+        elif amber:
             dot_col  = (*C_MOD, 1.0)
             dot_r    = DOT + 2 if (active or active_mod) else DOT
             line_col = (*C_MOD, 0.85 if (active or active_mod) else 0.5)
-            text_col = (*C_MOD, 1.0 if (active_mod or (is_combo and active)) else 0.75)
+            text_col = (*C_MOD, mod_alpha)
         elif layer_override:
             dot_col  = (*C_LAYER, 1.0)
             dot_r    = DOT + 2 if active else DOT
@@ -238,6 +256,21 @@ def _callouts(cr, entries, side, ax):
             _txt(cr, ax - 6, ly, label, 10, ha="right", va="mid")
         else:
             _txt(cr, ax + 6, ly, label, 10, ha="left",  va="mid")
+
+        # ── Conflict accent: yellow underline beneath a teal label that is also
+        # modifier-activated (app-specific override unlocked by a held modifier) ──
+        if conflict:
+            pw, ph = _txt_size(cr, label, 10)
+            uy = ly + ph / 2 - 1.0
+            if side == "left":
+                ux0, ux1 = ax - 6 - pw, ax - 6
+            else:
+                ux0, ux1 = ax + 6, ax + 6 + pw
+            cr.set_source_rgba(*C_MOD, mod_alpha)
+            cr.set_line_width(1.3)
+            cr.move_to(ux0, uy)
+            cr.line_to(ux1, uy)
+            cr.stroke()
 
         # ── Available-modifier diamond ────────────────────────────────────────
         if is_avail_mod:
