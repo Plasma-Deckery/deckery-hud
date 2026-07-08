@@ -106,6 +106,7 @@ class OsdWin(Gtk.ApplicationWindow):
 
         ctx     = self._state.get("context", {})
         raw     = ctx.get("active_outputs", []) or []
+        paused  = ctx.get("paused", False)
 
         # active_outputs entries are either plain strings or {key, silent, ...} dicts.
         def _key(e):   return e.get("key", "") if isinstance(e, dict) else e
@@ -116,7 +117,10 @@ class OsdWin(Gtk.ApplicationWindow):
         la_age = time.time() - la.get("ts", 0.0)
         toasted = set(la["value"]) if la_age < _SUPPRESS_S and isinstance(la.get("value"), list) else set()
 
-        outputs = [_key(e) for e in raw if not _silent(e) and _key(e) not in toasted]
+        # active_outputs reflects what bindings *would* resolve to, regardless of
+        # pause state — makima only gates the virtual-device write, not this field.
+        # When paused, nothing is actually executed, so don't display it.
+        outputs = [] if paused else [_key(e) for e in raw if not _silent(e) and _key(e) not in toasted]
 
         # ── Active outputs — same as center strip, bottom-center ──────────
         if outputs:

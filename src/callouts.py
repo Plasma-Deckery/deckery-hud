@@ -186,35 +186,44 @@ def _callouts(cr, entries, side, ax):
         show_dot = rest[0] if rest else True
         ly = t0 + i * ROW + ROW / 2
 
-        # ── Dot ──────────────────────────────────────────────────────────────
-        # Priority: modifier-held > combo-active > layer-override > active > bound > unbound
+        # ── Derive rendering state once ───────────────────────────────────────
+        # Each state defines dot_col, dot_r, line_col, text_col — rendered uniformly below.
+        # Priority: modifier-held > combo > layer-override > active > bound > unbound
         amber = active_mod or is_combo
+        if amber:
+            dot_col  = (*C_MOD, 1.0)
+            dot_r    = DOT + 2 if (active or active_mod) else DOT
+            line_col = (*C_MOD, 0.85 if (active or active_mod) else 0.5)
+            text_col = (*C_MOD, 1.0 if (active_mod or (is_combo and active)) else 0.75)
+        elif layer_override:
+            dot_col  = (*C_LAYER, 1.0)
+            dot_r    = DOT + 2 if active else DOT
+            line_col = (*C_LAYER, 0.85 if active else 0.55)
+            text_col = (*C_LAYER, 1.0 if active else 0.75)
+        elif active:
+            dot_col  = (1.0, 1.0, 1.0, 1.0)
+            dot_r    = DOT + 2
+            line_col = (1.0, 1.0, 1.0, 0.85)
+            text_col = (1.0, 1.0, 1.0, 1.0)
+        elif bound:
+            dot_col  = (1.0, 1.0, 1.0, 0.6)
+            dot_r    = DOT
+            line_col = (1.0, 1.0, 1.0, 0.55)
+            text_col = (0.88, 0.88, 0.88, 1.0)
+        else:                                  # unbound
+            dot_col  = (1.0, 1.0, 1.0, 0.2)
+            dot_r    = DOT
+            line_col = (1.0, 1.0, 1.0, 0.15)
+            text_col = (0.55, 0.55, 0.55, 0.4)
+
+        # ── Dot ──────────────────────────────────────────────────────────────
         if show_dot:
-            if amber:
-                cr.set_source_rgba(*C_MOD, 1.0)
-                cr.arc(bx, by, DOT + 2 if active else DOT, 0, math.tau)
-            elif layer_override:
-                cr.set_source_rgba(*C_LAYER, 1.0)
-                cr.arc(bx, by, DOT, 0, math.tau)
-            elif active:
-                cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
-                cr.arc(bx, by, DOT + 2, 0, math.tau)
-            else:
-                cr.set_source_rgba(1, 1, 1, 0.6 if bound else 0.2)
-                cr.arc(bx, by, DOT, 0, math.tau)
+            cr.set_source_rgba(*dot_col)
+            cr.arc(bx, by, dot_r, 0, math.tau)
             cr.fill()
 
         # ── Callout line ─────────────────────────────────────────────────────
-        if amber:
-            cr.set_source_rgba(*C_MOD, 0.85 if active else 0.5)
-        elif layer_override:
-            cr.set_source_rgba(*C_LAYER, 0.55)
-        elif active:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.85)
-        elif bound:
-            cr.set_source_rgba(1, 1, 1, 0.55)
-        else:
-            cr.set_source_rgba(1, 1, 1, 0.15)
+        cr.set_source_rgba(*line_col)
         cr.set_line_width(1.4)
         ex = (bx + ax) / 2
         cr.move_to(bx, by)
@@ -223,27 +232,7 @@ def _callouts(cr, entries, side, ax):
         cr.stroke()
 
         # ── Label ─────────────────────────────────────────────────────────────
-        # Colour hierarchy:
-        #   amber (1.0)  → modifier held or combo available
-        #   white (1.0)  → regular button currently pressed
-        #   teal         → window-config override (not base layer)
-        #   dim white    → normal base binding
-        #   very dim     → unbound
-        if active_mod:
-            col = (1.0, 0.78, 0.2, 1.0)       # amber full: modifier held
-        elif is_combo and active:
-            col = (1.0, 0.78, 0.2, 1.0)       # amber full: combo pressed
-        elif is_combo:
-            col = (1.0, 0.78, 0.2, 0.75)      # amber dim: combo available, not pressed
-        elif active:
-            col = (1.0, 1.0, 1.0, 1.0)        # white: regular active
-        elif not bound:
-            col = (0.55, 0.55, 0.55, 0.4)     # very dim: unbound
-        elif layer_override:
-            col = (*C_LAYER, 1.0)              # teal: window-config override
-        else:
-            col = (0.88, 0.88, 0.88, 1.0)     # normal base binding
-        cr.set_source_rgba(*col)
+        cr.set_source_rgba(*text_col)
         label = f"{name}: {action}"
         if side == "left":
             _txt(cr, ax - 6, ly, label, 10, ha="right", va="mid")
