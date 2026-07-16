@@ -1,8 +1,6 @@
 [Unit]
 Description=Deckery HUD overlay (persistent D-Bus service)
-PartOf=graphical-session.target
-PartOf=deckery-tray.service
-After=graphical-session.target
+BindsTo=deckery-tray.service
 After=deckery-tray.service
 
 [Service]
@@ -13,4 +11,4 @@ Restart=on-failure
 RestartSec=2
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=deckery-tray.service
