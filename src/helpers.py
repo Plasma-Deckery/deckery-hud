@@ -4,8 +4,9 @@ No GTK, no state, no layout — pure reusable tooling.
 """
 
 # ── Shared HUD colours ────────────────────────────────────────────────────────
-C_MOD   = (1.0,  0.792, 0.2)    # amber  — modifier buttons / held keys
-C_LAYER = (0.45, 0.90,  0.82)   # teal   — per-app / context stack layers
+C_MOD   = (1.0,  0.792, 0.2)    # amber   — modifier buttons / held keys
+C_LAYER = (0.45, 0.90,  0.82)   # teal    — per-app / context stack layers
+C_GAME  = (0.95, 0.35,  0.78)   # magenta — Gaming Mode trigger callout
 
 import gi
 gi.require_version('Pango', '1.0')

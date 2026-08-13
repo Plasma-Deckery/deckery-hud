@@ -6,7 +6,11 @@ Owns _BTNS, _SORT_Y, _SHOW_ALL, and all callout drawing logic.
 import math
 
 from layout import _FX, _FY, _FS, _BX, _BY, _BS, _AX_L, _AX_R
-from helpers import _K, _fmt, _txt, _txt_size, C_MOD, C_LAYER
+from helpers import _K, _fmt, _txt, _txt_size, C_MOD, C_LAYER, C_GAME
+
+# Gaming Mode trigger is always BTN_BASE (QAM / three-dot button) — hardcoded,
+# not matched against gaming_mode_trigger.key, per explicit product decision.
+_GAMING_MODE_BTN = "BTN_BASE"
 
 # ── Display option ────────────────────────────────────────────────────────────
 # True  → show all buttons, unbound = dimmed with "—"
@@ -89,6 +93,11 @@ def draw_callouts(cr, state):
     active_mods  = set(held_mods)
     avail_mods   = set(ctx.get("available_modifiers", []))
 
+    # Gaming Mode trigger sub-label — always attached to BTN_BASE (see
+    # _GAMING_MODE_BTN), only when the trigger isn't disabled in config.
+    gm_trigger   = state.get("gaming_mode_trigger")
+    gm_sub_label = f"(dbl-click) {gm_trigger['label']}" if gm_trigger else None
+
     # bindings is always the display base — modifier_active overlays on top.
     # We never fully switch views; instead each button is classified into one
     # of three tiers:
@@ -135,10 +144,15 @@ def draw_callouts(cr, state):
             layer_override = False
             action = "—"
 
+        sub_label  = gm_sub_label if btn_key == _GAMING_MODE_BTN else None
+        sub_active = is_active    if btn_key == _GAMING_MODE_BTN else False
+
         # entry: (sort_y, dot_x, dot_y, name, action,
-        #         layer_override, bound, active, is_mod, is_combo, is_avail_mod, show_dot)
+        #         layer_override, bound, active, is_mod, is_combo, is_avail_mod,
+        #         show_dot, sub_label, sub_active)
         entry = (sort_sc_y, sc_x, sc_y, name, action,
-                 layer_override, has_action, is_active, is_mod, is_combo, is_avail_mod, True)
+                 layer_override, has_action, is_active, is_mod, is_combo, is_avail_mod,
+                 True, sub_label, sub_active)
 
         if side == "left":
             (lf if view == "front" else lb).append(entry)
@@ -177,17 +191,36 @@ def _callouts(cr, entries, side, ax):
     if not entries:
         return
 
-    ROW = 22
+    ROW       = 22
+    SUB_EXTRA = 22   # extra row height reserved for an entry's sub_label line
     DOT = 3
+
+    # Row heights vary: an entry with a sub_label (Gaming Mode's second line
+    # under BTN_BASE) reserves an extra ROW so the following entries don't
+    # overlap it. Precompute cumulative offsets instead of a uniform i * ROW.
+    def _sub_label(e):
+        # index 12 = sub_label (string|None); index 13 = sub_active (bool).
+        # Do NOT use e[-1] — that would read sub_active after the tuple grew.
+        return e[12] if len(e) > 12 else None
+
+    heights = [ROW + (SUB_EXTRA if _sub_label(e) else 0) for e in entries]
+    total   = sum(heights)
+    offsets = []
+    acc     = 0
+    for h in heights:
+        offsets.append(acc)
+        acc += h
 
     ys  = [e[0] for e in entries]
     mid = (ys[0] + ys[-1]) / 2
-    t0  = mid - len(entries) * ROW / 2
+    t0  = mid - total / 2
 
     for i, (_, bx, by, name, action,
             layer_override, bound, active, active_mod, is_combo, is_avail_mod, *rest) in enumerate(entries):
-        show_dot = rest[0] if rest else True
-        ly = t0 + i * ROW + ROW / 2
+        show_dot   = rest[0] if rest else True
+        sub_label  = rest[1] if len(rest) > 1 else None
+        sub_active = rest[2] if len(rest) > 2 else False
+        ly = t0 + offsets[i] + ROW / 2
 
         # ── Derive rendering state once ───────────────────────────────────────
         # Priority: modifier-held/combo > layer-override > active > bound > unbound.
@@ -256,6 +289,17 @@ def _callouts(cr, entries, side, ax):
             _txt(cr, ax - 6, ly, label, 10, ha="right", va="mid")
         else:
             _txt(cr, ax + 6, ly, label, 10, ha="left",  va="mid")
+
+        # ── Gaming Mode sub-label — second line below BTN_BASE's normal callout.
+        # Magenta signal colour; full opacity when Gaming Mode is active, dimmed
+        # when inactive — mirrors the on/off state of the mode itself.
+        if sub_label:
+            sy2 = ly + _txt_size(cr, label, 10)[1] + 3
+            cr.set_source_rgba(*C_GAME, 1.0 if sub_active else 0.4)
+            if side == "left":
+                _txt(cr, ax - 6, sy2, sub_label, 10, ha="right", va="mid")
+            else:
+                _txt(cr, ax + 6, sy2, sub_label, 10, ha="left",  va="mid")
 
         # ── Conflict accent: yellow underline beneath a teal label that is also
         # modifier-activated (app-specific override unlocked by a held modifier) ──
