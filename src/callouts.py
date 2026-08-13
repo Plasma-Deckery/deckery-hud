@@ -304,7 +304,8 @@ def _callouts(cr, entries, side, ax):
         # ── Conflict accent: yellow underline beneath a teal label that is also
         # modifier-activated (app-specific override unlocked by a held modifier) ──
         if conflict:
-            pw, ph = _txt_size(cr, label, 10)
+            pw, _  = _txt_size(cr, label, 10)
+            _, ph  = _txt_size(cr, "Ag", 10)   # stable reference — avoids ☰ metric quirks
             uy = ly + ph / 2 - 1.0
             if side == "left":
                 ux0, ux1 = ax - 6 - pw, ax - 6
