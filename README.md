@@ -25,3 +25,21 @@ Part of [Plasma Deckery](https://github.com/Plasma-Deckery/deckery).
 deckery-hud is installed and managed as part of the Deckery suite — no separate setup needed.
 
 → [Deckery Setup Guide](https://plasma-deckery.github.io/deckery/setup-guide/)
+
+---
+
+## Development
+
+To run the service directly from this repo:
+
+```bash
+bash install.sh
+```
+
+This points `~/.local/bin/deckery-hud` at this clone. After any code change, a service restart picks it up immediately:
+
+```bash
+systemctl --user restart deckery-hud.service
+```
+
+To switch back to a production install, run `install.sh` from that clone instead.
