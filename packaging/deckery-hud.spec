@@ -16,7 +16,7 @@ BuildRequires:  systemd-rpm-macros
 # Runtime: all dependencies are available as Fedora RPMs — no bundled venv needed.
 Requires:       python3
 # GObject Introspection bindings (gi.repository.Gtk, Gio, GLib, Pango, PangoCairo)
-Requires:       python3-gobject3
+Requires:       python3-gobject
 # cairo / PangoCairo drawing (gi.repository → cairo Python bindings)
 Requires:       python3-cairo
 # GTK4 runtime + typelib (gi.repository.Gtk 4.0)
