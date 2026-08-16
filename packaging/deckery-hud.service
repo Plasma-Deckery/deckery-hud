@@ -1,0 +1,15 @@
+[Unit]
+Description=Deckery HUD overlay (persistent D-Bus service)
+BindsTo=deckery-tray.service
+After=deckery-tray.service graphical-session.target
+
+[Service]
+Type=dbus
+BusName=de.plasma_deckery.hud
+ExecStart=/usr/bin/python3 /usr/lib/deckery-hud/deckery-hud.py
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONPATH=/usr/lib/deckery-hud
+
+[Install]
+WantedBy=deckery-tray.service
