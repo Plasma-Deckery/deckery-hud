@@ -10,15 +10,11 @@ import os
 import socket
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-# Assets live next to the source files in an RPM install (/usr/lib/deckery-hud/assets/)
-# and one level above src/ in a dev checkout (assets/ at repo root).
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_DIR = (
-    _SCRIPT_DIR
-    if os.path.isdir(os.path.join(_SCRIPT_DIR, "assets"))
-    else os.path.dirname(_SCRIPT_DIR)
-)
-_STATE    = "/tmp/makima-state.json"
+# _DIR is the project root (one level above src/).
+# This works for both dev checkouts (src/ subdirectory) and RPM installs
+# (/usr/lib/deckery-hud/src/ subdirectory) — the structure is identical.
+_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_STATE = "/tmp/makima-state.json"
 
 _FRONT_SVG = os.path.join(_DIR, "assets", "steamdeckFront.svg")
 _BACK_SVG  = os.path.join(_DIR, "assets", "steamdeckBack.svg")

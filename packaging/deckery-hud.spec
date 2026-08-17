@@ -48,11 +48,13 @@ applet sends Toggle calls to show/hide the overlay.
 # Pure Python — nothing to compile.
 
 %install
-# Python source
-install -dm755 %{buildroot}%{_prefix}/lib/%{name}
-install -pm644 src/*.py %{buildroot}%{_prefix}/lib/%{name}/
+# Python source — installed to src/ to mirror the dev checkout structure.
+# ipc.py uses parent.parent of __file__ to find assets/, which works
+# identically for dev (src/ipc.py → repo root) and RPM (/usr/lib/deckery-hud/src/ipc.py → /usr/lib/deckery-hud/).
+install -dm755 %{buildroot}%{_prefix}/lib/%{name}/src
+install -pm644 src/*.py %{buildroot}%{_prefix}/lib/%{name}/src/
 
-# Assets (SVG button layouts)
+# Assets (SVG button layouts) — sit at parent level, next to src/
 install -dm755 %{buildroot}%{_prefix}/lib/%{name}/assets
 install -pm644 assets/*.svg %{buildroot}%{_prefix}/lib/%{name}/assets/
 
@@ -72,7 +74,8 @@ install -Dm644 packaging/deckery-hud.service \
 %files
 %license LICENSE
 %doc README.md
-%{_prefix}/lib/%{name}/
+%{_prefix}/lib/%{name}/src/
+%{_prefix}/lib/%{name}/assets/
 %{_bindir}/deckery-hud-toggle
 %{_userunitdir}/deckery-hud.service
 
