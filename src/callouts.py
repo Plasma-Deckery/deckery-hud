@@ -91,7 +91,14 @@ def draw_callouts(cr, state):
     config_stack = ctx.get("config_stack") or [""]
     base_layer   = config_stack[0]
     active_mods  = set(held_mods)
-    avail_mods   = set(ctx.get("available_modifiers", []))
+    avail_mods_raw = ctx.get("available_modifiers", {})
+    if isinstance(avail_mods_raw, dict):
+        avail_mods     = set(avail_mods_raw.keys())
+        avail_app_mods = {k for k, v in avail_mods_raw.items() if v.get("has_app_combos")}
+    else:
+        # fallback: old plain-string list format
+        avail_mods     = set(avail_mods_raw)
+        avail_app_mods = set()
 
     # Gaming Mode trigger sub-label — always attached to BTN_BASE (see
     # _GAMING_MODE_BTN), only when the trigger isn't disabled in config.
@@ -118,7 +125,8 @@ def draw_callouts(cr, state):
         has_action = bool(b and (b.get("action") or b.get("label")))
         is_active  = btn_key in active_btns
         is_mod      = btn_key in active_mods
-        is_avail_mod = btn_key in avail_mods and not is_mod
+        is_avail_mod     = btn_key in avail_mods     and not is_mod
+        is_avail_app_mod = btn_key in avail_app_mods and not is_mod
 
         if not has_action and not _SHOW_ALL and not is_active:
             continue
@@ -149,10 +157,10 @@ def draw_callouts(cr, state):
 
         # entry: (sort_y, dot_x, dot_y, name, action,
         #         layer_override, bound, active, is_mod, is_combo, is_avail_mod,
-        #         show_dot, sub_label, sub_active)
+        #         show_dot, sub_label, sub_active, is_avail_app_mod)
         entry = (sort_sc_y, sc_x, sc_y, name, action,
                  layer_override, has_action, is_active, is_mod, is_combo, is_avail_mod,
-                 True, sub_label, sub_active)
+                 True, sub_label, sub_active, is_avail_app_mod)
 
         if side == "left":
             (lf if view == "front" else lb).append(entry)
@@ -217,9 +225,10 @@ def _callouts(cr, entries, side, ax):
 
     for i, (_, bx, by, name, action,
             layer_override, bound, active, active_mod, is_combo, is_avail_mod, *rest) in enumerate(entries):
-        show_dot   = rest[0] if rest else True
-        sub_label  = rest[1] if len(rest) > 1 else None
-        sub_active = rest[2] if len(rest) > 2 else False
+        show_dot         = rest[0] if rest else True
+        sub_label        = rest[1] if len(rest) > 1 else None
+        sub_active       = rest[2] if len(rest) > 2 else False
+        is_avail_app_mod = rest[3] if len(rest) > 3 else False
         ly = t0 + offsets[i] + ROW / 2
 
         # ── Derive rendering state once ───────────────────────────────────────
@@ -318,6 +327,10 @@ def _callouts(cr, entries, side, ax):
             cr.stroke()
 
         # ── Available-modifier diamond ────────────────────────────────────────
+        # Amber fill = modifier has combos to unlock.
+        # Cyan stroke = at least one of those combos is app-specific (layer
+        # override) — same signal language as the teal label + amber underline
+        # used for conflict bindings.
         if is_avail_mod:
             pw, _ = _txt_size(cr, label, 10)
             r = 3
@@ -325,10 +338,18 @@ def _callouts(cr, entries, side, ax):
                 dot_x = ax - 6 - pw - 8
             else:
                 dot_x = ax + 6 + pw + 8
+            def _diamond():
+                cr.move_to(dot_x,     ly - r)
+                cr.line_to(dot_x + r, ly)
+                cr.line_to(dot_x,     ly + r)
+                cr.line_to(dot_x - r, ly)
+                cr.close_path()
             cr.set_source_rgba(*C_MOD, 0.85)
-            cr.move_to(dot_x,     ly - r)
-            cr.line_to(dot_x + r, ly)
-            cr.line_to(dot_x,     ly + r)
-            cr.line_to(dot_x - r, ly)
-            cr.close_path()
+            _diamond()
             cr.fill()
+            if is_avail_app_mod:
+                cr.set_source_rgba(*C_LAYER, 0.9)
+                cr.set_line_width(1.0)
+                cr.move_to(dot_x - r, ly + r + 2)
+                cr.line_to(dot_x + r, ly + r + 2)
+                cr.stroke()
