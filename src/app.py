@@ -130,8 +130,6 @@ class App(Gtk.Application):
     def hide_hud(self):
         if self._win is None:
             return
-        # Reset input-region flag — layer shell recreates the surface on next present()
-        self._win._region_set = False
         self._win.set_visible(False)
         makima_analog_off()
         if self._remapping_enabled:

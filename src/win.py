@@ -50,7 +50,6 @@ class Win(Gtk.ApplicationWindow):
 
         # ── State ─────────────────────────────────────────────────────────
         self._state          = {}
-        self._region_set     = False
         self._toast_source   = None
         self._last_action_ts = 0.0
         self._active_toasts  = []
@@ -183,25 +182,25 @@ class Win(Gtk.ApplicationWindow):
             cr.paint()
 
     def _draw_inner(self, cr, sw, sh):
-        # Set Wayland input region once per show cycle (close button + pause badge).
-        # _region_set is reset to False by App.hide_hud() before each new present().
-        if not self._region_set:
-            self._region_set = True
-            hx = (sw - HUD_W) // 2
-            hy = (sh - HUD_H) // 2
-            close_btn  = cairo.RectangleInt(hx + HUD_W - 44, hy, 44, _TITLE_H)
-            badge      = cairo.RectangleInt(
-                int(hx + _PAUSE_X), int(hy + _PAUSE_Y),
-                int(_PAUSE_W), int(_PAUSE_H))
-            mx, my, mw, mh = self._osd_btn_screen_rect()
-            rx, ry, rw, rh = self._remap_btn_screen_rect()
-            osd_btn   = cairo.RectangleInt(int(mx), int(my), int(mw), int(mh))
-            remap_btn = cairo.RectangleInt(int(rx), int(ry), int(rw), int(rh))
-            region = cairo.Region(close_btn)
-            region.union(cairo.Region(badge))
-            region.union(cairo.Region(osd_btn))
-            region.union(cairo.Region(remap_btn))
-            self.get_surface().set_input_region(region)
+        # Set Wayland input region on every draw — recalculated so it stays
+        # correct even if the surface is recreated by the layer shell after
+        # present(), or if the first draw fires before the compositor has
+        # sized the window to full screen.
+        hx = (sw - HUD_W) // 2
+        hy = (sh - HUD_H) // 2
+        close_btn  = cairo.RectangleInt(hx + HUD_W - 44, hy, 44, _TITLE_H)
+        badge      = cairo.RectangleInt(
+            int(hx + _PAUSE_X), int(hy + _PAUSE_Y),
+            int(_PAUSE_W), int(_PAUSE_H))
+        mx, my, mw, mh = self._osd_btn_screen_rect()
+        rx, ry, rw, rh = self._remap_btn_screen_rect()
+        osd_btn   = cairo.RectangleInt(int(mx), int(my), int(mw), int(mh))
+        remap_btn = cairo.RectangleInt(int(rx), int(ry), int(rw), int(rh))
+        region = cairo.Region(close_btn)
+        region.union(cairo.Region(badge))
+        region.union(cairo.Region(osd_btn))
+        region.union(cairo.Region(remap_btn))
+        self.get_surface().set_input_region(region)
 
         cr.set_operator(cairo.Operator.CLEAR)
         cr.paint()
