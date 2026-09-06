@@ -263,7 +263,7 @@ Diese drei Felder hängen zusammen. Sie werden nur befüllt, wenn der Analog-Exp
 per IPC eingeschaltet ist:
 
 ```bash
-# über /tmp/makima-control.sock
+# über $XDG_RUNTIME_DIR/makima-control.sock
 analog-state-export on
 analog-state-export off
 ```
