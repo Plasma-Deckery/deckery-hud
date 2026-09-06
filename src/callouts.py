@@ -4,9 +4,34 @@ Owns _BTNS, _SORT_Y, _SHOW_ALL, and all callout drawing logic.
 """
 
 import math
+from dataclasses import dataclass
 
 from layout import _FX, _FY, _FS, _BX, _BY, _BS, _AX_L, _AX_R
 from helpers import _K, _fmt, _txt, _txt_size, C_MOD, C_LAYER, C_GAME
+
+
+@dataclass
+class _Callout:
+    """One annotated row. Everything past `action` has a default, so the
+    trackpad legends can be built from the handful of fields they actually
+    carry."""
+    sort_y: float
+    dot_x: float
+    dot_y: float
+    name: str
+    action: str
+    layer_override: bool = False
+    bound: bool = False
+    active: bool = False
+    active_mod: bool = False
+    is_combo: bool = False
+    is_avail_mod: bool = False
+    show_dot: bool = True
+    sub_label: str = None
+    sub_active: bool = False
+    is_avail_app_mod: bool = False
+    is_hint: bool = False
+    is_avail_virt_mod: bool = False
 
 # Gaming Mode trigger is always BTN_BASE (QAM / three-dot button) — hardcoded,
 # not matched against gaming_mode_trigger.key, per explicit product decision.
@@ -91,14 +116,11 @@ def draw_callouts(cr, state):
     config_stack = ctx.get("config_stack") or [""]
     base_layer   = config_stack[0]
     active_mods  = set(held_mods)
-    avail_mods_raw = ctx.get("available_modifiers", {})
-    if isinstance(avail_mods_raw, dict):
-        avail_mods     = set(avail_mods_raw.keys())
-        avail_app_mods = {k for k, v in avail_mods_raw.items() if v.get("has_app_combos")}
-    else:
-        # fallback: old plain-string list format
-        avail_mods     = set(avail_mods_raw)
-        avail_app_mods = set()
+    avail_mods_raw = ctx.get("available_modifiers") or {}
+    avail_mods     = set(avail_mods_raw)
+    avail_app_mods = {k for k, v in avail_mods_raw.items() if v.get("has_app_combos")}
+    # virtual: the button unlocks hints (labels only), not real bindings.
+    avail_virt_mods = {k for k, v in avail_mods_raw.items() if v.get("virtual")}
 
     # Gaming Mode trigger sub-label — always attached to BTN_BASE (see
     # _GAMING_MODE_BTN), only when the trigger isn't disabled in config.
@@ -125,8 +147,15 @@ def draw_callouts(cr, state):
         has_action = bool(b and (b.get("action") or b.get("label")))
         is_active  = btn_key in active_btns
         is_mod      = btn_key in active_mods
-        is_avail_mod     = btn_key in avail_mods     and not is_mod
-        is_avail_app_mod = btn_key in avail_app_mods and not is_mod
+        is_avail_mod      = btn_key in avail_mods      and not is_mod
+        is_avail_app_mod  = btn_key in avail_app_mods  and not is_mod
+        is_avail_virt_mod = btn_key in avail_virt_mods and not is_mod
+        # Only combo hints need this: they arrive through modifier_active and
+        # would otherwise inherit the amber "a binding fires here" colour.
+        # Deliberately not read from base_b — a modifier-less hint can sit on a
+        # button that is itself a modifier, and stripping that button's amber
+        # while it is held would hide a real signal.
+        is_hint = is_combo and b.get("kind") == "hint"
 
         if not has_action and not _SHOW_ALL and not is_active:
             continue
@@ -155,12 +184,14 @@ def draw_callouts(cr, state):
         sub_label  = gm_sub_label if btn_key == _GAMING_MODE_BTN else None
         sub_active = is_active    if btn_key == _GAMING_MODE_BTN else False
 
-        # entry: (sort_y, dot_x, dot_y, name, action,
-        #         layer_override, bound, active, is_mod, is_combo, is_avail_mod,
-        #         show_dot, sub_label, sub_active, is_avail_app_mod)
-        entry = (sort_sc_y, sc_x, sc_y, name, action,
-                 layer_override, has_action, is_active, is_mod, is_combo, is_avail_mod,
-                 True, sub_label, sub_active, is_avail_app_mod)
+        entry = _Callout(
+            sort_y=sort_sc_y, dot_x=sc_x, dot_y=sc_y, name=name, action=action,
+            layer_override=layer_override, bound=has_action, active=is_active,
+            active_mod=is_mod, is_combo=is_combo, is_avail_mod=is_avail_mod,
+            sub_label=sub_label, sub_active=sub_active,
+            is_avail_app_mod=is_avail_app_mod,
+            is_hint=is_hint, is_avail_virt_mod=is_avail_virt_mod,
+        )
 
         if side == "left":
             (lf if view == "front" else lb).append(entry)
@@ -168,7 +199,7 @@ def draw_callouts(cr, state):
             (rf if view == "front" else rb).append(entry)
 
     for group in (lf, lb, rf, rb):
-        group.sort()
+        group.sort(key=lambda e: (e.sort_y, e.dot_x, e.dot_y))
 
     # ── Trackpad mode entries — appended AFTER sort so they don't skew centering ─
     pads    = state.get("trackpads") or {}
@@ -185,9 +216,12 @@ def draw_callouts(cr, state):
     _lpad_dot = (_FX + (98.86  + 107.5 / 2) * _FS, _FY + (149.31 + 107.6) * _FS)
     _rpad_dot = (_FX + (818.07 + 107.5 / 2) * _FS, _FY + (149.31 + 107.6) * _FS)
     _ROW = 22
-    # active_mod=gesture → amber legend; active → white legend; show_dot=False always
-    lf.append(((lf[-1][0] if lf else _FY) + _ROW, *_lpad_dot, "LPad", lpad_mode, False, True, lpad_active, gesture, False, False, False))
-    rf.append(((rf[-1][0] if rf else _FY) + _ROW, *_rpad_dot, "RPad", rpad_mode, False, True, rpad_active, gesture, False, False, False))
+    # active_mod=gesture → amber legend; active → white legend; no dot, the pad
+    # is not a point on the shell.
+    lf.append(_Callout((lf[-1].sort_y if lf else _FY) + _ROW, *_lpad_dot, "LPad", lpad_mode,
+                       bound=True, active=lpad_active, active_mod=gesture, show_dot=False))
+    rf.append(_Callout((rf[-1].sort_y if rf else _FY) + _ROW, *_rpad_dot, "RPad", rpad_mode,
+                       bound=True, active=rpad_active, active_mod=gesture, show_dot=False))
 
     _callouts(cr, lf, "left",  _AX_L)
     _callouts(cr, lb, "left",  _AX_L)
@@ -206,12 +240,7 @@ def _callouts(cr, entries, side, ax):
     # Row heights vary: an entry with a sub_label (Gaming Mode's second line
     # under BTN_BASE) reserves an extra ROW so the following entries don't
     # overlap it. Precompute cumulative offsets instead of a uniform i * ROW.
-    def _sub_label(e):
-        # index 12 = sub_label (string|None); index 13 = sub_active (bool).
-        # Do NOT use e[-1] — that would read sub_active after the tuple grew.
-        return e[12] if len(e) > 12 else None
-
-    heights = [ROW + (SUB_EXTRA if _sub_label(e) else 0) for e in entries]
+    heights = [ROW + (SUB_EXTRA if e.sub_label else 0) for e in entries]
     total   = sum(heights)
     offsets = []
     acc     = 0
@@ -219,16 +248,17 @@ def _callouts(cr, entries, side, ax):
         offsets.append(acc)
         acc += h
 
-    ys  = [e[0] for e in entries]
+    ys  = [e.sort_y for e in entries]
     mid = (ys[0] + ys[-1]) / 2
     t0  = mid - total / 2
 
-    for i, (_, bx, by, name, action,
-            layer_override, bound, active, active_mod, is_combo, is_avail_mod, *rest) in enumerate(entries):
-        show_dot         = rest[0] if rest else True
-        sub_label        = rest[1] if len(rest) > 1 else None
-        sub_active       = rest[2] if len(rest) > 2 else False
-        is_avail_app_mod = rest[3] if len(rest) > 3 else False
+    for i, e in enumerate(entries):
+        bx, by, name, action = e.dot_x, e.dot_y, e.name, e.action
+        layer_override, bound, active = e.layer_override, e.bound, e.active
+        active_mod, is_combo, is_hint = e.active_mod, e.is_combo, e.is_hint
+        is_avail_mod, is_avail_app_mod = e.is_avail_mod, e.is_avail_app_mod
+        is_avail_virt_mod = e.is_avail_virt_mod
+        show_dot, sub_label, sub_active = e.show_dot, e.sub_label, e.sub_active
         ly = t0 + offsets[i] + ROW / 2
 
         # ── Derive rendering state once ───────────────────────────────────────
@@ -237,7 +267,14 @@ def _callouts(cr, entries, side, ax):
         # override, colour stays teal (origin wins) and modifier-activation is
         # shown as a yellow underline instead of overriding the colour outright
         # (issue #1) — this is the only place the two dimensions actually conflict.
-        amber     = active_mod or is_combo
+        # Hints are excluded from the *combo* half of the amber tier on purpose.
+        # They follow the modifier logic mechanically — a held button reveals
+        # them — but there is no binding behind them, so the amber "a combo
+        # fires here" signal would be a lie. They stay teal (app-provided label)
+        # with no underline. active_mod deliberately stays outside the
+        # exclusion: a button that is itself a held modifier keeps its amber
+        # even when a hint happens to sit on it.
+        amber     = active_mod or (is_combo and not is_hint)
         conflict  = amber and layer_override
         # Shared alpha for the modifier-driven tiers (conflict + pure amber) —
         # full when the modifier itself is held or a pressed combo, dimmer when
@@ -328,9 +365,13 @@ def _callouts(cr, entries, side, ax):
 
         # ── Available-modifier diamond ────────────────────────────────────────
         # Amber fill = modifier has combos to unlock.
+        # Teal fill  = virtual modifier: what it reveals are hints (labels for
+        #              shortcuts that already work), not bindings. Same colour
+        #              as the labels themselves, so the diamond and what it
+        #              opens read as one thing.
         # Cyan stroke = at least one of those combos is app-specific (layer
         # override) — same signal language as the teal label + amber underline
-        # used for conflict bindings.
+        # used for conflict bindings. Redundant under a teal fill, so skipped.
         if is_avail_mod:
             pw, _ = _txt_size(cr, label, 10)
             r = 3
@@ -344,10 +385,10 @@ def _callouts(cr, entries, side, ax):
                 cr.line_to(dot_x,     ly + r)
                 cr.line_to(dot_x - r, ly)
                 cr.close_path()
-            cr.set_source_rgba(*C_MOD, 0.85)
+            cr.set_source_rgba(*(C_LAYER if is_avail_virt_mod else C_MOD), 0.85)
             _diamond()
             cr.fill()
-            if is_avail_app_mod:
+            if is_avail_app_mod and not is_avail_virt_mod:
                 cr.set_source_rgba(*C_LAYER, 0.9)
                 cr.set_line_width(1.0)
                 cr.move_to(dot_x - r, ly + r + 2)
