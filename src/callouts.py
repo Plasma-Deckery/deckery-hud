@@ -57,8 +57,8 @@ _BTNS = {
     "BTN_SELECT":     (121,  33, "left",  "View", "front"),
     "BTN_BASE":       (845, 289, "right", "...",  "front"),
     # Front — right side
-    "BTN_WEST":       (959,  44, "right", "Y",    "front"),
-    "BTN_NORTH":      (929,  74, "right", "X",    "front"),
+    "BTN_NORTH":      (959,  44, "right", "Y",    "front"),
+    "BTN_WEST":       (929,  74, "right", "X",    "front"),
     "BTN_EAST":       (989,  74, "right", "B",    "front"),
     "BTN_SOUTH":      (959, 104, "right", "A",    "front"),
     "BTN_THUMBR":     (860,  90, "right", "R3",   "front"),
