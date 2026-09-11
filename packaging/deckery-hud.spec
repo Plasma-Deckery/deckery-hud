@@ -1,5 +1,5 @@
 Name:           deckery-hud
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Steam Deck button-layout HUD overlay for KDE Plasma desktop
 
@@ -80,6 +80,9 @@ install -Dm644 packaging/deckery-hud.service \
 %{_userunitdir}/deckery-hud.service
 
 %changelog
+* Thu Sep 11 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.4.0-1
+- Minor version bump to 0.4.0
+
 * Sat Aug 16 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.3.0-1
 - Initial RPM packaging
 - Wayland layer-shell HUD overlay via GTK4 + gtk4-layer-shell GI bindings
