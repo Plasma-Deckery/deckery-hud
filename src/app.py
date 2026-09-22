@@ -12,7 +12,9 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gio, GLib
 
-from ipc import makima_pause, makima_resume, makima_analog_on, makima_analog_off, load_state, _STATE
+from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_off,
+                 load_state, _STATE, auth_daemon_present, start_auth_session,
+                 mark_demo_session)
 from win import Win
 from osd_win import OsdWin
 
@@ -41,6 +43,9 @@ class App(Gtk.Application):
         self._osd_win           = None
         self._osd_enabled       = True
         self._remapping_enabled = True
+        # Re-checked every time the HUD opens: deckery-auth may be installed or
+        # stopped while we are running, and the button should follow.
+        self._auth_available    = False
         self._state             = {}
         self._monitor           = None
         self._reg_id            = 0
@@ -121,6 +126,7 @@ class App(Gtk.Application):
     def show_hud(self):
         if self._win is None:
             return
+        self._auth_available = auth_daemon_present()
         self._osd_win.set_visible(False)
         makima_pause()
         makima_analog_on()
@@ -136,6 +142,22 @@ class App(Gtk.Application):
             makima_resume()
         if self._osd_enabled and self._remapping_enabled:
             self._osd_win.present()
+
+    def show_auth(self):
+        """Close the HUD, then bring up the PIN overlay.
+
+        In that order, and with a beat in between: the overlay is a layer-shell
+        surface that covers everything, and starting it while the HUD is still
+        on its way out leaves the two fighting over the screen.
+        """
+        # Marker first, then the session — the overlay reads it at SESSION_START.
+        mark_demo_session()
+        self.hide_hud()
+        GLib.timeout_add(150, self._start_auth_once)
+
+    def _start_auth_once(self):
+        start_auth_session()
+        return False   # one shot
 
     def toggle_hud(self):
         if self._win is None:

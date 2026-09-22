@@ -365,10 +365,11 @@ def _callouts(cr, entries, side, ax):
 
         # ── Available-modifier diamond ────────────────────────────────────────
         # Amber fill = modifier has combos to unlock.
-        # Teal fill  = virtual modifier: what it reveals are hints (labels for
-        #              shortcuts that already work), not bindings. Same colour
-        #              as the labels themselves, so the diamond and what it
-        #              opens read as one thing.
+        # White fill = virtual modifier whose hints are all from the base config
+        #              (no app-layer signal needed).
+        # Teal fill  = virtual modifier that has at least one app-specific hint
+        #              — same colour as app-override labels so the diamond and
+        #              what it opens read as one thing.
         # Cyan stroke = at least one of those combos is app-specific (layer
         # override) — same signal language as the teal label + amber underline
         # used for conflict bindings. Redundant under a teal fill, so skipped.
@@ -385,7 +386,16 @@ def _callouts(cr, entries, side, ax):
                 cr.line_to(dot_x,     ly + r)
                 cr.line_to(dot_x - r, ly)
                 cr.close_path()
-            cr.set_source_rgba(*(C_LAYER if is_avail_virt_mod else C_MOD), 0.85)
+            # Virtual modifier with only base-config hints → white diamond
+            # (no app-layer signal needed; teal is reserved for when an app
+            # override is actually present). Non-virtual modifier → amber.
+            if is_avail_virt_mod and is_avail_app_mod:
+                _diam_col = C_LAYER
+            elif is_avail_virt_mod:
+                _diam_col = (1.0, 1.0, 1.0)
+            else:
+                _diam_col = C_MOD
+            cr.set_source_rgba(*_diam_col, 0.85)
             _diamond()
             cr.fill()
             if is_avail_app_mod and not is_avail_virt_mod:

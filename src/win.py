@@ -103,6 +103,18 @@ class Win(Gtk.ApplicationWindow):
         by = hy + (_TITLE_H - bh) / 2
         return bx, by, bw, bh
 
+    def _auth_btn_screen_rect(self):
+        # Between the Controls badge and the remapping pill; width matches the
+        # wider "Show Auth" label in renderer._draw_title.
+        sw, sh = self._da.get_width(), self._da.get_height()
+        hx = (sw - HUD_W) / 2
+        hy = (sh - HUD_H) / 2
+        bw, bh = 48, 20
+        osd_bx   = hx + HUD_W - 28 - 16 - bw
+        remap_bx = osd_bx - 8 - bw
+        aw = 66
+        return remap_bx - 8 - aw, hy + (_TITLE_H - bh) / 2, aw, bh
+
     def _close_btn_screen_rect(self):
         sw, sh = self._da.get_width(), self._da.get_height()
         hx = (sw - HUD_W) / 2
@@ -113,6 +125,7 @@ class Win(Gtk.ApplicationWindow):
         bx, by, bw, bh = self._badge_screen_rect()
         mx, my, mw, mh = self._osd_btn_screen_rect()
         rx, ry, rw, rh = self._remap_btn_screen_rect()
+        ax, ay, aw, ah = self._auth_btn_screen_rect()
         cx, cy, cw, ch = self._close_btn_screen_rect()
         if bx <= x <= bx + bw and by <= y <= by + bh:
             paused = self._state.get("context", {}).get("paused", False)
@@ -127,6 +140,9 @@ class Win(Gtk.ApplicationWindow):
             self.get_application().toggle_remapping()
         elif mx <= x <= mx + mw and my <= y <= my + mh:
             self.get_application().toggle_osd()
+        elif (self.get_application()._auth_available
+              and ax <= x <= ax + aw and ay <= y <= ay + ah):
+            self.get_application().show_auth()
         elif cx <= x <= cx + cw and cy <= y <= cy + ch:
             self.get_application().hide_hud()
         # else: dead zone — ignore
@@ -212,7 +228,8 @@ class Win(Gtk.ApplicationWindow):
         draw_hud(cr, self._front, self._back, self._state,
                  hover_t=self._pause_anim.value,
                  osd_enabled=app._osd_enabled,
-                 remapping_enabled=app._remapping_enabled)
+                 remapping_enabled=app._remapping_enabled,
+                 auth_available=app._auth_available)
         cr.restore()
 
         # Toast origin: bottom edge of the HUD panel, shifted up by 40 px.

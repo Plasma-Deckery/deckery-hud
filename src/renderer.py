@@ -16,7 +16,8 @@ from center_strip import draw_center_strip
 from trackpads import draw_trackpads
 
 
-def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False, remapping_enabled=True):
+def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False,
+             remapping_enabled=True, auth_available=False):
     # Drop shadow — multi-pass approximation of Gaussian blur
     _shadow_steps = 12
     for i in range(_shadow_steps, 0, -1):
@@ -41,7 +42,8 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False, rem
     draw_callouts(cr, state)
 
 
-def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=True):
+def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=True,
+                auth_available=False):
     ctx    = state.get("context") or {}
     stack  = ctx.get("config_stack") or ["—"]
     paused = ctx.get("paused", False)
@@ -111,6 +113,20 @@ def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=Tru
         cr.set_source_rgba(*rmp_label)
         cr.arc(rmp_dot_x, rmp_dot_y, dot_r, 0, math.tau)
         cr.fill()
+
+    # Auth button — left of the remapping pill, i.e. between the Controls badge
+    # and "On". Only there when deckery-auth is actually installed; it is an
+    # action, not a toggle, so it carries a centred label and no state dot.
+    if auth_available:
+        _AUTH_W, _AUTH_H = 66, 20
+        _AUTH_X = _RMP_X - 8 - _AUTH_W
+        _AUTH_Y = (_TITLE_H - _AUTH_H) / 2
+        _rrect(cr, _AUTH_X, _AUTH_Y, _AUTH_W, _AUTH_H, 4)
+        cr.set_source_rgba(1, 1, 1, 0.08)
+        cr.fill()
+        cr.set_source_rgba(1, 1, 1, 0.35)
+        _txt(cr, _AUTH_X + _AUTH_W / 2, _TITLE_H / 2, "Show Auth", 8,
+             ha="center", va="mid")
 
     # OSD toggle button — left of close button
     # Gap to close circle left edge (HUD_W-28) matches close circle's right margin (8px)
