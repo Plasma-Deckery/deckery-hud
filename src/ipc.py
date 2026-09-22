@@ -109,6 +109,28 @@ def mark_demo_session() -> None:
         pass
 
 
+def start_pin_change() -> None:
+    """Change the PIN: the old one authenticates, then a new one is set twice.
+
+    `deckery-pin-set` is root-only — SET_PIN is refused for any other uid — so
+    sudo is not a workaround here, it IS the old-PIN check. Afterwards the tool
+    drives the daemon's set-PIN mode and the overlay asks for the new one.
+    Nothing new is needed on the daemon for this; the whole flow already exists.
+
+    No demo marker, deliberately: this one really does want the real PIN.
+    """
+    try:
+        subprocess.Popen(
+            ["sudo", "deckery-pin-set"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        pass
+
+
 def start_auth_session() -> None:
     """Bring up the real PIN overlay by asking for a harmless privilege.
 

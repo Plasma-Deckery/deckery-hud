@@ -128,6 +128,17 @@ def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=Tru
         _txt(cr, _AUTH_X + _AUTH_W / 2, _TITLE_H / 2, "Show Auth", 8,
              ha="center", va="mid")
 
+        # Change the PIN — left of Show Auth. Same shape, but this one is not a
+        # demonstration: the old PIN really is checked and a new one is set.
+        _CHG_W = 76
+        _CHG_X = _AUTH_X - 8 - _CHG_W
+        _rrect(cr, _CHG_X, _AUTH_Y, _CHG_W, _AUTH_H, 4)
+        cr.set_source_rgba(1, 1, 1, 0.08)
+        cr.fill()
+        cr.set_source_rgba(1, 1, 1, 0.35)
+        _txt(cr, _CHG_X + _CHG_W / 2, _TITLE_H / 2, "Change Auth", 8,
+             ha="center", va="mid")
+
     # OSD toggle button — left of close button
     # Gap to close circle left edge (HUD_W-28) matches close circle's right margin (8px)
     if osd_enabled:

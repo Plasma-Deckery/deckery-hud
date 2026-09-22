@@ -14,7 +14,7 @@ from gi.repository import Gtk, Gio, GLib
 
 from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_off,
                  load_state, _STATE, auth_daemon_present, start_auth_session,
-                 mark_demo_session)
+                 mark_demo_session, start_pin_change)
 from win import Win
 from osd_win import OsdWin
 
@@ -157,6 +157,15 @@ class App(Gtk.Application):
 
     def _start_auth_once(self):
         start_auth_session()
+        return False   # one shot
+
+    def change_auth(self):
+        """Close the HUD, then start the PIN change (old PIN, then new twice)."""
+        self.hide_hud()
+        GLib.timeout_add(150, self._start_pin_change_once)
+
+    def _start_pin_change_once(self):
+        start_pin_change()
         return False   # one shot
 
     def toggle_hud(self):

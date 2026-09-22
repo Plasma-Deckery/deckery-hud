@@ -115,6 +115,12 @@ class Win(Gtk.ApplicationWindow):
         aw = 66
         return remap_bx - 8 - aw, hy + (_TITLE_H - bh) / 2, aw, bh
 
+    def _change_btn_screen_rect(self):
+        # Left of the Show Auth pill; width matches renderer._draw_title.
+        ax, ay, aw, ah = self._auth_btn_screen_rect()
+        cw = 76
+        return ax - 8 - cw, ay, cw, ah
+
     def _close_btn_screen_rect(self):
         sw, sh = self._da.get_width(), self._da.get_height()
         hx = (sw - HUD_W) / 2
@@ -126,6 +132,7 @@ class Win(Gtk.ApplicationWindow):
         mx, my, mw, mh = self._osd_btn_screen_rect()
         rx, ry, rw, rh = self._remap_btn_screen_rect()
         ax, ay, aw, ah = self._auth_btn_screen_rect()
+        gx, gy, gw, gh = self._change_btn_screen_rect()
         cx, cy, cw, ch = self._close_btn_screen_rect()
         if bx <= x <= bx + bw and by <= y <= by + bh:
             paused = self._state.get("context", {}).get("paused", False)
@@ -143,6 +150,9 @@ class Win(Gtk.ApplicationWindow):
         elif (self.get_application()._auth_available
               and ax <= x <= ax + aw and ay <= y <= ay + ah):
             self.get_application().show_auth()
+        elif (self.get_application()._auth_available
+              and gx <= x <= gx + gw and gy <= y <= gy + gh):
+            self.get_application().change_auth()
         elif cx <= x <= cx + cw and cy <= y <= cy + ch:
             self.get_application().hide_hud()
         # else: dead zone — ignore
