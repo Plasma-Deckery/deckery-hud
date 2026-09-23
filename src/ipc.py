@@ -17,28 +17,17 @@ import time
 # This works for both dev checkouts (src/ subdirectory) and RPM installs
 # (/usr/lib/deckery-hud/src/ subdirectory) — the structure is identical.
 _DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# makima writes its state into $XDG_RUNTIME_DIR — a per-user tmpfs, mode 0700,
-# the same directory the control socket below lives in, and for the same
-# reason: /tmp is mode 1777, so anything able to create the path first decides
-# what this overlay draws.
+# makima writes its state into $XDG_RUNTIME_DIR (= /run/user/<uid>) — a
+# per-user tmpfs, mode 0700, the same directory the control socket below lives
+# in, and for the same reason: /tmp is mode 1777, so anything able to create
+# the path first decides what this overlay draws.
 #
-# The /tmp fallback is for a makima from before that move, and is one-sided on
-# purpose: the legacy path wins only when there is a file there and none in the
-# runtime directory. The HUD can start before makima has written anything, and
-# defaulting to /tmp then would leave it watching a path nothing will write to.
-_RUNTIME_STATE = os.path.join(
+# No /tmp fallback, deliberately. It would downgrade to the squattable path in
+# exactly the situation where something is already unusual, and it is the same
+# derivation makima itself makes, so the two cannot disagree.
+_STATE = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}",
     "makima-state.json")
-_LEGACY_STATE = "/tmp/makima-state.json"
-
-def _state_path() -> str:
-    if os.path.exists(_RUNTIME_STATE):
-        return _RUNTIME_STATE
-    if os.path.exists(_LEGACY_STATE):
-        return _LEGACY_STATE
-    return _RUNTIME_STATE
-
-_STATE = _state_path()
 
 _FRONT_SVG = os.path.join(_DIR, "assets", "steamdeckFront.svg")
 _BACK_SVG  = os.path.join(_DIR, "assets", "steamdeckBack.svg")
@@ -83,12 +72,23 @@ def makima_analog_off() -> None:
 # ── State loading ─────────────────────────────────────────────────────────────
 
 def load_state() -> dict:
+    """makima's current state, or a state that says it could not be read.
+
+    The `unreadable` marker is the point. Without it a missing or unparsable
+    file was indistinguishable from a controller with nothing bound: the
+    overlay drew its full chrome with every button blank and no way to say
+    why. Now the renderer has something to show instead of a working-looking
+    HUD that happens to be empty.
+    """
     try:
         with open(_STATE) as f:
-            return json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
     except Exception:
         pass
-    return {"context": {"config_stack": ["—"]}, "bindings": {}, "modifier_active": {}}
+    return {"unreadable": _STATE,
+            "context": {"config_stack": ["—"]}, "bindings": {}, "modifier_active": {}}
 
 
 # ── deckery-auth ──────────────────────────────────────────────────────────────
