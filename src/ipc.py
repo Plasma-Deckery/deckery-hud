@@ -7,8 +7,8 @@ relocatable and no personal paths are hardcoded.
 
 import json
 import os
-import os
 import socket
+import shutil
 import subprocess
 import time
 
@@ -17,7 +17,28 @@ import time
 # This works for both dev checkouts (src/ subdirectory) and RPM installs
 # (/usr/lib/deckery-hud/src/ subdirectory) — the structure is identical.
 _DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_STATE = "/tmp/makima-state.json"
+# makima writes its state into $XDG_RUNTIME_DIR — a per-user tmpfs, mode 0700,
+# the same directory the control socket below lives in, and for the same
+# reason: /tmp is mode 1777, so anything able to create the path first decides
+# what this overlay draws.
+#
+# The /tmp fallback is for a makima from before that move, and is one-sided on
+# purpose: the legacy path wins only when there is a file there and none in the
+# runtime directory. The HUD can start before makima has written anything, and
+# defaulting to /tmp then would leave it watching a path nothing will write to.
+_RUNTIME_STATE = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}",
+    "makima-state.json")
+_LEGACY_STATE = "/tmp/makima-state.json"
+
+def _state_path() -> str:
+    if os.path.exists(_RUNTIME_STATE):
+        return _RUNTIME_STATE
+    if os.path.exists(_LEGACY_STATE):
+        return _LEGACY_STATE
+    return _RUNTIME_STATE
+
+_STATE = _state_path()
 
 _FRONT_SVG = os.path.join(_DIR, "assets", "steamdeckFront.svg")
 _BACK_SVG  = os.path.join(_DIR, "assets", "steamdeckBack.svg")
@@ -117,11 +138,16 @@ def start_pin_change() -> None:
     drives the daemon's set-PIN mode and the overlay asks for the new one.
     Nothing new is needed on the daemon for this; the whole flow already exists.
 
+    `-k` is what keeps that true. sudo remembers a successful authentication
+    for minutes, so after using Show Auth the change would have gone through
+    with no question asked — the old-PIN check silently skipped, which is the
+    one thing this flow exists for.
+
     No demo marker, deliberately: this one really does want the real PIN.
     """
     try:
         subprocess.Popen(
-            ["sudo", "deckery-pin-set"],
+            _on_host(["sudo", "-k", "deckery-pin-set"]),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -129,6 +155,19 @@ def start_pin_change() -> None:
         )
     except OSError:
         pass
+
+
+def _on_host(argv: list) -> list:
+    """Wrap a command so it runs on the host rather than in this container.
+
+    The HUD lives in the `deckery` distrobox, and sudo in there is passwordless
+    and authenticates against the *container's* PAM. `sudo true` therefore
+    succeeded instantly and silently, and no overlay ever appeared — the click
+    looked completely dead. Only on the host does sudo reach pam_deckery.
+    """
+    if os.path.exists("/run/.containerenv") and shutil.which("distrobox-host-exec"):
+        return ["distrobox-host-exec"] + argv
+    return argv
 
 
 def start_auth_session() -> None:
@@ -141,12 +180,16 @@ def start_auth_session() -> None:
     something to an attacker. Going through sudo means there is nothing to fake:
     this IS the genuine prompt, and `true` grants nothing once it succeeds.
 
+    `-k` because sudo caches a successful authentication for minutes: without
+    it, clicking this shortly after any other sudo would succeed instantly and
+    show nothing at all. The whole point is to see the prompt.
+
     Detached into its own session so it outlives the HUD and needs no terminal
     (pam_deckery talks to the daemon, not to a tty).
     """
     try:
         subprocess.Popen(
-            ["sudo", "true"],
+            _on_host(["sudo", "-k", "true"]),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
