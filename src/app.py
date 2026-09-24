@@ -81,7 +81,10 @@ class App(Gtk.Application):
         self._osd_win.present()
 
         # Shared FileMonitor — dispatches state to both windows
-        _tmp = Gio.File.new_for_path("/tmp")
+        # The directory comes from _STATE rather than being named here: makima
+        # writes into $XDG_RUNTIME_DIR, and a second hardcoded "/tmp" would
+        # have left this watching a directory nothing writes to.
+        _tmp = Gio.File.new_for_path(os.path.dirname(_STATE))
         self._monitor = _tmp.monitor_directory(Gio.FileMonitorFlags.NONE, None)
         self._monitor.connect("changed", self._on_file_changed)
 
