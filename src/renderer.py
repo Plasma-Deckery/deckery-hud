@@ -33,6 +33,13 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False, rem
     _rrect(cr, 0, 0, HUD_W, HUD_H, 18)
     cr.fill()
 
+    # Nothing to draw a button map from. Saying so beats drawing the whole
+    # chrome with every key blank, which is what an empty state looks like and
+    # reads as a broken overlay rather than as a missing daemon.
+    if state.get("unreadable"):
+        _draw_unreadable(cr, state["unreadable"])
+        return
+
     _draw_title(cr, state, hover_t, osd_enabled, remapping_enabled)
     _draw_breadcrumbs(cr, state)
     _draw_svgs(cr, front_svg, back_svg)
@@ -40,6 +47,18 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False, rem
     draw_center_strip(cr, state)
     draw_callouts(cr, state)
 
+
+
+def _draw_unreadable(cr, path):
+    """One line, centred, when makima's state file cannot be read."""
+    cr.set_source_rgba(0.93, 0.93, 0.96, 0.92)
+    _txt(cr, HUD_W / 2, HUD_H / 2 - 16, "No state from makima",
+         size=15, bold=True, ha="center", va="center")
+    cr.set_source_rgba(0.93, 0.93, 0.96, 0.55)
+    _txt(cr, HUD_W / 2, HUD_H / 2 + 10, f"Cannot read {path}",
+         size=11, ha="center", va="center")
+    _txt(cr, HUD_W / 2, HUD_H / 2 + 30, "Is makima.service running?",
+         size=11, ha="center", va="center")
 
 def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=True):
     ctx    = state.get("context") or {}
