@@ -1,5 +1,5 @@
 Name:           deckery-hud
-Version:        0.4.1
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Steam Deck button-layout HUD overlay for KDE Plasma desktop
 
@@ -80,6 +80,9 @@ install -Dm644 packaging/deckery-hud.service \
 %{_userunitdir}/deckery-hud.service
 
 %changelog
+* Sun Nov 08 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.5.0-1
+- Version aligned with makima-deckery and deckery 0.5.0; no functional changes
+
 * Sun Sep 27 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.4.1-1
 - A command binding that failed is drawn as a failure, not as a key tap
 - Says so on screen when there is no state file to read instead of looking broken
