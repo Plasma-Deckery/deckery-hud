@@ -14,7 +14,7 @@ from gi.repository import Gtk, Gio, GLib
 
 from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_off,
                  load_state, _STATE, auth_daemon_present, start_auth_session,
-                 mark_demo_session, start_pin_change)
+                 start_pin_change)
 from win import Win
 from osd_win import OsdWin
 
@@ -134,13 +134,16 @@ class App(Gtk.Application):
         makima_pause()
         makima_analog_on()
         self._win.on_state(self._state)
-        self._win.present()
+        self._win.set_open(True)
 
     def hide_hud(self):
         if self._win is None:
             return
-        self._win.set_visible(False)
-        makima_analog_off()
+        # Analog export off only once the window is actually gone: switching
+        # it off at the start of the close animation made makima drop the
+        # trackpad data mid-slide, which changed the pad legend and forced a
+        # full re-render of both sides right in the middle of the animation.
+        self._win.set_open(False, on_closed=makima_analog_off)
         if self._remapping_enabled:
             makima_resume()
         if self._osd_enabled and self._remapping_enabled:
@@ -153,8 +156,6 @@ class App(Gtk.Application):
         surface that covers everything, and starting it while the HUD is still
         on its way out leaves the two fighting over the screen.
         """
-        # Marker first, then the session — the overlay reads it at SESSION_START.
-        mark_demo_session()
         self.hide_hud()
         GLib.timeout_add(150, self._start_auth_once)
 

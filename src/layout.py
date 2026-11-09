@@ -35,6 +35,32 @@ _PAUSE_H = 22
 _PAUSE_X = (HUD_W - _PAUSE_W) / 2
 _PAUSE_Y = (_TITLE_H - _PAUSE_H) / 2
 
+# Auth buttons in the title bar (HUD-local coordinates).
+#
+# Centred in the gap between the Controls badge and the right-hand pill
+# cluster, so they read as their own pair rather than as two more toggles
+# tacked onto On/OSD.
+#
+# Defined here, not in the renderer, because three places have to agree on
+# them: what is drawn, what the click handler hit-tests, and — the one that
+# actually decides whether a click arrives at all — the Wayland input region.
+# Having them computed separately is how the first version ended up looking
+# right and being dead.
+_AUTH_W   = 76
+_AUTH_H   = 20
+_AUTH_GAP = 8
+_AUTH_Y   = (_TITLE_H - _AUTH_H) / 2
+
+_OSD_BTN_W = 48
+_OSD_BTN_X = HUD_W - 28 - 16 - _OSD_BTN_W
+_RMP_BTN_X = _OSD_BTN_X - 8 - _OSD_BTN_W
+
+_AUTH_PAIR_W = 2 * _AUTH_W + _AUTH_GAP
+_AUTH_GAP_L  = _PAUSE_X + _PAUSE_W        # right edge of the Controls badge
+_AUTH_GAP_R  = _RMP_BTN_X                 # left edge of the On pill
+_SHOW_X = _AUTH_GAP_L + (_AUTH_GAP_R - _AUTH_GAP_L - _AUTH_PAIR_W) / 2
+_CHG_X  = _SHOW_X + _AUTH_W + _AUTH_GAP
+
 # Callout anchor X: where the horizontal run terminates on each side
 _AX_L = _FX - 30
 _AX_R = _FX + _FDW + 30

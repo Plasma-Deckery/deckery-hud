@@ -4,12 +4,13 @@
 
 Runs inside a [distrobox](https://github.com/containers/distrobox) container (`deckery`) because `gtk4-layer-shell` is not available as a GObject Typelib on the Bazzite host.
 
-Required inside the container (declared in `distrobox.ini`):
+Required inside the container (installed by `install.sh`):
 - Python 3
 - `gtk4-layer-shell` (shared library + GObject Typelib)
 - `python-gobject` (GTK4 bindings)
 - `librsvg` (SVG rendering)
 - `pango` / `pangocairo` (text layout)
+- `python-numpy` (split layout's backdrop field, `src/metaball.py`)
 
 ## File watch
 

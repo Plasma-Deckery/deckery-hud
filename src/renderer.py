@@ -9,15 +9,17 @@ from gi.repository import Rsvg
 import math
 
 from layout import (HUD_W, HUD_H, _TITLE_H, _PAD, _FX, _FY, _FDW, _SVG_H, _BX, _BY, _BDW,
+                    _AUTH_W, _AUTH_H, _AUTH_Y, _SHOW_X, _CHG_X,
                     _PAUSE_W, _PAUSE_H, _PAUSE_X, _PAUSE_Y)
-from helpers import _rrect, _txt, _pill_row, C_MOD, C_LAYER
+from helpers import _rrect, _txt, _txt_size, _pill_row, C_MOD, C_LAYER
 from callouts import draw_callouts, _btn_short
 from center_strip import draw_center_strip
 from trackpads import draw_trackpads
 
 
 def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False,
-             remapping_enabled=True, auth_available=False):
+             remapping_enabled=True, auth_available=False,
+             show_t=0.0, change_t=0.0):
     # Drop shadow — multi-pass approximation of Gaussian blur
     _shadow_steps = 12
     for i in range(_shadow_steps, 0, -1):
@@ -41,7 +43,8 @@ def draw_hud(cr, front_svg, back_svg, state, hover_t=0.0, osd_enabled=False,
         _draw_unreadable(cr, state["unreadable"])
         return
 
-    _draw_title(cr, state, hover_t, osd_enabled, remapping_enabled)
+    _draw_title(cr, state, hover_t, osd_enabled, remapping_enabled, auth_available,
+                show_t, change_t)
     _draw_breadcrumbs(cr, state)
     _draw_svgs(cr, front_svg, back_svg)
     draw_trackpads(cr, state)
@@ -62,7 +65,7 @@ def _draw_unreadable(cr, path):
          size=11, ha="center", va="center")
 
 def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=True,
-                auth_available=False):
+                auth_available=False, show_t=0.0, change_t=0.0):
     ctx    = state.get("context") or {}
     stack  = ctx.get("config_stack") or ["—"]
     paused = ctx.get("paused", False)
@@ -133,30 +136,48 @@ def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=Tru
         cr.arc(rmp_dot_x, rmp_dot_y, dot_r, 0, math.tau)
         cr.fill()
 
-    # Auth button — left of the remapping pill, i.e. between the Controls badge
-    # and "On". Only there when deckery-auth is actually installed; it is an
-    # action, not a toggle, so it carries a centred label and no state dot.
+    # Auth pair — centred between the Controls badge and the On pill. Geometry
+    # lives in layout so drawing, hit test and Wayland input region agree.
+    #
+    # Coloured and hover-animated with the same curve as the Controls badge
+    # (bg 0.05→0.22, label 0.60→0.95). Flat grey read as "disabled", which is
+    # exactly wrong for the one button that changes a credential.
     if auth_available:
-        _AUTH_W, _AUTH_H = 66, 20
-        _AUTH_X = _RMP_X - 8 - _AUTH_W
-        _AUTH_Y = (_TITLE_H - _AUTH_H) / 2
-        _rrect(cr, _AUTH_X, _AUTH_Y, _AUTH_W, _AUTH_H, 4)
-        cr.set_source_rgba(1, 1, 1, 0.08)
-        cr.fill()
-        cr.set_source_rgba(1, 1, 1, 0.35)
-        _txt(cr, _AUTH_X + _AUTH_W / 2, _TITLE_H / 2, "Show Auth", 8,
-             ha="center", va="mid")
+        def _lock(x, cy, h, r, g, b, a):
+            # Drawn, not typed: the HUD font carries no padlock glyph, and a
+            # missing glyph shows as a blank box.
+            bw, bh = h * 0.78, h * 0.55
+            bx, by = x, cy - bh / 2 + h * 0.16
+            cr.set_source_rgba(r, g, b, a)
+            _rrect(cr, bx, by, bw, bh, 1.5)
+            cr.fill()
+            cr.set_line_width(max(1.0, h * 0.13))
+            cr.new_sub_path()
+            cr.arc(bx + bw / 2, by, bw * 0.32, math.pi, 0)
+            cr.stroke()
 
-        # Change the PIN — left of Show Auth. Same shape, but this one is not a
-        # demonstration: the old PIN really is checked and a new one is set.
-        _CHG_W = 76
-        _CHG_X = _AUTH_X - 8 - _CHG_W
-        _rrect(cr, _CHG_X, _AUTH_Y, _CHG_W, _AUTH_H, 4)
-        cr.set_source_rgba(1, 1, 1, 0.08)
-        cr.fill()
-        cr.set_source_rgba(1, 1, 1, 0.35)
-        _txt(cr, _CHG_X + _CHG_W / 2, _TITLE_H / 2, "Change Auth", 8,
-             ha="center", va="mid")
+        def _auth_pill(x, label, rgb, t, lock=False):
+            r, g, b = rgb
+            bg_a, txt_a = 0.05 + 0.17 * t, 0.60 + 0.35 * t
+            _rrect(cr, x, _AUTH_Y, _AUTH_W, _AUTH_H, 4)
+            cr.set_source_rgba(r, g, b, bg_a)
+            cr.fill()
+            # Icon and label are centred as one group, so the label stays
+            # optically centred whether or not there is an icon.
+            tw, _th = _txt_size(cr, label, 8)
+            ih      = _AUTH_H * 0.46
+            icon_w  = ih * 0.78 + 4 if lock else 0
+            start   = x + (_AUTH_W - (icon_w + tw)) / 2
+            if lock:
+                _lock(start, _TITLE_H / 2, ih, r, g, b, txt_a)
+            cr.set_source_rgba(r, g, b, txt_a)
+            _txt(cr, start + icon_w, _TITLE_H / 2, label, 8, ha="left", va="mid")
+
+        # Both blue — a saturated azure rather than the lavender this started
+        # as. The padlock, not the colour, is what marks the consequential one.
+        _AUTH_BLUE = (0.35, 0.65, 1.0)
+        _auth_pill(_SHOW_X, "Show Auth",  _AUTH_BLUE, show_t)
+        _auth_pill(_CHG_X,  "Change PIN", _AUTH_BLUE, change_t, lock=True)
 
     # OSD toggle button — left of close button
     # Gap to close circle left edge (HUD_W-28) matches close circle's right margin (8px)

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from layout import _FX, _FY, _FS, _BX, _BY, _BS, _AX_L, _AX_R
 from helpers import _K, _fmt, _txt, _txt_size, C_MOD, C_LAYER, C_GAME
+from viewmodel import classify_all, pad_legend_vm
 
 
 @dataclass
@@ -32,10 +33,8 @@ class _Callout:
     is_avail_app_mod: bool = False
     is_hint: bool = False
     is_avail_virt_mod: bool = False
-
-# Gaming Mode trigger is always BTN_BASE (QAM / three-dot button) — hardcoded,
-# not matched against gaming_mode_trigger.key, per explicit product decision.
-_GAMING_MODE_BTN = "BTN_BASE"
+    show_name: bool = True
+    grow_on_active: bool = True
 
 # ── Display option ────────────────────────────────────────────────────────────
 # True  → show all buttons, unbound = dimmed with "—"
@@ -109,55 +108,17 @@ def _fmt_combo_key(combo_key):
 # ── Rendering ─────────────────────────────────────────────────────────────────
 
 def draw_callouts(cr, state):
-    ctx          = state.get("context") or {}
-    held_mods    = ctx.get("held_modifiers", [])
-    mod_active   = state.get("modifier_active") or {}
-    active_btns  = set(ctx.get("active_buttons", []))
-    config_stack = ctx.get("config_stack") or [""]
-    base_layer   = config_stack[0]
-    active_mods  = set(held_mods)
-    avail_mods_raw = ctx.get("available_modifiers") or {}
-    avail_mods     = set(avail_mods_raw)
-    avail_app_mods = {k for k, v in avail_mods_raw.items() if v.get("has_app_combos")}
-    # virtual: the button unlocks hints (labels only), not real bindings.
-    avail_virt_mods = {k for k, v in avail_mods_raw.items() if v.get("virtual")}
-
-    # Gaming Mode trigger sub-label — always attached to BTN_BASE (see
-    # _GAMING_MODE_BTN), only when the trigger isn't disabled in config.
-    gm_trigger   = state.get("gaming_mode_trigger")
-    gm_sub_label = f"(dbl-click) {gm_trigger['label']}" if gm_trigger else None
-
-    # bindings is always the display base — modifier_active overlays on top.
-    # We never fully switch views; instead each button is classified into one
-    # of three tiers:
-    #   is_combo      → button overridden by an active modifier combo   (amber)
-    #   layer_override → binding comes from a non-base config layer      (blue)
-    #   regular        → normal base binding                             (white)
-    all_bindings = state.get("bindings") or {}
+    # "What to show" per button is resolved once, the same way for every
+    # renderer (viewmodel.classify_all) — this function only adds geometry.
+    vms = classify_all(state, _BTNS.keys())
 
     lf, lb = [], []   # left-front, left-back
     rf, rb = [], []   # right-front, right-back
 
     for btn_key, (sx, sy, side, name, view) in _BTNS.items():
-        combo_b  = mod_active.get(btn_key)   # set only when modifier held + combo exists
-        base_b   = all_bindings.get(btn_key) # regular binding (if any)
+        vm = vms[btn_key]
 
-        is_combo  = combo_b is not None
-        b         = combo_b if is_combo else base_b
-        has_action = bool(b and (b.get("action") or b.get("label")))
-        is_active  = btn_key in active_btns
-        is_mod      = btn_key in active_mods
-        is_avail_mod      = btn_key in avail_mods      and not is_mod
-        is_avail_app_mod  = btn_key in avail_app_mods  and not is_mod
-        is_avail_virt_mod = btn_key in avail_virt_mods and not is_mod
-        # Only combo hints need this: they arrive through modifier_active and
-        # would otherwise inherit the amber "a binding fires here" colour.
-        # Deliberately not read from base_b — a modifier-less hint can sit on a
-        # button that is itself a modifier, and stripping that button's amber
-        # while it is held would hide a real signal.
-        is_hint = is_combo and b.get("kind") == "hint"
-
-        if not has_action and not _SHOW_ALL and not is_active:
+        if not vm.bound and not _SHOW_ALL and not vm.is_active:
             continue
 
         if view == "front":
@@ -169,28 +130,13 @@ def draw_callouts(cr, state):
             sc_y      = _BY + sy * _BS
             sort_sc_y = _BY + _SORT_Y.get(btn_key, sy) * _BS
 
-        if has_action:
-            # layer_override: binding (base OR combo) comes from a non-base config
-            # (e.g. Firefox, Konsole). modifier_active entries carry "origin" just
-            # like base bindings, so this applies uniformly — a combo that's also
-            # app-specific must be flagged too, or the app-specific signal is lost
-            # for every combo (issue #1).
-            layer_override = b.get("origin", base_layer) != base_layer
-            action = b.get("label") or _fmt(b["action"])
-        else:
-            layer_override = False
-            action = "—"
-
-        sub_label  = gm_sub_label if btn_key == _GAMING_MODE_BTN else None
-        sub_active = is_active    if btn_key == _GAMING_MODE_BTN else False
-
         entry = _Callout(
-            sort_y=sort_sc_y, dot_x=sc_x, dot_y=sc_y, name=name, action=action,
-            layer_override=layer_override, bound=has_action, active=is_active,
-            active_mod=is_mod, is_combo=is_combo, is_avail_mod=is_avail_mod,
-            sub_label=sub_label, sub_active=sub_active,
-            is_avail_app_mod=is_avail_app_mod,
-            is_hint=is_hint, is_avail_virt_mod=is_avail_virt_mod,
+            sort_y=sort_sc_y, dot_x=sc_x, dot_y=sc_y, name=name, action=vm.action,
+            layer_override=vm.layer_override, bound=vm.bound, active=vm.is_active,
+            active_mod=vm.active_mod, is_combo=vm.is_combo, is_avail_mod=vm.is_avail_mod,
+            sub_label=vm.sub_label, sub_active=vm.sub_active,
+            is_avail_app_mod=vm.is_avail_app_mod,
+            is_hint=vm.is_hint, is_avail_virt_mod=vm.is_avail_virt_mod,
         )
 
         if side == "left":
@@ -202,26 +148,16 @@ def draw_callouts(cr, state):
         group.sort(key=lambda e: (e.sort_y, e.dot_x, e.dot_y))
 
     # ── Trackpad mode entries — appended AFTER sort so they don't skew centering ─
-    pads    = state.get("trackpads") or {}
-    lpad    = pads.get("left")  or {}
-    rpad    = pads.get("right") or {}
-    gesture = (pads.get("gesture") or {}).get("touching", False)
-    lpad_mode  = (lpad.get("mode") or "—").replace("-", " ").title()
-    rpad_mode  = (rpad.get("mode") or "—").replace("-", " ").title()
-    lpad_touch = lpad.get("touching", False)
-    rpad_touch = rpad.get("touching", False)
-    # gesture → amber (active_mod=True) for both; individual touch → white (active=True)
-    lpad_active = lpad_touch or gesture
-    rpad_active = rpad_touch or gesture
+    pv = pad_legend_vm(state)
     _lpad_dot = (_FX + (98.86  + 107.5 / 2) * _FS, _FY + (149.31 + 107.6) * _FS)
     _rpad_dot = (_FX + (818.07 + 107.5 / 2) * _FS, _FY + (149.31 + 107.6) * _FS)
     _ROW = 22
     # active_mod=gesture → amber legend; active → white legend; no dot, the pad
     # is not a point on the shell.
-    lf.append(_Callout((lf[-1].sort_y if lf else _FY) + _ROW, *_lpad_dot, "LPad", lpad_mode,
-                       bound=True, active=lpad_active, active_mod=gesture, show_dot=False))
-    rf.append(_Callout((rf[-1].sort_y if rf else _FY) + _ROW, *_rpad_dot, "RPad", rpad_mode,
-                       bound=True, active=rpad_active, active_mod=gesture, show_dot=False))
+    lf.append(_Callout((lf[-1].sort_y if lf else _FY) + _ROW, *_lpad_dot, "LPad", pv.lpad_label,
+                       bound=True, active=pv.lpad_active, active_mod=pv.gesture, show_dot=False))
+    rf.append(_Callout((rf[-1].sort_y if rf else _FY) + _ROW, *_rpad_dot, "RPad", pv.rpad_label,
+                       bound=True, active=pv.rpad_active, active_mod=pv.gesture, show_dot=False))
 
     _callouts(cr, lf, "left",  _AX_L)
     _callouts(cr, lb, "left",  _AX_L)
@@ -229,12 +165,32 @@ def draw_callouts(cr, state):
     _callouts(cr, rb, "right", _AX_R)
 
 
-def _callouts(cr, entries, side, ax):
+def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0, anchor_row=None):
+    """straight=True skips the usual auto-stacked vertical centering and
+    routes each entry's row at its own dot's y instead — the dot→text line
+    degenerates to one straight horizontal segment (no diagonal-then-elbow)
+    since the line's own midpoint bend sits at the same y as both ends.
+    Only meant for small, already well-separated entry groups (e.g. a
+    cluster's own paddle pair) — it does no collision spacing at all.
+
+    y_nudge: shifts the whole auto-centred block up (negative) or down
+    (positive) by a flat px amount, on top of the entries' own dot-span
+    centring — e.g. "centred, but a little above middle" instead of exactly
+    centred on the entries' own min/max y. No effect under straight=True
+    (there's no shared centred block to shift — each row already sits at
+    its own dot).
+
+    anchor_row: compute the block's vertical anchor (where row 0 lands) as
+    if `row` were this value instead, while still spacing the actual rows
+    by `row` itself. Lets a later `row` change compress/expand the gaps
+    between rows without moving the top row's own position — pass the
+    *previous* row value here when tightening row spacing after the fact,
+    so only the entries below the first one shift."""
     if not entries:
         return
 
-    ROW       = 22
-    SUB_EXTRA = 22   # extra row height reserved for an entry's sub_label line
+    ROW       = row
+    SUB_EXTRA = row   # extra row height reserved for an entry's sub_label line
     DOT = 3
 
     # Row heights vary: an entry with a sub_label (Gaming Mode's second line
@@ -250,7 +206,12 @@ def _callouts(cr, entries, side, ax):
 
     ys  = [e.sort_y for e in entries]
     mid = (ys[0] + ys[-1]) / 2
-    t0  = mid - total / 2
+    if anchor_row is not None:
+        anchor_heights = [anchor_row + (anchor_row if e.sub_label else 0) for e in entries]
+        anchor_total = sum(anchor_heights)
+        t0 = mid - anchor_total / 2 + y_nudge
+    else:
+        t0 = mid - total / 2 + y_nudge
 
     for i, e in enumerate(entries):
         bx, by, name, action = e.dot_x, e.dot_y, e.name, e.action
@@ -259,7 +220,7 @@ def _callouts(cr, entries, side, ax):
         is_avail_mod, is_avail_app_mod = e.is_avail_mod, e.is_avail_app_mod
         is_avail_virt_mod = e.is_avail_virt_mod
         show_dot, sub_label, sub_active = e.show_dot, e.sub_label, e.sub_active
-        ly = t0 + offsets[i] + ROW / 2
+        ly = by if straight else t0 + offsets[i] + ROW / 2
 
         # ── Derive rendering state once ───────────────────────────────────────
         # Priority: modifier-held/combo > layer-override > active > bound > unbound.
@@ -313,6 +274,12 @@ def _callouts(cr, entries, side, ax):
             line_col = (1.0, 1.0, 1.0, 0.15)
             text_col = (0.55, 0.55, 0.55, 0.4)
 
+        if not e.grow_on_active:
+            # ABXY's own dot (on their circle's left edge) — on request, it
+            # shouldn't grow on press the way every other dot here does; the
+            # button's own fill wash + letter already carry that signal.
+            dot_r = DOT
+
         # ── Dot ──────────────────────────────────────────────────────────────
         if show_dot:
             cr.set_source_rgba(*dot_col)
@@ -330,28 +297,38 @@ def _callouts(cr, entries, side, ax):
 
         # ── Label ─────────────────────────────────────────────────────────────
         cr.set_source_rgba(*text_col)
-        label = f"{name}: {action}"
-        if side == "left":
-            _txt(cr, ax - 6, ly, label, 10, ha="right", va="mid")
-        else:
-            _txt(cr, ax + 6, ly, label, 10, ha="left",  va="mid")
+        label = f"{name}: {action}" if e.show_name else action
+        # When the main row has nothing real to say ("—") and there's a
+        # sub_label waiting to take its place, skip the "—" entirely and let
+        # the sub_label sit flush with the dot (same ly) instead of being
+        # pushed to a second line below an empty row — e.g. BTN_BASE with no
+        # binding still has its Gaming Mode hint, and that hint should read
+        # flush with the QAM pill, not dangling under a blank "—" line.
+        show_main = not (sub_label and action == "—")
+        if show_main:
+            if side == "left":
+                _txt(cr, ax - 6, ly, label, size, ha="right", va="mid")
+            else:
+                _txt(cr, ax + 6, ly, label, size, ha="left",  va="mid")
 
-        # ── Gaming Mode sub-label — second line below BTN_BASE's normal callout.
-        # Magenta signal colour; full opacity when Gaming Mode is active, dimmed
-        # when inactive — mirrors the on/off state of the mode itself.
+        # ── Gaming Mode sub-label — second line below BTN_BASE's normal
+        # callout, unless that callout was skipped above, in which case this
+        # takes its place at ly directly. Magenta signal colour; full opacity
+        # when Gaming Mode is active, dimmed when inactive — mirrors the
+        # on/off state of the mode itself.
         if sub_label:
-            sy2 = ly + _txt_size(cr, label, 10)[1] + 3
+            sy2 = ly + _txt_size(cr, label, size)[1] + 3 if show_main else ly
             cr.set_source_rgba(*C_GAME, 1.0 if sub_active else 0.4)
             if side == "left":
-                _txt(cr, ax - 6, sy2, sub_label, 10, ha="right", va="mid")
+                _txt(cr, ax - 6, sy2, sub_label, size, ha="right", va="mid")
             else:
-                _txt(cr, ax + 6, sy2, sub_label, 10, ha="left",  va="mid")
+                _txt(cr, ax + 6, sy2, sub_label, size, ha="left",  va="mid")
 
         # ── Conflict accent: yellow underline beneath a teal label that is also
         # modifier-activated (app-specific override unlocked by a held modifier) ──
         if conflict:
-            pw, _  = _txt_size(cr, label, 10)
-            _, ph  = _txt_size(cr, "Ag", 10)   # stable reference — avoids ☰ metric quirks
+            pw, _  = _txt_size(cr, label, size)
+            _, ph  = _txt_size(cr, "Ag", size)   # stable reference — avoids ☰ metric quirks
             uy = ly + ph / 2 - 1.0
             if side == "left":
                 ux0, ux1 = ax - 6 - pw, ax - 6
@@ -374,7 +351,7 @@ def _callouts(cr, entries, side, ax):
         # override) — same signal language as the teal label + amber underline
         # used for conflict bindings. Redundant under a teal fill, so skipped.
         if is_avail_mod:
-            pw, _ = _txt_size(cr, label, 10)
+            pw, _ = _txt_size(cr, label, size)
             r = 3
             if side == "left":
                 dot_x = ax - 6 - pw - 8

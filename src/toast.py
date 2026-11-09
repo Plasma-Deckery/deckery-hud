@@ -20,6 +20,7 @@ _RISE_PX      = 48     # total upward travel in screen pixels over TTL
 
 _C_KEYS = (0.72, 0.55, 1.0)    # lavender — key tap
 _C_CMD  = (0.55, 0.90, 0.55)   # green    — command / exec
+_C_ERR  = (1.00, 0.45, 0.42)   # red      — a command that did not run
 
 
 def draw_toast(cr, sw, sh, toasts, start_y=None):
@@ -64,6 +65,13 @@ def _draw_one(cr, sw, sh, la, start_y=None):
     elif t in ("command", "exec"):
         label = explicit_label or (value if isinstance(value, str) else " ".join(str(v) for v in value))
         col   = _C_CMD
+    elif t == "error":
+        # A command binding that did not run. `label` names the binding the
+        # user pressed, `value` says why — both, because neither alone is
+        # enough to act on.
+        reason = value if isinstance(value, str) else str(value)
+        label  = f"{explicit_label}: {reason}" if explicit_label else reason
+        col    = _C_ERR
     else:
         label = explicit_label or (str(value) if value else "—")
         col   = _C_KEYS

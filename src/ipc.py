@@ -9,7 +9,6 @@ import json
 import os
 import socket
 import shutil
-import subprocess
 import time
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -98,102 +97,73 @@ def load_state() -> dict:
 # presence of the socket file is the only thing we can observe from here. It
 # says the daemon created its sockets at some point — not that it is alive.
 # That is enough to decide whether to offer the button.
-_AUTH_SOCK = "/run/deckery/auth.sock"
+# Two candidate roots, tried in order. Inside the `deckery` distrobox the host
+# filesystem also appears under /run/host, and distrobox binds the individual
+# deckery sockets at container start — so a socket the daemon created later is
+# only reachable via the /run/host path until the container is restarted. Both
+# are checked so neither a fresh socket nor a fresh container breaks this.
+_SOCK_ROOTS = ("/run/deckery", "/run/host/run/deckery")
+
+
+def _sock(name: str):
+    """First existing path for a daemon socket, or None."""
+    for root in _SOCK_ROOTS:
+        p = os.path.join(root, name)
+        try:
+            if os.path.exists(p):
+                return p
+        except OSError:
+            continue
+    return None
 
 
 def auth_daemon_present() -> bool:
     """Is deckery-auth installed and has it set up its sockets?"""
-    try:
-        return os.path.exists(_AUTH_SOCK)
-    except OSError:
-        return False
-
-
-# Marker the auth overlay looks for. In $XDG_RUNTIME_DIR, which is 0700 — only
-# this user can write it. It carries a timestamp and is treated as valid for a
-# few seconds, so it needs no cleanup and cannot leak into a later real prompt.
-#
-# Note the direction it fails in: the marker can only ever ADD the "do not type
-# your real PIN" warning. Forging it gains an attacker nothing — the worst it
-# achieves is talking someone out of entering their PIN.
-def _demo_marker_path() -> str:
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    return os.path.join(runtime, "deckery-auth-demo")
-
-
-def mark_demo_session() -> None:
-    """Tell the auth overlay that the next prompt is a demonstration."""
-    try:
-        with open(_demo_marker_path(), "w") as f:
-            f.write(str(int(time.time() * 1000)))
-    except OSError:
-        pass
+    return _sock("auth.sock") is not None
 
 
 def start_pin_change() -> None:
-    """Change the PIN: the old one authenticates, then a new one is set twice.
+    """Ask the daemon to run the PIN change.
 
-    `deckery-pin-set` is root-only — SET_PIN is refused for any other uid — so
-    sudo is not a workaround here, it IS the old-PIN check. Afterwards the tool
-    drives the daemon's set-PIN mode and the overlay asks for the new one.
-    Nothing new is needed on the daemon for this; the whole flow already exists.
+    One line on a socket, no sudo. The daemon itself demands the PIN currently
+    in force before it writes anything, so knowing the old PIN is the
+    permission — which is why this socket needs no privilege at all.
 
-    `-k` is what keeps that true. sudo remembers a successful authentication
-    for minutes, so after using Show Auth the change would have gone through
-    with no question asked — the old-PIN check silently skipped, which is the
-    one thing this flow exists for.
+    The previous version shelled out to `sudo deckery-pin-set`, which put the
+    old-PIN check in sudoers rather than in the daemon. A NOPASSWD line for
+    that binary then removed the check entirely and the change went straight
+    through. A rule that can be configured away was never the rule.
 
-    No demo marker, deliberately: this one really does want the real PIN.
+    Fire and forget: the daemon drives the overlay from here on, and the reply
+    only says how it ended.
     """
+    _control("CHANGE_PIN")
+
+
+def _control(cmd: str) -> None:
+    """Send one command to the daemon's control socket. Errors are not fatal."""
+    path = _sock("control.sock")
+    if path is None:
+        return
     try:
-        subprocess.Popen(
-            _on_host(["sudo", "-k", "deckery-pin-set"]),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s_:
+            s_.settimeout(2.0)
+            s_.connect(path)
+            s_.sendall(cmd.encode() + b"\n")
     except OSError:
         pass
-
-
-def _on_host(argv: list) -> list:
-    """Wrap a command so it runs on the host rather than in this container.
-
-    The HUD lives in the `deckery` distrobox, and sudo in there is passwordless
-    and authenticates against the *container's* PAM. `sudo true` therefore
-    succeeded instantly and silently, and no overlay ever appeared — the click
-    looked completely dead. Only on the host does sudo reach pam_deckery.
-    """
-    if os.path.exists("/run/.containerenv") and shutil.which("distrobox-host-exec"):
-        return ["distrobox-host-exec"] + argv
-    return argv
 
 
 def start_auth_session() -> None:
-    """Bring up the real PIN overlay by asking for a harmless privilege.
+    """Ask the daemon to show the overlay as a demonstration.
 
-    Deliberately `sudo true` rather than a "demo" command on the daemon. A
-    dedicated entry point would have to be reachable by an unprivileged session
-    process, and that is a prompt anyone could conjure up — the overlay is a
-    full-screen PIN dialog, so being able to summon it on demand is worth
-    something to an attacker. Going through sudo means there is nothing to fake:
-    this IS the genuine prompt, and `true` grants nothing once it succeeds.
+    Same socket as the PIN change, and for the same reason: neither needs a
+    privilege. The demo verifies nothing and stores nothing, so there is no
+    authority to protect.
 
-    `-k` because sudo caches a successful authentication for minutes: without
-    it, clicking this shortly after any other sudo would succeed instantly and
-    show nothing at all. The whole point is to see the prompt.
-
-    Detached into its own session so it outlives the HUD and needs no terminal
-    (pam_deckery talks to the daemon, not to a tty).
+    This used to run `sudo true` and leave a marker file for the overlay to
+    notice. That worked, but the marking could go stale or be missed — and a
+    demo that fails to announce itself is indistinguishable from a real prompt.
+    Now the daemon knows what it started and says so itself.
     """
-    try:
-        subprocess.Popen(
-            _on_host(["sudo", "-k", "true"]),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except OSError:
-        pass
+    _control("DEMO")
