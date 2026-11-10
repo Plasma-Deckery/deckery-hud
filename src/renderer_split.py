@@ -19,8 +19,8 @@ from dataclasses import dataclass, replace
 
 import cairo
 
-from helpers import (_rrect, _txt, _txt_smooth, _txt_size, _pill_row, C_MOD, C_LAYER,
-                     capture_text_boxes)
+from helpers import (_rrect, _txt, _txt_smooth, _txt_size, _pill_row, _fade_glass,
+                     C_MOD, C_LAYER, GLASS_PILL, GLASS_PILL_FG, capture_text_boxes)
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
 from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
@@ -1733,7 +1733,7 @@ def _draw_center(cr, state, center, open_t):
         # "LClick"/"RClick" text; every other key gets a small keyboard
         # glyph *before* its own text instead (Control, Alt, Brightness
         # Up/Down, ...) — on request.
-        icon_color = (0, 0, 0, alpha)
+        icon_color = (*GLASS_PILL_FG[:3], GLASS_PILL_FG[3] * alpha)
         def _click_cb(which):
             def draw(cr, ccx, ccy):
                 _draw_click_icon(cr, which, ccx, ccy, "center", icon_color, size=_PILL_ICON_SIZE)
@@ -1745,8 +1745,8 @@ def _draw_center(cr, state, center, open_t):
         pill_icons = [_click_cb(k) if k in _CLICK_ICON_NAME else None for k in outputs]
         pill_prefix_icons = [None if k in _CLICK_ICON_NAME else _kbd_cb() for k in outputs]
         _pill_row(cr, cx, (y0 + y1) / 2, out_labels, sep="+", size=10,
-                  bg=(0.333, 0.867, 1.0, alpha), fg=(0, 0, 0, alpha),
-                  sep_rgba=(1.0, 1.0, 1.0, 0.55 * alpha), ha="center",
+                  glass=_fade_glass(GLASS_PILL, alpha), fg=icon_color,
+                  sep_rgba=(0.5, 0.5, 0.52, 0.9 * alpha), ha="center",
                   icons=pill_icons, prefix_icons=pill_prefix_icons,
                   icon_size=_PILL_ICON_SIZE)
 

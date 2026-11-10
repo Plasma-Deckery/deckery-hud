@@ -13,14 +13,12 @@ gi.require_version('Gtk4LayerShell', '1.0')
 from gi.repository import Gtk, Gtk4LayerShell as LayerShell, GLib
 import cairo
 
-from helpers import _pill_row, _K
+from helpers import _pill_row, _K, GLASS_PILL, GLASS_PILL_FG
 from toast import draw_toast
 
 _TOAST_TTL_MS   = 1500
 _TOAST_FRAME_MS = 33
 _SUPPRESS_S     = 0.4   # how long to hide pills that are covered by the toast
-
-_C_ACT = (0.333, 0.867, 1.0)   # cyan — same as center strip
 
 
 class OsdWin(Gtk.ApplicationWindow):
@@ -133,8 +131,8 @@ class OsdWin(Gtk.ApplicationWindow):
                 sw / 2, sh - 28,
                 labels,
                 sep="+", size=9,
-                bg=(*_C_ACT, 1.0), fg=(0, 0, 0, 1),
-                border=None, sep_rgba=(1.0, 1.0, 1.0, 0.55),
+                glass=GLASS_PILL, fg=GLASS_PILL_FG,
+                sep_rgba=(0.5, 0.5, 0.52, 0.9),
                 ha="center",
             )
 

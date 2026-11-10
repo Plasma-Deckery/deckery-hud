@@ -71,6 +71,54 @@ def _rrect(cr, x, y, w, h, r):
     cr.close_path()
 
 
+# Active-outputs pill material — the split centre strip and the OSD draw the
+# same frosted glass (see _glass_pill), so it lives here once. Picked from
+# in-context renders over real wallpapers and a desktop screenshot: dense
+# enough that busy content behind it (text) stays calm, light enough that
+# the background still shows through. No shadow or outline — on request,
+# those read as a different design language than the HUD's soft backdrop.
+GLASS_PILL    = dict(top=(1, 1, 1, 0.72), bottom=(0.955, 0.96, 0.975, 0.61), sheen=0.13)
+GLASS_PILL_FG = (0.08, 0.08, 0.10, 0.92)
+
+
+def _fade_glass(g, alpha):
+    """Copy of a _glass_pill spec with every alpha scaled by `alpha`."""
+    return {"top":    g["top"][:3] + (g["top"][3] * alpha,),
+            "bottom": g["bottom"][:3] + (g["bottom"][3] * alpha,),
+            "sheen":  g.get("sheen", 0) * alpha}
+
+
+def _glass_pill(cr, x, y, w, h, r, g):
+    """
+    Faked frosted-glass pill — real backdrop blur isn't available to a
+    layer-shell surface, so the material is a translucent milky fill that
+    lightens whatever is behind it, plus a faint highlight on top:
+
+      top    — RGBA fill at the top edge    } vertical gradient body
+      bottom — RGBA fill at the bottom edge }
+      sheen  — alpha of a white highlight fading out over the upper half
+    """
+    body = cairo.LinearGradient(0, y, 0, y + h)
+    body.add_color_stop_rgba(0, *g["top"])
+    body.add_color_stop_rgba(1, *g["bottom"])
+    cr.set_source(body)
+    _rrect(cr, x, y, w, h, r)
+    cr.fill()
+
+    sheen = g.get("sheen", 0)
+    if sheen:
+        cr.save()
+        _rrect(cr, x, y, w, h, r)
+        cr.clip()
+        hl = cairo.LinearGradient(0, y, 0, y + h * 0.55)
+        hl.add_color_stop_rgba(0, 1, 1, 1, sheen)
+        hl.add_color_stop_rgba(1, 1, 1, 1, 0)
+        cr.set_source(hl)
+        cr.rectangle(x, y, w, h * 0.55)
+        cr.fill()
+        cr.restore()
+
+
 def _txt(cr, x, y, text, size=12, bold=False, ha="left", va="top"):
     lo = PangoCairo.create_layout(cr)
     weight = "Bold" if bold else ""
@@ -151,7 +199,8 @@ def _txt_markup(cr, x, y, markup, size=12, ha="left", va="top"):
 def _pill_row(cr, cx, cy, labels, sep="›", size=9,
               bg=(1, 1, 1, 0.10), fg=(1, 1, 1, 0.9),
               border=None, sep_rgba=(0.55, 0.55, 0.55, 0.7),
-              ha="center", styles=None, icons=None, prefix_icons=None, icon_size=None):
+              ha="center", styles=None, icons=None, prefix_icons=None, icon_size=None,
+              glass=None):
     """
     Draw a horizontal row of pill-shaped labels joined by a separator glyph.
 
@@ -186,6 +235,8 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
                  what the caller actually draws into it — a shorter pill
                  with an icon overflowing its background was exactly that
                  mismatch. Defaults to the text-driven box from before.
+    glass      — optional dict (see _glass_pill) that replaces the flat `bg`
+                 fill with a faked glass material; `border` still applies.
     """
     if not labels:
         return
@@ -261,9 +312,12 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         _note_box(cr, x, pill_y, pill_w, ph, labels[i])
 
         # Background
-        cr.set_source_rgba(*p_bg)
-        _rrect(cr, x, pill_y, pill_w, ph, r)
-        cr.fill()
+        if glass is not None:
+            _glass_pill(cr, x, pill_y, pill_w, ph, r, glass)
+        else:
+            cr.set_source_rgba(*p_bg)
+            _rrect(cr, x, pill_y, pill_w, ph, r)
+            cr.fill()
 
         # Border
         if border is not None:
