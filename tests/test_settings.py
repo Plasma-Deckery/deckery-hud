@@ -136,6 +136,75 @@ class FileTests(_TmpFile):
                              Path.home() / ".config" / "deckery-hud" / "settings.toml")
 
 
+class RememberTests(_TmpFile):
+
+    def remember_capturing(self, key, value):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            result = settings.remember(key, value, self.path)
+        return result, err.getvalue()
+
+    def text(self):
+        return self.path.read_text(encoding="utf-8")
+
+    def test_remember_keeps_comments_and_order(self):
+        self.write(template().replace("[osd]\n", "[osd]\n# meine Notiz\n"))
+        self.assertTrue(settings.remember("layout.design", "split", self.path))
+        self.assertEqual(load(self.path).layout.design, "split")
+        text = self.text()
+        self.assertIn("# meine Notiz", text)
+        self.assertIn('# design = "classic"', text)
+        self.assertLess(text.index("[layout]"), text.index("[osd]"))
+
+    def test_remember_creates_missing_file_from_template(self):
+        self.assertTrue(settings.remember("layout.design", "split", self.path))
+        text = self.text()
+        self.assertIn("# Deckery HUD — Einstellungen.", text)
+        self.assertIn('design = "split"', text)
+
+    def test_remember_adds_missing_section(self):
+        self.write("[osd]\nenabled = false\n")
+        self.assertTrue(settings.remember("layout.design", "split", self.path))
+        result = load(self.path)
+        self.assertEqual(result.layout.design, "split")
+        self.assertIs(result.osd.enabled, False)
+
+    def test_remember_overwrites_existing_value(self):
+        self.write("[osd]\nenabled = true\n")
+        self.assertTrue(settings.remember("osd.enabled", False, self.path))
+        self.assertIs(load(self.path).osd.enabled, False)
+        self.assertEqual(self.text().count("enabled ="), 1)
+
+    def test_remember_refuses_broken_file(self):
+        self.write("[layout\n")
+        before = self.path.read_bytes()
+        result, err = self.remember_capturing("layout.design", "split")
+        self.assertFalse(result)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertIn("settings.toml", err)
+
+    def test_remember_rejects_invalid(self):
+        for key, value in (("layout.design", "neu"), ("osd.enabled", 1), ("nope.x", 1),
+                           ("layout.nope", "x")):
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError):
+                    settings.remember(key, value, self.path)
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory permissions")
+    def test_remember_unwritable_dir(self):
+        os.chmod(self.dir, 0o500)
+        result, err = self.remember_capturing("layout.design", "split")
+        self.assertFalse(result)
+        self.assertFalse(self.path.exists())
+        self.assertNotEqual(err, "")
+
+    def test_remember_without_tomlkit(self):
+        with mock.patch.dict(sys.modules, {"tomlkit": None}):
+            result, err = self.remember_capturing("layout.design", "split")
+        self.assertFalse(result)
+        self.assertIn("tomlkit", err)
+
+
 class DiffTests(unittest.TestCase):
 
     def test_diff(self):

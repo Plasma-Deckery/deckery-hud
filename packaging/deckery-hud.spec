@@ -19,6 +19,8 @@ Requires:       python3
 Requires:       python3-gobject
 # cairo / PangoCairo drawing (gi.repository → cairo Python bindings)
 Requires:       python3-cairo
+# Writes settings.toml keeping the user's comments (settings.remember)
+Requires:       python3-tomlkit
 # GTK4 runtime + typelib (gi.repository.Gtk 4.0)
 Requires:       gtk4
 # Wayland layer-shell protocol for GTK4 (gi.repository.Gtk4LayerShell 1.0)

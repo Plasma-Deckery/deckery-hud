@@ -240,6 +240,59 @@ def ensure_file(path=None):
         _warn(f"Vorlage {path} nicht angelegt ({e}); Standardwerte gelten")
 
 
+# ── Writing ───────────────────────────────────────────────────────────────────
+
+def remember(key, value, path=None):
+    """Set one key ("section.field") in the file, keeping everything else in it.
+
+    Raises ValueError for a key or value load() would reject — that is a bug
+    in the caller, not something the user did. Returns False (with a warning)
+    when the choice could not be saved: the file does not parse, tomlkit is
+    missing, or writing failed. The running HUD keeps the choice either way;
+    it just does not survive a restart.
+    """
+    section, _, name = key.partition(".")
+    cls = dict(_section_fields()).get(section)
+    f = {f.name: f for f in dataclasses.fields(cls)}.get(name) if cls else None
+    if f is None:
+        raise ValueError(f"unbekannte Einstellung {key!r}")
+    problem = _problem(f, value)
+    if problem:
+        raise ValueError(f"{key}: {problem}")
+
+    path = Path(path) if path else settings_path()
+    try:
+        # Only needed here: loading works without it, so a missing package
+        # costs saving a choice, never starting the HUD.
+        import tomlkit
+    except ImportError:
+        _warn(f"tomlkit fehlt, {key} nicht gespeichert")
+        return False
+    try:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            text = template()
+        doc = tomlkit.parse(text)
+        table = doc.get(section)
+        if table is None:
+            table = tomlkit.table()
+            doc.add(section, table)
+        elif not isinstance(table, dict):
+            _warn(f"'{section}' ist keine Sektion, {key} nicht gespeichert")
+            return False
+        table[name] = value
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomic(path, tomlkit.dumps(doc))
+    except tomlkit.exceptions.TOMLKitError as e:
+        _warn(f"{path} nicht lesbar ({e}); {key} nicht gespeichert")
+        return False
+    except (OSError, UnicodeDecodeError) as e:
+        _warn(f"{path} nicht geschrieben ({e}); {key} nicht gespeichert")
+        return False
+    return True
+
+
 def _write_atomic(path, text):
     """Write via a temporary file in the same directory and rename, so a reader
     (the file monitor, an editor) never sees a half-written file."""
