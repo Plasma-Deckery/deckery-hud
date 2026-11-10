@@ -7,7 +7,7 @@ real makima.
 Not a test suite — a fixture-rendering tool. Run inside the `deckery`
 distrobox, where cairo/gi.Rsvg are installed (see docs/info.md):
 
-    distrobox enter deckery -- python3 tools/render_sample.py <out_dir> [classic|split]
+    distrobox enter deckery -- python3 tools/render_sample.py <out_dir> [classic|split|split_groups]
 
 Writes one PNG per sample state into <out_dir>.
 """
@@ -195,6 +195,27 @@ SAMPLES = {
 }
 
 
+def _group_cases(sw):
+    """B-12 partial-HUD cases for the split renderer: (state, elements) with
+    elements as draw_hud_split takes them, {id: (opacity, dx, Content)}."""
+    from reveal import Content, FULL
+    from renderer_split import _side_slide_offset
+    from elements import ELEMENT_IDS, side_of
+    opening = {e: (0.5, _side_slide_offset(side_of(e), sw, 0.5) if side_of(e) else 0.0, FULL)
+               for e in ELEMENT_IDS}
+    opening["RPad"] = (1.0, 0.0, FULL)
+    return {
+        "mod_filter": (SAMPLES["held_modifier"], {
+            "DPad": (1.0, 0.0, Content(frozenset({"BTN_DPAD_UP"}))),
+            "L1": (1.0, 0.0, FULL),
+        }),
+        "pad_only_right": (SAMPLES["pad_modes"], {"RPad": (1.0, 0.0, FULL)}),
+        "gesture_both": (SAMPLES["gesture_active"], {"LPad": (1.0, 0.0, FULL),
+                                                      "RPad": (1.0, 0.0, FULL)}),
+        "full_opening_with_pad": (SAMPLES["pad_modes"], opening),
+    }
+
+
 def render(renderer_name, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     front = _svg("steamdeckFront.svg")
@@ -208,10 +229,16 @@ def render(renderer_name, out_dir):
         from renderer_split import draw_hud_split
         w, h = 1280, 800
         draw_fn = lambda cr, state: draw_hud_split(cr, front, back, state, w, h)
+    elif renderer_name == "split_groups":
+        from renderer_split import draw_hud_split
+        w, h = 1280, 800
+        cases = _group_cases(w)
+        draw_fn = lambda cr, case: draw_hud_split(cr, front, back, case[0], w, h, groups=case[1])
     else:
         raise ValueError(renderer_name)
 
-    for name, state in SAMPLES.items():
+    samples = cases if renderer_name == "split_groups" else SAMPLES
+    for name, state in samples.items():
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
         cr = cairo.Context(surface)
         cr.set_source_rgb(0.1, 0.1, 0.12)

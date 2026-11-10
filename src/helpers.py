@@ -22,6 +22,38 @@ import math
 from viewmodel import _K, _fmt
 
 
+# ── Text-box capture ─────────────────────────────────────────────────────────
+# While a list is installed here, every text line and label pill drawn
+# through these helpers appends its box — in device space, i.e. screen px for
+# the HUD's own layers — so shadow.py can lay a shadow under each legend line
+# without re-deriving the layout that placed it.
+_text_sink = None
+
+
+class capture_text_boxes:
+    """with capture_text_boxes() as cap: ... — cap.boxes fills with
+    (x, y, w, h), cap.texts with the matching strings."""
+
+    def __enter__(self):
+        global _text_sink
+        self._prev, self.boxes, self.texts = _text_sink, [], []
+        _text_sink = self
+        return self
+
+    def __exit__(self, *exc):
+        global _text_sink
+        _text_sink = self._prev
+
+
+def _note_box(cr, x, y, w, h, text):
+    if _text_sink is None:
+        return
+    pts = [cr.user_to_device(x + dx, y + dy) for dx in (0, w) for dy in (0, h)]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    _text_sink.boxes.append((min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)))
+    _text_sink.texts.append(text)
+
+
 def _pango_esc(s):
     """Escape special characters for Pango markup."""
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -48,6 +80,7 @@ def _txt(cr, x, y, text, size=12, bold=False, ha="left", va="top"):
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
     ty = y - (ph if va == "bottom" else ph / 2 if va == "mid" else 0)
+    _note_box(cr, tx, ty, pw, ph, text)
     cr.move_to(tx, ty)
     PangoCairo.show_layout(cr, lo)
 
@@ -85,6 +118,7 @@ def _txt_smooth(cr, x, y, text, size=12, bold=False, ha="center", va="mid"):
     iw, ih = ink.width / Pango.SCALE, ink.height / Pango.SCALE
     tx = x - ix - (iw if ha == "right" else iw / 2 if ha == "center" else 0)
     ty = y - iy - (ih if va == "bottom" else ih / 2 if va == "mid" else 0)
+    _note_box(cr, tx + ix, ty + iy, iw, ih, text)
     cr.new_path()
     cr.move_to(tx, ty)
     PangoCairo.layout_path(cr, lo)
@@ -109,6 +143,7 @@ def _txt_markup(cr, x, y, markup, size=12, ha="left", va="top"):
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
     ty = y - (ph if va == "bottom" else ph / 2 if va == "mid" else 0)
+    _note_box(cr, tx, ty, pw, ph, markup)
     cr.move_to(tx, ty)
     PangoCairo.show_layout(cr, lo)
 
@@ -223,6 +258,7 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         pill_y = cy - ph / 2
 
         p_bg, p_fg = (styles[i] if styles and i < len(styles) else (bg, fg))
+        _note_box(cr, x, pill_y, pill_w, ph, labels[i])
 
         # Background
         cr.set_source_rgba(*p_bg)

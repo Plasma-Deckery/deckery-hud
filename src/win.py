@@ -22,6 +22,7 @@ from layout import (HUD_W, HUD_H, _TITLE_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE
 from renderer import draw_hud
 from toast import draw_toast
 from anim import HoverAnim
+from reveal import GROUPS, GroupAnim, RevealSettings
 
 # Experimental split-screen layout (issue #21), opt-in only — the shipping
 # default stays the classic centred renderer. See docs/SPLIT_LAYOUT.md.
@@ -30,11 +31,10 @@ from anim import HoverAnim
 _LAYOUT_MODE = os.environ.get("DECKERY_HUD_LAYOUT", "classic")
 if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
-                                split_layers, draw_split_live, _side_slide_offset,
-                                draw_gesture_connector_live)
+                                group_layers, live_rect, draw_group_live, _side_slide_offset,
+                                draw_gesture_connector_live, SHADOW_STYLE)
+    from shadow import bleed_transfer
     from layout_split import compute_layout, center_badge_rect, center_close_rect
-    from viewmodel import classify_all
-    from callouts import _BTNS
 
 
 class _HudArea(Gtk.Widget):
@@ -94,11 +94,16 @@ _PRESS_ANIM_MS = 90
 # this is the midpoint between the two, biased toward keeping that more
 # dramatic perspective while pulling the angle back down.
 _DPAD_3D_MAX_ANGLE = 24.0
+
+# Group animations: a tick gap longer than _STALL_S counts as a stall and
+# is taken out of the running transitions, minus one ordinary frame.
+_STALL_S = 0.05
+_FRAME_S = 1 / 90
 _DPAD_3D_DEPTH = 260.0
 
 
 class Win(Gtk.ApplicationWindow):
-    def __init__(self, application):
+    def __init__(self, application, settings=None):
         super().__init__(application=application)
         self.set_title("Deckery HUD")
         self.set_decorated(False)
@@ -131,24 +136,31 @@ class Win(Gtk.ApplicationWindow):
         self._pause_anim     = HoverAnim(lambda: self._da.queue_draw())
         self._show_anim      = HoverAnim(lambda: self._da.queue_draw())
         self._change_anim    = HoverAnim(lambda: self._da.queue_draw())
-        self._last_tick      = None   # see _on_open_tick's timing instrumentation
+        self._last_tick      = None   # see _on_group_tick's timing instrumentation
         self._tex_cache      = {}     # split mode: layer name -> (cairo surface, Gdk.Texture)
-        self._on_closed      = None   # see set_open
-        self._open_ticks     = None   # see set_open / _on_open_tick
+        self._map_ticks      = None   # see _need_surface / _on_group_tick
 
         # ── Drawing area ──────────────────────────────────────────────────
         da = _HudArea(self._snapshot)
         self.set_child(da)
         self._da = da
 
-        # Open/close transition — split mode only. Reuses HoverAnim exactly
-        # as-is (same eased 0->1 tween already used for the hover badges)
-        # instead of a new animation class; the only addition is that
-        # closing has to finish the animation before the window actually
-        # disappears, which the wrapped redraw callback below handles.
-        # Driven by the drawing area's own frame clock (widget=da), not a
+        # Split mode: every element (one button with its shape, legend and
+        # shadow — see elements.py — plus the centre column) has its own
+        # visibility (reveal.GroupAnim), so single elements can show on
+        # their own while the full HUD is closed (B-12). All of them tick
+        # off one callback on the drawing area's own frame clock, not a
         # generic timer — see anim.py's note on why that matters here.
-        self._open_anim = HoverAnim(self._on_open_tick, duration_ms=260, widget=da) if _LAYOUT_MODE == "split" else None
+        self._settings  = settings or RevealSettings()
+        self._anims     = {g: GroupAnim(self._settings) for g in GROUPS} if _LAYOUT_MODE == "split" else {}
+        self._contents  = {}      # group -> reveal.Content it shows (kept while fading out)
+        self._causes    = {}      # group -> cause of its last Want, decides slide vs fade out
+        self._full      = False   # the full HUD is open (input, centre, toasts)
+        self._drawn     = {}      # group -> (Gdk.Texture, rect) last drawn, for a crossfade
+        self._xfade     = {}      # group -> (texture, rect, start) fading out under new content
+        self._tick_id   = None
+        self._visible   = frozenset()
+        self._gesture   = False   # last seen two-pad gesture, see on_state
 
         # Per-button press animations (see _PRESS_ANIM_KEYS) — one HoverAnim
         # each, all ticking off the same drawing area's frame clock. Built
@@ -293,75 +305,138 @@ class Win(Gtk.ApplicationWindow):
     # ── Open/close transition (split mode) ──────────────────────────────────
 
     def set_open(self, opening: bool, on_closed=None):
-        """Called by App.show_hud()/hide_hud() instead of present()/
-        set_visible(False) directly. Outside split mode this *is*
-        present()/set_visible(False) — classic keeps its original instant
-        show/hide, nothing about it changes.
+        """Classic only: the original instant present()/set_visible(False).
+        Split mode goes through set_wants instead.
 
-        on_closed: run once the window is actually gone — immediately in
-        classic, after the close animation in split. Dropped if the HUD is
-        reopened before that."""
-        if self._open_anim is None:
-            if opening:
-                self.present()
-            else:
-                self.set_visible(False)
-                if on_closed:
-                    on_closed()
-            return
+        on_closed: run once the window is gone."""
         if opening:
-            self._on_closed = None
-            # Freshly mapping the window costs one long first frame (~165ms
-            # measured: compositor map + GPU setup). The duration-based
-            # animation would spend nearly its whole 260ms on that and show
-            # two frames of slide; _on_open_tick restarts its clock once the
-            # first frame is actually on screen instead.
-            self._open_ticks = 0 if not self.get_visible() else None
             self.present()
-            self._open_anim.set(True)
         else:
-            self._on_closed = on_closed
-            self._open_anim.set(False)
-
-    def _on_open_tick(self):
-        # Timing instrumentation for the "animation is laggy" reports —
-        # printed (systemd/journald captures the service's stdout) only
-        # during the brief open/close window itself, not continuously, so
-        # it's a handful of lines per toggle, not log spam. Measures the
-        # actual tick-to-tick interval (is GLib's timer firing on schedule?)
-        # separately from draw cost (is drawing itself slow?), since those
-        # point at different causes.
-        now = time.monotonic()
-        if self._last_tick is not None:
-            print(f"[deckery-hud] open_anim tick +{(now - self._last_tick) * 1000:.1f}ms "
-                  f"(target 33ms)", flush=True)
-        self._last_tick = now
-
-        # Second tick after mapping = the first frame has been presented
-        # (the frame clock only ticks again once it has), so the stall is
-        # behind us: restart the slide from where it began.
-        if self._open_ticks is not None and self._open_anim._target > 0.5:
-            self._open_ticks += 1
-            if self._open_ticks == 2:
-                self._open_anim.restart_clock()
-                self._open_ticks = None
-
-        self._da.queue_draw()
-        # HoverAnim has no "finished closing" signal of its own — it just
-        # eases toward whatever target was last set. Checking the eased
-        # value here is enough: once it's back at ~0 *and* we're still
-        # closing (not mid-open), the window can actually disappear.
-        if self._open_anim.value <= 0.001 and self._open_anim._target < 0.5:
             self.set_visible(False)
-            self._last_tick = None
-            on_closed, self._on_closed = self._on_closed, None
             if on_closed:
                 on_closed()
+
+    # ── Group visibility (split mode) ────────────────────────────────────────
+
+    def set_wants(self, wants):
+        """wants: {group: reveal.Want} — every group not in it goes away.
+        A group keeps the content it had while it fades or slides out, and
+        a group that stays visible but changes content crossfades."""
+        now = time.monotonic()
+        self._full = any(w.cause == "full" for w in wants.values())
+        for g, anim in self._anims.items():
+            w = wants.get(g)
+            if w is None:
+                anim.set_target(False, self._causes.get(g, "detector"), now)
+                continue
+            old = self._contents.get(g)
+            if old is not None and old != w.content and anim.value > 0 and g in self._drawn:
+                tex, rect = self._drawn[g]
+                self._xfade[g] = (tex, rect, now)
+            self._contents[g] = w.content
+            self._causes[g] = w.cause
+            anim.set_target(True, w.cause, now)
+        if any(a.target for a in self._anims.values()):
+            self._need_surface(True)
+        self._start_ticking()
+        self._da.queue_draw()
+        self._check_visible()
+
+    def visible_groups(self):
+        """Groups on screen or on their way there."""
+        return frozenset(g for g, a in self._anims.items() if a.target or a.value > 0)
+
+    def is_full(self):
+        return self._full
+
+    def _check_visible(self):
+        vis = self.visible_groups()
+        if vis != self._visible:
+            self._visible = vis
+            self.get_application()._on_groups_changed()
+
+    def _need_surface(self, needed):
+        """The one place the split HUD's surface is mapped or unmapped
+        (B-01/B-03 hook in here)."""
+        if needed and not self.get_visible():
+            # Freshly mapping the window costs one long first frame (~165ms
+            # measured: compositor map + GPU setup). The duration-based
+            # animations would spend nearly all of a fade on that and show
+            # two frames of it; _on_group_tick restarts their clocks once the
+            # first frame is actually on screen instead.
+            self._map_ticks = 0
+            self.present()
+        elif not needed and self.get_visible():
+            self.set_visible(False)
+            self._map_ticks = None
+
+    def _start_ticking(self):
+        if self._tick_id is None and (any(a.running for a in self._anims.values()) or self._xfade):
+            self._tick_id = self._da.add_tick_callback(self._on_group_tick)
+
+    def _on_group_tick(self, _widget, _clock):
+        now = time.monotonic()
+        # Timing instrumentation for the "animation is laggy" reports —
+        # only while something animates, a handful of lines per transition.
+        # Measures the tick-to-tick interval (is the frame clock on
+        # schedule?) separately from draw cost (snapshot_split's own print).
+        if self._last_tick is not None:
+            gap = now - self._last_tick
+            print(f"[deckery-hud] group_anim tick +{gap * 1000:.1f}ms", flush=True)
+            # A frame that took far longer than a frame (a cold layer build
+            # when the full HUD opens over an already visible group, measured
+            # ~390ms) would otherwise eat the whole slide. Count it as one
+            # ordinary frame instead.
+            if gap > _STALL_S:
+                for a in self._anims.values():
+                    a.delay(gap - _FRAME_S)
+        self._last_tick = now
+
+        # Until the second tick after mapping — the first frame has been
+        # presented then (the frame clock only ticks again once it has) —
+        # hold every transition at its start. Merely restarting the clock at
+        # that tick isn't enough: a first frame longer than a fade (cold or
+        # after idle, measured up to ~275ms) would have finished it already.
+        if self._map_ticks is not None:
+            self._map_ticks += 1
+            for a in self._anims.values():
+                a.restart_clock(now)
+            if self._map_ticks >= 2:
+                self._map_ticks = None
+            self._da.queue_draw()
+            return GLib.SOURCE_CONTINUE
+
+        running = False
+        for a in self._anims.values():
+            running = a.tick(now) or running
+        xf = self._settings.crossfade_ms / 1000
+        self._xfade = {g: x for g, x in self._xfade.items() if now - x[2] < xf}
+        self._da.queue_draw()
+        self._check_visible()
+        if running or self._xfade:
+            return GLib.SOURCE_CONTINUE
+        self._tick_id = None
+        self._last_tick = None
+        if not self.visible_groups():
+            self._need_surface(False)
+        return GLib.SOURCE_REMOVE
 
     # ── State update (called by App on file change) ───────────────────────
 
     def on_state(self, state):
         self._state = state
+        # A gesture swaps each visible pad's own mode label for the shared
+        # connector (which fades with the pads) and back; crossfade that
+        # swap instead of letting the label pop.
+        gesture = bool(((state.get("trackpads") or {}).get("gesture") or {}).get("touching"))
+        if gesture != self._gesture and self._anims:
+            now = time.monotonic()
+            for g in ("LPad", "RPad"):
+                if self._anims[g].value > 0 and g in self._drawn:
+                    tex, rect = self._drawn[g]
+                    self._xfade[g] = (tex, rect, now)
+            self._start_ticking()
+        self._gesture = gesture
         if self._press_anims:
             active = set((state.get("context") or {}).get("active_buttons", []))
             for key, anim in self._press_anims.items():
@@ -414,12 +489,6 @@ class Win(Gtk.ApplicationWindow):
             cr.set_operator(cairo.Operator.CLEAR)
             cr.paint()
             return
-        if _LAYOUT_MODE == "split":
-            try:
-                self._draw_dpad_3d(snapshot, sw, sh)
-            except Exception:
-                import traceback
-                traceback.print_exc()
 
     def _draw_inner(self, cr, sw, sh):
         if _LAYOUT_MODE == "split":
@@ -478,6 +547,11 @@ class Win(Gtk.ApplicationWindow):
         draw_toast(cr, sw, sh, self._active_toasts, start_y=hud_bottom)
 
     def _set_split_input_region(self):
+        if not self._full:
+            # Single groups never take input: clicks go to whatever is
+            # underneath, and makima keeps running.
+            self.get_surface().set_input_region(cairo.Region())
+            return
         badge, close = self._split_rects()
         bx, by, bw, bh = badge
         cx, cy, cw, ch = close
@@ -500,97 +574,134 @@ class Win(Gtk.ApplicationWindow):
         self._tex_cache[name] = (surf, tex)
         return tex
 
+    def _bleed_transfer(self):
+        """(ramp, curve) — see shadow.bleed_transfer; the ramp applies first."""
+        if getattr(self, "_bleed_ct", None) is None:
+            m, b, table = bleed_transfer(SHADOW_STYLE)
+            self._bleed_ct = (Gsk.ComponentTransfer.new_linear(m, b),
+                              Gsk.ComponentTransfer.new_table(table))
+        return self._bleed_ct
+
     def _snapshot_split(self, snapshot, sw, sh):
         """Split mode as GPU layers instead of one full-screen cairo node.
 
         Drawing everything through a single full-screen append_cairo() meant
         GTK re-rasterized the whole screen in software and uploaded it as a
-        fresh texture on every frame open_t changed — measured at 22-33ms
-        per frame during the slide on a 90Hz panel (~30-45fps). Here the
-        cached layers (backdrop halves, both sides, centre column) are
-        textures uploaded only when their content changes, and the slide
-        and fade are snapshot translate/opacity — composited on the GPU.
-        Only the genuinely live bits (trackpad dots, moving stick rings,
-        mid-press buttons) stay cairo, in two narrow strips over the
-        cluster columns rather than a full-screen node."""
-        mid_anim = 0.0 < self._open_anim.value < 1.0
+        fresh texture on every animation frame — measured at 22-33ms per
+        frame during the slide on a 90Hz panel (~30-45fps). Here every group
+        (the eight clusters and the centre column) is a cached texture
+        uploaded only when its content changes, with its own shadow under
+        it, and each group's slide and fade are snapshot translate/opacity
+        from its own GroupAnim — composited on the GPU. Only the genuinely
+        live bits (trackpad dots, moving stick rings, mid-press buttons)
+        stay cairo, in one narrow strip per group."""
+        now = time.monotonic()
+        mid_anim = any(a.running for a in self._anims.values())
         t0 = time.perf_counter() if mid_anim else None
         self._set_split_input_region()
 
-        open_t = self._open_anim.value
+        shown = [g for g in GROUPS if g in self._contents
+                 and (self._anims[g].value > 0 or self._anims[g].target)]
+        if not shown:
+            return
         press_t = {k: a.value for k, a in self._press_anims.items()}
         surface = self.get_surface()
         scale = surface.get_scale() if surface is not None else 1.0
-        layers = split_layers(self._state, sw, sh, press_t, dev_scale=scale)
-        dx = {side: _side_slide_offset(side, sw, open_t) for side in ("left", "right")}
+        layers = group_layers(self._state, sw, sh, {g: self._contents[g] for g in shown},
+                              press_t, dev_scale=scale)
+        groups = layers["groups"]
+        opacity = {g: self._anims[g].value for g in shown}
+        # Only a sliding group moves, and only the clusters: the centre
+        # column fades in place, and so does any group a detector shows.
+        dx = {g: _side_slide_offset(groups[g].side, sw, opacity[g])
+              if groups[g].side and self._anims[g].style == "slide" else 0.0
+              for g in shown}
 
         def rect(x, y, w, h):
             return Graphene.Rect().init(x, y, w, h)
 
-        def full(surf):
-            # Exactly the texture's own device size in logical px, so it maps
-            # 1:1 onto the device pixel grid at rest — no resampling blur.
-            return rect(0, 0, surf.get_width() / scale, surf.get_height() / scale)
-
-        for (bx, bw, half), side in zip(layers["backdrop"], ("left", "right")):
+        def placed(g, append):
             snapshot.save()
-            snapshot.translate(Graphene.Point().init(dx[side], 0))
-            snapshot.push_opacity(open_t)
-            snapshot.append_scaled_texture(self._texture("backdrop_" + side, half),
-                                           Gsk.ScalingFilter.LINEAR, rect(bx, 0, bw, sh))
+            snapshot.translate(Graphene.Point().init(dx[g], 0))
+            snapshot.push_opacity(opacity[g])
+            append()
             snapshot.pop()
             snapshot.restore()
 
-        for side in ("left", "right"):
-            surf = layers["sides"][side]
-            snapshot.save()
-            snapshot.translate(Graphene.Point().init(dx[side], 0))
-            snapshot.push_opacity(open_t)
-            snapshot.append_texture(self._texture(side, surf), full(surf))
+        # Every shadow before any content, so no element's shadow darkens a
+        # neighbour's text. First the bleed: each element's soft field with
+        # its own slide/fade, all in one pass that is only then mapped to
+        # alpha — so neighbouring clouds fuse into one shape instead of
+        # stacking (see shadow.py). Then each element's own core/edge shadow.
+        bleeds = [g for g in shown if groups[g].bleed is not None]
+        if bleeds:
+            ident = Gsk.ComponentTransfer.new_identity()
+            ramp, curve = self._bleed_transfer()
+            snapshot.push_component_transfer(ident, ident, ident, curve)
+            snapshot.push_component_transfer(ident, ident, ident, ramp)
+            for g in bleeds:
+                surf, x, y, w, h = groups[g].bleed
+                placed(g, lambda: snapshot.append_scaled_texture(
+                    self._texture("bleed_" + g, surf), Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
             snapshot.pop()
-            snapshot.restore()
-
-        # Live overlays: each strip covers its side's cluster column, plus
-        # room for a pressed button's adjacent action text while one is down.
-        col_left, _y0, col_right, _y1 = layers["center"]
-        for side in ("left", "right"):
-            prefix = "l_" if side == "left" else "r_"
-            pressed = any(_SCALE_ANIM_PARTS[k][1].startswith(prefix) for k in layers["active_press"])
-            extra = sw * 0.3 if pressed else 16
-            if side == "left":
-                x0, w = dx[side], col_left + extra
+            snapshot.pop()
+        for g in shown:
+            if groups[g].shadow is None:
+                continue
+            surf, x, y, w, h = groups[g].shadow
+            placed(g, lambda: snapshot.append_scaled_texture(
+                self._texture("shadow_" + g, surf), Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+        xf = self._settings.crossfade_ms / 1000
+        for g in shown:
+            layer = groups[g]
+            tex = self._texture(g, layer.surface)
+            if g in self._xfade:
+                # A real dissolve, not new-over-old: two plain alphas would
+                # dim whatever both textures share (the art) mid-way.
+                old_tex, old_rect, start = self._xfade[g]
+                k = min(1.0, (now - start) / xf) if xf > 0 else 1.0
+                def both():
+                    snapshot.push_cross_fade(k)
+                    snapshot.append_texture(old_tex, rect(*old_rect))
+                    snapshot.pop()
+                    snapshot.append_texture(tex, rect(*layer.rect))
+                    snapshot.pop()
+                placed(g, both)
             else:
-                x0, w = col_right - extra + dx[side], sw - col_right + extra
-            snapshot.push_opacity(open_t)
-            cr = snapshot.append_cairo(rect(x0, 0, w, sh))
-            draw_split_live(cr, self._state, layers, sw, sh, open_t, press_t, draw_dpad=False)
-            snapshot.pop()
+                placed(g, lambda: snapshot.append_texture(tex, rect(*layer.rect)))
+            self._drawn[g] = (tex, layer.rect)
+        for g in shown:
+            if groups[g].tx is None:
+                continue
+            def live():
+                cr = snapshot.append_cairo(rect(*live_rect(g, layers, sw, sh)))
+                draw_group_live(cr, g, self._state, layers, 0.0, press_t, draw_dpad=False)
+            placed(g, live)
 
         # Two pads touching at once connects across screen centre — needs
-        # its own full-width, unclipped pass; the two strips just above
-        # each stop well short of centre (see draw_gesture_connector_live's
-        # own docstring for what went wrong trying to fold this into them).
+        # its own full-width, unclipped pass; the per-group strips each stop
+        # well short of centre (see draw_gesture_connector_live). It is as
+        # visible as the fainter of the two pads.
         pv = layers.get("pv")
-        if pv is not None and pv.gesture:
-            snapshot.push_opacity(open_t)
+        if pv is not None and pv.gesture and "LPad" in groups and "RPad" in groups:
+            snapshot.push_opacity(min(opacity["LPad"], opacity["RPad"]))
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
-            draw_gesture_connector_live(cr, layers, sw, open_t)
+            draw_gesture_connector_live(cr, layers, sw, dx["LPad"], dx["RPad"])
             snapshot.pop()
 
-        center_surf = layers["center_surf"]
-        snapshot.push_opacity(open_t)
-        snapshot.append_texture(self._texture("center", center_surf), full(center_surf))
-        snapshot.pop()
+        if "DPad" in groups:
+            snapshot.push_opacity(opacity["DPad"])
+            self._draw_dpad_3d(snapshot, sw, sh, dx["DPad"], groups["DPad"].vms)
+            snapshot.pop()
 
-        self._draw_dpad_3d(snapshot, sw, sh)
-
-        if self._active_toasts:
+        if self._full and self._active_toasts:
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
             draw_toast(cr, sw, sh, self._active_toasts, start_y=sh - 40)
 
         if t0 is not None:
+            vals = " ".join(f"{g}={opacity[g]:.2f}" for g in shown)
             print(f"[deckery-hud] snapshot_split: {(time.perf_counter() - t0) * 1000:.1f}ms "
-                  f"(open_t={open_t:.2f}, screen={sw}x{sh}@{scale:.3g})", flush=True)
+                  f"({vals}, screen={sw}x{sh}@{scale:.3g})", flush=True)
 
     def _draw_inner_split(self, cr, sw, sh):
         self._set_split_input_region()
@@ -599,18 +710,15 @@ class Win(Gtk.ApplicationWindow):
         cr.paint()
         cr.set_operator(cairo.Operator.OVER)
 
-        mid_anim = 0.0 < self._open_anim.value < 1.0
-        t0 = time.perf_counter() if mid_anim else None
+        # Only reached for an unreadable state, which draw_hud_split turns
+        # into a message; it fades with the centre column.
         press_t = {k: a.value for k, a in self._press_anims.items()}
         draw_hud_split(cr, self._front, self._back, self._state, sw, sh,
-                       open_t=self._open_anim.value, press_t=press_t, draw_dpad=False)
-        if t0 is not None:
-            print(f"[deckery-hud] draw_hud_split: {(time.perf_counter() - t0) * 1000:.1f}ms "
-                  f"(open_t={self._open_anim.value:.2f}, screen={sw}x{sh})", flush=True)
+                       open_t=self._anims["center"].value, press_t=press_t, draw_dpad=False)
 
         draw_toast(cr, sw, sh, self._active_toasts, start_y=sh - 40)
 
-    def _draw_dpad_3d(self, snapshot, sw, sh):
+    def _draw_dpad_3d(self, snapshot, sw, sh, dx, vms):
         """The d-pad's real 3D tilt — a genuine Gtk.Snapshot perspective/
         rotate_3d transform, not a 2D stand-in (see draw_dpad_live's own
         non-3D hinge-scale fallback, used when draw_dpad=True instead — not
@@ -621,8 +729,8 @@ class Win(Gtk.ApplicationWindow):
         cairo content is appended — it can't be retrofitted onto content
         that's already been appended through a different (non-transformed)
         block."""
-        ox, oy, scale, cx, cy = get_dpad_geometry(sw, sh, self._open_anim.value)
-        vms = classify_all(self._state, _BTNS.keys())
+        ox, oy, scale, cx, cy = get_dpad_geometry(sw, sh, 1.0)
+        ox, cx = ox + dx, cx + dx
         press_t = {k: a.value for k, a in self._press_anims.items()}
 
         up    = press_t.get("BTN_DPAD_UP", 0.0)
