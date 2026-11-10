@@ -247,6 +247,17 @@ class DiffTests(unittest.TestCase):
         settings._set_debug(False)
         self.assertIs(settings.debug_enabled(), False)
 
+    def test_dbg_only_prints_with_debug(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            settings.dbg("quiet")
+            settings._set_debug(True)
+            try:
+                settings.dbg("loud")
+            finally:
+                settings._set_debug(False)
+        self.assertEqual(out.getvalue(), "[deckery-hud] loud\n")
+
     def test_diff(self):
         self.assertEqual(diff(Settings(), Settings(osd=OsdSettings(enabled=False))),
                          {"osd.enabled"})

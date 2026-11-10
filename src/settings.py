@@ -129,6 +129,13 @@ def debug_enabled():
     return _debug
 
 
+def dbg(msg):
+    """Diagnostic line for the journal, only with [debug] enabled. Errors and
+    tracebacks print unconditionally; this is for timing and cache chatter."""
+    if _debug:
+        print(f"[deckery-hud] {msg}", flush=True)
+
+
 def _set_debug(on):
     global _debug
     _debug = on
