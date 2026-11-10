@@ -247,6 +247,11 @@ def ensure_file(path=None):
     path = Path(path) if path else settings_path()
     if path.exists():
         return
+    if path.is_symlink():
+        # A link whose target is not there yet (a dotfiles checkout still
+        # missing): writing a template over it would cut it loose for good.
+        _warn(f"{path} zeigt auf eine fehlende Datei; keine Vorlage angelegt")
+        return
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         _write_atomic(path, template())
@@ -275,6 +280,12 @@ def remember(key, value, path=None):
         raise ValueError(f"{key}: {problem}")
 
     path = Path(path) if path else settings_path()
+    if path.is_symlink() and not path.exists():
+        _warn(f"{path} zeigt auf eine fehlende Datei; {key} nicht gespeichert")
+        return False
+    # Write the link's target, not the link: replacing the link with a regular
+    # file would silently take the file out of the user's dotfiles.
+    path = Path(os.path.realpath(path))
     try:
         # Only needed here: loading works without it, so a missing package
         # costs saving a choice, never starting the HUD.

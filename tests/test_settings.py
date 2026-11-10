@@ -212,6 +212,25 @@ class RememberTests(_TmpFile):
             os.umask(old)
         self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o644)
 
+    def test_remember_writes_through_symlink(self):
+        target_dir = self.dir / "dotfiles"
+        target_dir.mkdir()
+        target = target_dir / "hud.toml"
+        target.write_text("[osd]\nenabled = true\n", encoding="utf-8")
+        self.path.symlink_to(target)
+        self.assertTrue(settings.remember("osd.enabled", False, self.path))
+        self.assertTrue(self.path.is_symlink())
+        self.assertIs(load(target).osd.enabled, False)
+        self.assertEqual(list(self.dir.glob(".settings-*")), [])
+
+    def test_ensure_file_leaves_dangling_symlink(self):
+        self.path.symlink_to(self.dir / "missing" / "hud.toml")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ensure_file(self.path)
+        self.assertTrue(self.path.is_symlink())
+        self.assertFalse((self.dir / "missing").exists())
+
     def test_remember_without_tomlkit(self):
         with mock.patch.dict(sys.modules, {"tomlkit": None}):
             result, err = self.remember_capturing("layout.design", "split")
