@@ -389,7 +389,8 @@ def _get_group_layer(name, content, vms, pv, anchor_x_val, sw, sh, active_press,
     side = _group_side(name)
     gvms = _mask_vms(vms, name, content)
     own = set(CLUSTER_BUTTONS.get(name, ()))
-    vms_key = {k: v for k, v in gvms.items() if k in own}
+    # Unmasked: rows a filter hides still take part in the layout.
+    vms_key = {k: v for k, v in vms.items() if k in own}
     if name == "l_pad":
         pv_key = (pv.lpad_label, pv.lpad_active, pv.gesture)
     elif name == "r_pad":
@@ -405,7 +406,7 @@ def _get_group_layer(name, content, vms, pv, anchor_x_val, sw, sh, active_press,
 
     def draw(cr):
         _render_part_cluster(cr, name, *tx, gvms, active_press=active_press, pv=pv, art=content.art)
-        _draw_cluster_callouts(cr, side, name, tx, gvms, pv, anchor_x_val, content)
+        _draw_cluster_callouts(cr, side, name, tx, vms, pv, anchor_x_val, content)
 
     _t0 = time.perf_counter()
     surf, rect = _render_cropped(draw, sw, sh, dev_scale)
@@ -1399,14 +1400,15 @@ _ICON_PAD_LEGEND = {"Mt Trackpad"}
 
 def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, content=FULL):
     """Legend rows for one cluster. content (reveal.Content) narrows them
-    to a subset of buttons and decides whether the pad's mode row shows."""
+    to a subset of buttons and decides whether the pad's mode row shows.
+    Rows left out are still laid out (hidden=True), so the ones drawn sit
+    exactly where the full HUD puts them — vms must be the unmasked ones
+    for the same reason."""
     ox, oy, scale = tx
     entries = []
     pad_icon = None   # (dot_x, dot_y, active) for an _ICON_PAD_LEGEND mode, set below
     for btn_key, (sx, sy, btn_side, short, view) in _BTNS.items():
         if _cluster_of(btn_key, name) is None:
-            continue
-        if content.legends is not None and btn_key not in content.legends:
             continue
         vm = vms[btn_key]
         if not vm.bound and not _SHOW_ALL and not vm.is_active:
@@ -1469,9 +1471,10 @@ def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, content=FULL):
             # itself reacting rather than the button, on top of the
             # button's own fill wash already doing that job.
             grow_on_active=(btn_key not in _ABXY_BTNS),
+            hidden=content.legends is not None and btn_key not in content.legends,
         ))
 
-    if name in ("l_pad", "r_pad") and content.pad_label:
+    if name in ("l_pad", "r_pad"):
         pad_key = "l" if name == "l_pad" else "r"
         bounds = _LPAD if pad_key == "l" else _RPAD
         # Inner vertical edge at mid-height — left pad's right edge,
@@ -1499,13 +1502,14 @@ def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, content=FULL):
             # so neither side gets its own separate row here.
             pass
         elif label in _ICON_PAD_LEGEND:
-            pad_icon = (dot_x, dot_y, active)
+            if content.pad_label:
+                pad_icon = (dot_x, dot_y, active)
         elif label != "—" and label not in _HIDDEN_PAD_LEGEND:
             entries.append(_Callout(
                 sort_y=dot_y, dot_x=dot_x, dot_y=dot_y,
                 name="LPad" if pad_key == "l" else "RPad", action=label,
                 bound=True, active=active, active_mod=pv.gesture, show_dot=False,
-                show_name=False,
+                show_name=False, hidden=not content.pad_label,
             ))
 
     entries.sort(key=lambda e: e.sort_y)

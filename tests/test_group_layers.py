@@ -75,3 +75,31 @@ def test_content_union():
     a = Content(frozenset({"BTN_TL"}), False, "all")
     assert a.union(PAD_ONLY) == Content(frozenset({"BTN_TL"}), True, "all")
     assert a.union(FULL) == FULL
+
+
+def _on_screen(layer):
+    """The group's surface pasted at its rect on a screen-sized buffer."""
+    import cairo
+    import numpy as np
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, SW, SH)
+    cr = cairo.Context(surf)
+    cr.set_source_surface(layer.surface, layer.rect[0], layer.rect[1])
+    cr.paint()
+    surf.flush()
+    return np.ndarray((SH, surf.get_stride() // 4, 4), np.uint8, surf.get_data())[:, :SW].copy()
+
+
+def test_filtered_rows_keep_full_layout_position():
+    """A filtered group is a subset of the full one, pixel for pixel — its
+    rows sit exactly where they do in the full HUD."""
+    state = copy.deepcopy(SAMPLES["held_modifier"])
+    for k, a in (("BTN_DPAD_DOWN", "KEY_DOWN"), ("BTN_DPAD_LEFT", "KEY_LEFT"),
+                 ("BTN_DPAD_RIGHT", "KEY_RIGHT")):
+        state["bindings"][k] = {"action": [a], "kind": "remap", "label": None,
+                                "origin": "Steam Deck", "silent": False}
+    only_up = Content(frozenset({"BTN_DPAD_UP"}), False, "all")
+    full = _on_screen(_layers(state, {"l_face": FULL})["l_face"])
+    filtered = _on_screen(_layers(state, {"l_face": only_up})["l_face"])
+    ink = filtered[..., 3] > 0
+    mismatch = (filtered[ink] != full[ink]).any(axis=1).sum()
+    assert mismatch <= 0.02 * ink.sum()

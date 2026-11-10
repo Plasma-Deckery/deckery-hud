@@ -234,3 +234,38 @@ def test_anim_rapid_flips_end_consistent():
     assert not a.tick(end)
     assert a.value == 0.0
     assert not a.target
+
+
+# ── Final-review fixes ────────────────────────────────────────────────────
+
+def _makima_pads(l, r, gesture):
+    # makima reports per-pad touching as False while a gesture is active
+    # (lpad_touching = !gesture_touching && touching_hw).
+    return _state(lpad=l and not gesture, rpad=r and not gesture, gesture=gesture)
+
+
+def test_gesture_survivor_pad_stays():
+    r = Reveal(S)
+    r.update(_makima_pads(True, False, False), 0.0)
+    r.update(_makima_pads(True, True, True), 0.1)
+    assert set(r.update(_makima_pads(True, True, True), 2.0)) == {"l_pad", "r_pad"}
+    # right finger lifts: gesture ends, left pad survives
+    for t in (3.0, 3.2, 3.49, 3.5, 4.0, 4.6):
+        assert "l_pad" in r.update(_makima_pads(True, False, False), t), t
+    assert set(r.update(_makima_pads(True, False, False), 3.6)) == {"l_pad"}
+
+
+def test_hold_does_not_fire_after_release():
+    h = Hold(1500, 500)
+    h.update(True, 0.0)
+    h.update(False, 1.2)
+    assert not h.update(False, 1.6)
+    assert not h.update(False, 1.7)
+
+
+def test_hold_fires_when_raw_returns_after_threshold():
+    h = Hold(1500, 500)
+    h.update(True, 0.0)
+    h.update(False, 1.4)
+    assert not h.update(False, 1.6)
+    assert h.update(True, 1.7)

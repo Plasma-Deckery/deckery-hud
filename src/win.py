@@ -22,6 +22,7 @@ from layout import (HUD_W, HUD_H, _TITLE_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE
 from renderer import draw_hud
 from toast import draw_toast
 from anim import HoverAnim
+from reveal import GROUPS, GroupAnim, RevealSettings
 
 # Experimental split-screen layout (issue #21), opt-in only — the shipping
 # default stays the classic centred renderer. See docs/SPLIT_LAYOUT.md.
@@ -32,7 +33,6 @@ if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
                                 draw_gesture_connector_live)
-    from reveal import GROUPS, GroupAnim, RevealSettings
     from layout_split import compute_layout, center_badge_rect, center_close_rect
 
 
@@ -377,15 +377,19 @@ class Win(Gtk.ApplicationWindow):
                   flush=True)
         self._last_tick = now
 
-        # Second tick after mapping = the first frame has been presented
-        # (the frame clock only ticks again once it has), so the stall is
-        # behind us: restart every running transition from where it began.
+        # Until the second tick after mapping — the first frame has been
+        # presented then (the frame clock only ticks again once it has) —
+        # hold every transition at its start. Merely restarting the clock at
+        # that tick isn't enough: a first frame longer than a fade (cold or
+        # after idle, measured up to ~275ms) would have finished it already.
         if self._map_ticks is not None:
             self._map_ticks += 1
-            if self._map_ticks == 2:
-                for a in self._anims.values():
-                    a.restart_clock(now)
+            for a in self._anims.values():
+                a.restart_clock(now)
+            if self._map_ticks >= 2:
                 self._map_ticks = None
+            self._da.queue_draw()
+            return GLib.SOURCE_CONTINUE
 
         running = False
         for a in self._anims.values():
@@ -581,10 +585,10 @@ class Win(Gtk.ApplicationWindow):
         def rect(x, y, w, h):
             return Graphene.Rect().init(x, y, w, h)
 
-        def placed(g, append, alpha=1.0):
+        def placed(g, append):
             snapshot.save()
             snapshot.translate(Graphene.Point().init(dx[g], 0))
-            snapshot.push_opacity(opacity[g] * alpha)
+            snapshot.push_opacity(opacity[g])
             append()
             snapshot.pop()
             snapshot.restore()
@@ -599,12 +603,20 @@ class Win(Gtk.ApplicationWindow):
         for g in shown:
             layer = groups[g]
             tex = self._texture(g, layer.surface)
-            k = 1.0
             if g in self._xfade:
+                # A real dissolve, not new-over-old: two plain alphas would
+                # dim whatever both textures share (the art) mid-way.
                 old_tex, old_rect, start = self._xfade[g]
                 k = min(1.0, (now - start) / xf) if xf > 0 else 1.0
-                placed(g, lambda: snapshot.append_texture(old_tex, rect(*old_rect)), 1.0 - k)
-            placed(g, lambda: snapshot.append_texture(tex, rect(*layer.rect)), k)
+                def both():
+                    snapshot.push_cross_fade(k)
+                    snapshot.append_texture(old_tex, rect(*old_rect))
+                    snapshot.pop()
+                    snapshot.append_texture(tex, rect(*layer.rect))
+                    snapshot.pop()
+                placed(g, both)
+            else:
+                placed(g, lambda: snapshot.append_texture(tex, rect(*layer.rect)))
             self._drawn[g] = (tex, layer.rect)
         for g in shown:
             if groups[g].tx is None:

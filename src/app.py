@@ -16,9 +16,16 @@ from gi.repository import Gtk, Gio, GLib
 from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_off,
                  load_state, _STATE, auth_daemon_present, start_auth_session,
                  start_pin_change)
-from win import Win, _LAYOUT_MODE
+import win
+from win import Win
 from osd_win import OsdWin
 from reveal import Reveal, RevealSettings
+
+def _split_mode():
+    """Read at call time, not import: the layout can be switched while
+    running (win.py gets reloaded)."""
+    return win._LAYOUT_MODE == "split"
+
 
 # ── D-Bus ─────────────────────────────────────────────────────────────────────
 _DBUS_NAME = "de.plasma_deckery.hud"
@@ -54,7 +61,7 @@ class App(Gtk.Application):
         # The full HUD is open (paused, takes input). Split mode can also
         # show single groups with this False — see Reveal / _reveal_sync.
         self._full              = False
-        self._settings          = RevealSettings(enabled=_LAYOUT_MODE == "split")
+        self._settings          = RevealSettings()
         self._reveal            = Reveal(self._settings)
         self._deadline_src      = None
         self._analog_on         = False
@@ -123,7 +130,7 @@ class App(Gtk.Application):
             self._win.on_state(self._state)
         if not self._full and self._osd_enabled and self._osd_win.is_visible():
             self._osd_win.on_state(self._state)
-        if _LAYOUT_MODE == "split":
+        if _split_mode():
             self._reveal_sync()
 
     # ── Single groups (split mode, B-12) ──────────────────────────────────
@@ -180,7 +187,7 @@ class App(Gtk.Application):
         self._osd_win.set_visible(False)
         makima_pause()
         self._win.on_state(self._state)
-        if _LAYOUT_MODE == "split":
+        if _split_mode():
             self._reveal.full = True
             self._reveal_sync()
         else:
@@ -191,7 +198,7 @@ class App(Gtk.Application):
         if self._win is None:
             return
         self._full = False
-        if _LAYOUT_MODE == "split":
+        if _split_mode():
             # Groups a detector still wants stay; the rest slides out. The
             # analog export follows in _on_groups_changed.
             self._reveal.full = False

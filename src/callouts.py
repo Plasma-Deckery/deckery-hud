@@ -35,6 +35,8 @@ class _Callout:
     is_avail_virt_mod: bool = False
     show_name: bool = True
     grow_on_active: bool = True
+    hidden: bool = False   # laid out like any row, but not drawn — keeps the
+                           # rows that are drawn exactly where they'd be with it
 
 # ── Display option ────────────────────────────────────────────────────────────
 # True  → show all buttons, unbound = dimmed with "—"
@@ -221,6 +223,8 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         is_avail_virt_mod = e.is_avail_virt_mod
         show_dot, sub_label, sub_active = e.show_dot, e.sub_label, e.sub_active
         ly = by if straight else t0 + offsets[i] + ROW / 2
+        if e.hidden:
+            continue
 
         # ── Derive rendering state once ───────────────────────────────────────
         # Priority: modifier-held/combo > layer-override > active > bound > unbound.

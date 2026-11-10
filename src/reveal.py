@@ -65,7 +65,10 @@ class Want:
 class Hold:
     """Debounced "held for a while". raw is the live signal; drops shorter
     than release_ms count as still held. Fires once held (bridged) for
-    hold_ms, and stays fired until raw has been off for release_ms."""
+    hold_ms while raw is on, and stays fired until raw has been off for
+    release_ms. A threshold that passes during a drop doesn't fire on its
+    own: otherwise an unrelated state write landing in that drop would
+    flash the group up just after the finger lifted."""
 
     def __init__(self, hold_ms, release_ms):
         self.hold = hold_ms / 1000
@@ -83,7 +86,10 @@ class Hold:
                 self._off_since = now
             if now - self._off_since >= self.release:
                 self._since = self._off_since = None
-        return self._since is not None and now - self._since >= self.hold
+        if self._since is None:
+            return False
+        held_until = now if self._off_since is None else self._off_since
+        return held_until - self._since >= self.hold
 
     def next_change(self, now):
         """When update() would answer differently without a new raw value."""
@@ -133,11 +139,15 @@ class Reveal:
             self._mod_contents = {}
         else:
             pads = state.get("trackpads") or {}
+            gesture = bool((pads.get("gesture") or {}).get("touching"))
             for name, side in (("l_pad", "left"), ("r_pad", "right")):
-                touching = bool((pads.get(side) or {}).get("touching"))
+                # makima reports a pad's own touching as False while a
+                # gesture is on. Counting the gesture as touching both keeps
+                # each pad's clock running, so the finger that stays when
+                # the other lifts keeps its pad instead of it blinking out.
+                touching = bool((pads.get(side) or {}).get("touching")) or gesture
                 if self._pad[name].update(touching and s.pad_enabled, now):
                     want(name, PAD_ONLY)
-            gesture = bool((pads.get("gesture") or {}).get("touching"))
             if self._gesture.update(gesture and s.gesture_enabled, now):
                 want("l_pad", PAD_ONLY)
                 want("r_pad", PAD_ONLY)
