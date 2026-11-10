@@ -1,0 +1,256 @@
+"""
+settings.py — the HUD's settings file: description, loading, template, writing.
+
+Lives at $XDG_CONFIG_HOME/deckery-hud/settings.toml (~/.config/deckery-hud/).
+Not in ~/.config/deckery/: makima loads every *.toml there as a binding config,
+and preferences.toml there is makima's own and rewritten by it.
+
+The file is shared between the user and the HUD. The user edits it by hand;
+the HUD writes single keys into it when a button makes a choice (remember()),
+keeping the user's comments and order. Nothing else decides a setting — no
+environment variable, no second state file. A key missing from the file means
+its default from the dataclasses below.
+
+Pure Python, no GTK: app.py does the watching and applies changes.
+
+── Adding a feature's settings ─────────────────────────────────────────────────
+1. A frozen dataclass with flat fields (bool / int / float / str). Each field
+   gets a default and `metadata=_meta("<one line of help>")`, plus
+   `choices=(...)` for a fixed set of strings or `minimum=` for a lower bound.
+   The class docstring is the section's help line.
+2. A field for it in `Settings` — its name is the [section] in the file.
+3. Its reaction to a change in App._apply_settings.
+Validation, the template and the file watching need nothing else.
+"""
+
+import dataclasses
+import json
+import os
+import sys
+import tempfile
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _meta(help, choices=None, minimum=None):
+    return {"help": help, "choices": choices, "minimum": minimum}
+
+
+# ── Description ───────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class LayoutSettings:
+    """Aussehen des HUD."""
+    design: str = field(default="classic", metadata=_meta(
+        'Welches Design: "split" (neu) oder "classic".',
+        choices=("classic", "split")))
+
+
+@dataclass(frozen=True)
+class OsdSettings:
+    """Anzeige am Bildschirmrand."""
+    enabled: bool = field(default=True, metadata=_meta(
+        "Kleine Anzeige am Bildschirmrand, solange das HUD zu ist."))
+
+
+@dataclass(frozen=True)
+class RevealSettings:
+    """Gruppen einzeln einblenden, ohne das volle HUD zu öffnen."""
+    enabled: bool = field(default=True, metadata=_meta(
+        "Hauptschalter für das einzelne Einblenden."))
+    pad_enabled: bool = field(default=True, metadata=_meta(
+        "Ein länger benutztes Trackpad blendet sich mit Label ein."))
+    gesture_enabled: bool = field(default=True, metadata=_meta(
+        "Beide Pads gleichzeitig berührt (Geste) blendet beide ein."))
+    modifier_enabled: bool = field(default=True, metadata=_meta(
+        "Ein länger gehaltener Modifier zeigt die Belegungen seiner Ebene."))
+    hold_ms: int = field(default=1500, metadata=_meta(
+        "Wie lange Pad oder Modifier benutzt werden, bis sie erscheinen (ms).",
+        minimum=1))
+    gesture_hold_ms: int = field(default=1500, metadata=_meta(
+        "Wie lange die Geste gehalten wird, bis beide Pads erscheinen (ms).",
+        minimum=1))
+    release_ms: int = field(default=500, metadata=_meta(
+        "Kurzes Abheben, das überbrückt wird, und Wartezeit vor dem Ausblenden (ms).",
+        minimum=1))
+    slide_ms: int = field(default=260, metadata=_meta(
+        "Dauer des Hereinfahrens (ms).", minimum=1))
+    fade_in_ms: int = field(default=200, metadata=_meta(
+        "Dauer des Einblendens (ms).", minimum=1))
+    fade_out_ms: int = field(default=300, metadata=_meta(
+        "Dauer des Ausblendens (ms).", minimum=1))
+    crossfade_ms: int = field(default=120, metadata=_meta(
+        "Überblenden, wenn eine sichtbare Gruppe ihren Inhalt wechselt (ms).",
+        minimum=1))
+
+
+@dataclass(frozen=True)
+class DebugSettings:
+    """Fehlersuche."""
+    enabled: bool = field(default=False, metadata=_meta(
+        "Zusätzliche Diagnose-Ausgaben im Log."))
+
+
+@dataclass(frozen=True)
+class Settings:
+    layout: LayoutSettings = LayoutSettings()
+    osd: OsdSettings = OsdSettings()
+    reveal: RevealSettings = RevealSettings()
+    debug: DebugSettings = DebugSettings()
+
+
+_HEADER = """\
+# Deckery HUD — Einstellungen.
+# Zeilen mit # sind aus und zeigen den Standardwert. Zum Ändern das #
+# entfernen und den Wert anpassen. Änderungen wirken sofort.
+"""
+
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+
+def settings_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(Path.home(), ".config")
+    return Path(base) / "deckery-hud" / "settings.toml"
+
+
+def _warn(msg):
+    print(f"deckery-hud settings: {msg}", file=sys.stderr)
+
+
+# ── Validation ────────────────────────────────────────────────────────────────
+
+def _problem(f, value):
+    """Why `value` is not acceptable for dataclass field `f`, or None if it is."""
+    # bool is a subclass of int; `enabled = 1` or `hold_ms = true` is a mistake,
+    # not a value. An int for a float field is fine.
+    if f.type is bool:
+        ok = type(value) is bool
+    elif f.type is int:
+        ok = type(value) is int
+    elif f.type is float:
+        ok = type(value) in (int, float)
+    else:
+        ok = type(value) is str
+    if not ok:
+        return f"erwartet {f.type.__name__}, steht {value!r}"
+    choices = f.metadata.get("choices")
+    if choices and value not in choices:
+        return f"erlaubt: {', '.join(choices)}; steht {value!r}"
+    minimum = f.metadata.get("minimum")
+    if minimum is not None and value < minimum:
+        return f"mindestens {minimum}, steht {value!r}"
+    return None
+
+
+def _section_fields():
+    """(section name, section class) for every section in Settings."""
+    return [(s.name, s.default.__class__) for s in dataclasses.fields(Settings)]
+
+
+# ── Loading ───────────────────────────────────────────────────────────────────
+
+def load(path=None, previous=None):
+    """Read the file and return a complete Settings, fresh on every call.
+
+    A missing or empty file gives the defaults. A file that cannot be parsed
+    gives `previous` (the values in force so far) or, without one, the
+    defaults. A single bad value only costs its own key.
+    """
+    path = Path(path) if path else settings_path()
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return Settings()
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
+        kept = "bisherige Werte bleiben" if previous else "Standardwerte gelten"
+        _warn(f"{path} nicht lesbar ({e}); {kept}")
+        return previous if previous is not None else Settings()
+
+    known = dict(_section_fields())
+    for name in data:
+        if name not in known:
+            _warn(f"unbekannte Sektion oder Schlüssel '{name}', ignoriert")
+
+    sections = {}
+    for name, cls in known.items():
+        given = data.get(name, {})
+        if not isinstance(given, dict):
+            _warn(f"'{name}' muss eine Sektion [{name}] sein, ignoriert")
+            given = {}
+        fields_by_name = {f.name: f for f in dataclasses.fields(cls)}
+        values = {}
+        for key, value in given.items():
+            f = fields_by_name.get(key)
+            if f is None:
+                _warn(f"unbekannter Schlüssel '{name}.{key}', ignoriert")
+                continue
+            problem = _problem(f, value)
+            if problem:
+                _warn(f"'{name}.{key}': {problem}; Standard {f.default!r} gilt")
+                continue
+            values[key] = value
+        sections[name] = cls(**values)
+    return Settings(**sections)
+
+
+def diff(old, new):
+    """Keys ("section.field") whose value differs between two Settings."""
+    changed = set()
+    for name, cls in _section_fields():
+        a, b = getattr(old, name), getattr(new, name)
+        for f in dataclasses.fields(cls):
+            if getattr(a, f.name) != getattr(b, f.name):
+                changed.add(f"{name}.{f.name}")
+    return changed
+
+
+# ── Template ──────────────────────────────────────────────────────────────────
+
+def _toml_literal(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    return repr(value)
+
+
+def template():
+    """The file written on first start: every setting commented out at its default."""
+    lines = [_HEADER]
+    for name, cls in _section_fields():
+        lines.append(f"[{name}]")
+        lines.append(f"# {cls.__doc__}")
+        for f in dataclasses.fields(cls):
+            lines.append(f"# {f.metadata['help']}")
+            lines.append(f"# {f.name} = {_toml_literal(f.default)}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def ensure_file(path=None):
+    """Write the template if the file does not exist. Never touches an existing one."""
+    path = Path(path) if path else settings_path()
+    if path.exists():
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomic(path, template())
+    except OSError as e:
+        _warn(f"Vorlage {path} nicht angelegt ({e}); Standardwerte gelten")
+
+
+def _write_atomic(path, text):
+    """Write via a temporary file in the same directory and rename, so a reader
+    (the file monitor, an editor) never sees a half-written file."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".settings-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
