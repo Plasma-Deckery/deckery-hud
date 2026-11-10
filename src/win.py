@@ -13,29 +13,31 @@ gi.require_version('Gdk', '4.0')
 gi.require_version('Gsk', '4.0')
 from gi.repository import Gtk, Gio, Gtk4LayerShell as LayerShell, Rsvg, GLib, Graphene, Gdk, Gsk
 import cairo
-import os
 import time
 
 from ipc import makima_pause, makima_resume, _FRONT_SVG, _BACK_SVG
 from layout import (HUD_W, HUD_H, _TITLE_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE_H,
-                    _AUTH_W, _AUTH_H, _AUTH_Y, _SHOW_X, _CHG_X)
+                    _AUTH_W, _AUTH_H, _AUTH_Y, _SHOW_X, _CHG_X,
+                    _SPLIT_BTN_X, _OSD_BTN_W)
 from renderer import draw_hud
 from toast import draw_toast
 from anim import HoverAnim
 from reveal import GROUPS, GroupAnim, RevealSettings
 from settings import dbg, debug_enabled
+import layout_choice
 
 # Experimental split-screen layout (issue #21), opt-in only — the shipping
 # default stays the classic centred renderer. See docs/SPLIT_LAYOUT.md.
 # Imported only when selected, so a bug in the experimental path can't affect
-# anyone who hasn't opted in.
-_LAYOUT_MODE = os.environ.get("DECKERY_HUD_LAYOUT", "classic")
+# anyone who hasn't opted in. Read once per import: switching designs from
+# the HUD (App.switch_layout) reloads this module and builds a fresh Win.
+_LAYOUT_MODE = layout_choice.current()
 if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
                                 draw_gesture_connector_live, SHADOW_STYLE, warm_all)
     from shadow import bleed_transfer
-    from layout_split import compute_layout, center_badge_rect, center_close_rect
+    from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
 
 
 class _HudArea(Gtk.Widget):
@@ -240,6 +242,12 @@ class Win(Gtk.ApplicationWindow):
         hx, hy = (sw - HUD_W) / 2, (sh - HUD_H) / 2
         return hx + _CHG_X, hy + _AUTH_Y, _AUTH_W, _AUTH_H
 
+    def _split_btn_screen_rect(self):
+        sw, sh = self._da.get_width(), self._da.get_height()
+        hx, hy = (sw - HUD_W) / 2, (sh - HUD_H) / 2
+        bh = 20
+        return hx + _SPLIT_BTN_X, hy + (_TITLE_H - bh) / 2, _OSD_BTN_W, bh
+
     def _close_btn_screen_rect(self):
         sw, sh = self._da.get_width(), self._da.get_height()
         hx = (sw - HUD_W) / 2
@@ -255,6 +263,7 @@ class Win(Gtk.ApplicationWindow):
         rx, ry, rw, rh = self._remap_btn_screen_rect()
         ax, ay, aw, ah = self._auth_btn_screen_rect()
         gx, gy, gw, gh = self._change_btn_screen_rect()
+        sx, sy, sw_, sh_ = self._split_btn_screen_rect()
         cx, cy, cw, ch = self._close_btn_screen_rect()
         if bx <= x <= bx + bw and by <= y <= by + bh:
             paused = self._state.get("context", {}).get("paused", False)
@@ -275,6 +284,8 @@ class Win(Gtk.ApplicationWindow):
         elif (self.get_application()._auth_available
               and gx <= x <= gx + gw and gy <= y <= gy + gh):
             self.get_application().change_auth()
+        elif sx <= x <= sx + sw_ and sy <= y <= sy + sh_:
+            self.get_application().switch_layout("split")
         elif cx <= x <= cx + cw and cy <= y <= cy + ch:
             self.get_application().hide_hud()
         # else: dead zone — ignore
@@ -297,12 +308,13 @@ class Win(Gtk.ApplicationWindow):
     def _split_rects(self):
         sw, sh = self._da.get_width(), self._da.get_height()
         _clusters, _anchor_x, center = compute_layout(sw, sh)
-        return center_badge_rect(center), center_close_rect(center)
+        return center_badge_rect(center), center_close_rect(center), center_classic_rect(center)
 
     def _on_click_split(self, x, y):
-        badge, close = self._split_rects()
+        badge, close, classic = self._split_rects()
         bx, by, bw, bh = badge
         cx, cy, cw, ch = close
+        kx, ky, kw, kh = classic
         if bx <= x <= bx + bw and by <= y <= by + bh:
             paused = self._state.get("context", {}).get("paused", False)
             if paused:
@@ -314,6 +326,8 @@ class Win(Gtk.ApplicationWindow):
             self._da.queue_draw()
         elif cx <= x <= cx + cw and cy <= y <= cy + ch:
             self.get_application().hide_hud()
+        elif kx <= x <= kx + kw and ky <= y <= ky + kh:
+            self.get_application().switch_layout("classic")
 
     def _on_motion_leave(self, _ctrl):
         self._pause_anim.set(False)
@@ -333,6 +347,16 @@ class Win(Gtk.ApplicationWindow):
             self.set_visible(False)
             if on_closed:
                 on_closed()
+
+    def retire(self):
+        """Destroy this window for good — App.switch_layout replaces it with
+        a Win of the other design. Instant, no close animation: the new
+        window takes over the screen at once. Timer-driven redraws are
+        stopped first so nothing keeps drawing into the dead widget."""
+        if self._toast_source is not None:
+            GLib.source_remove(self._toast_source)
+            self._toast_source = None
+        self.destroy()
 
     # ── Group visibility (split mode) ────────────────────────────────────────
 
@@ -572,6 +596,9 @@ class Win(Gtk.ApplicationWindow):
         region.union(cairo.Region(badge))
         region.union(cairo.Region(osd_btn))
         region.union(cairo.Region(remap_btn))
+        sx, sy, sw_, sh_ = self._split_btn_screen_rect()
+        region.union(cairo.Region(
+            cairo.RectangleInt(int(sx), int(sy), int(sw_), int(sh_))))
         # Without these two the auth pills draw but cannot be clicked at all:
         # a Wayland surface receives no pointer events outside its input
         # region, so the handler is never even consulted.
@@ -611,11 +638,13 @@ class Win(Gtk.ApplicationWindow):
             # underneath, and makima keeps running.
             self.get_surface().set_input_region(cairo.Region())
             return
-        badge, close = self._split_rects()
+        badge, close, classic = self._split_rects()
         bx, by, bw, bh = badge
         cx, cy, cw, ch = close
+        kx, ky, kw, kh = classic
         region = cairo.Region(cairo.RectangleInt(int(bx), int(by), int(bw), int(bh)))
         region.union(cairo.Region(cairo.RectangleInt(int(cx), int(cy), int(cw), int(ch))))
+        region.union(cairo.Region(cairo.RectangleInt(int(kx), int(ky), int(kw), int(kh))))
         self.get_surface().set_input_region(region)
 
     def _texture(self, name, surf):

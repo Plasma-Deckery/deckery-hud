@@ -54,10 +54,12 @@ _AUTH_Y   = (_TITLE_H - _AUTH_H) / 2
 _OSD_BTN_W = 48
 _OSD_BTN_X = HUD_W - 28 - 16 - _OSD_BTN_W
 _RMP_BTN_X = _OSD_BTN_X - 8 - _OSD_BTN_W
+# Switch to the split design (backlog B-05) — left of the On pill, same size.
+_SPLIT_BTN_X = _RMP_BTN_X - 8 - _OSD_BTN_W
 
 _AUTH_PAIR_W = 2 * _AUTH_W + _AUTH_GAP
 _AUTH_GAP_L  = _PAUSE_X + _PAUSE_W        # right edge of the Controls badge
-_AUTH_GAP_R  = _RMP_BTN_X                 # left edge of the On pill
+_AUTH_GAP_R  = _SPLIT_BTN_X               # left edge of the Split pill
 _SHOW_X = _AUTH_GAP_L + (_AUTH_GAP_R - _AUTH_GAP_L - _AUTH_PAIR_W) / 2
 _CHG_X  = _SHOW_X + _AUTH_W + _AUTH_GAP
 

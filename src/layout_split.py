@@ -148,3 +148,11 @@ def center_close_rect(center):
     x0, y0, x1, y1 = center
     ccx, ccy, r = x1 - 26, y0 + 26, 11
     return ccx - r, ccy - r, 2 * r, 2 * r
+
+
+def center_classic_rect(center):
+    """"Classic" pill (switch to the classic design, backlog B-05) — top-left
+    of the centre column, mirroring the close button on the right."""
+    x0, y0, x1, y1 = center
+    w, h = 56, 22
+    return x0 + 15, y0 + 26 - h / 2, w, h
