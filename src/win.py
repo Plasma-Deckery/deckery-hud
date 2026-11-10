@@ -32,7 +32,7 @@ _LAYOUT_MODE = os.environ.get("DECKERY_HUD_LAYOUT", "classic")
 if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
-                                draw_gesture_connector_live, SHADOW_STYLE)
+                                draw_gesture_connector_live, SHADOW_STYLE, warm_all)
     from shadow import bleed_transfer
     from layout_split import compute_layout, center_badge_rect, center_close_rect
 
@@ -113,7 +113,14 @@ class Win(Gtk.ApplicationWindow):
         LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
         LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
         LayerShell.set_exclusive_zone(self, -1)
-        LayerShell.set_namespace(self, "deckery-hud")
+        # KWin turns the namespace into a window type, and any name it doesn't
+        # know ("deckery-hud") makes a normal window — which its Scale effect
+        # zooms and fades on every map and unmap, on top of our own slide
+        # (B-03). "dock" is one it knows that neither Scale nor Fading Popups
+        # animates; the layer stays OVERLAY, KWin takes that from the layer
+        # shell, not the type. Split only: classic keeps the KWin zoom as its
+        # one transition.
+        LayerShell.set_namespace(self, "dock" if _LAYOUT_MODE == "split" else "deckery-hud")
         for edge in (LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT,
                      LayerShell.Edge.TOP,  LayerShell.Edge.BOTTOM):
             LayerShell.set_anchor(self, edge, True)
@@ -139,6 +146,8 @@ class Win(Gtk.ApplicationWindow):
         self._last_tick      = None   # see _on_group_tick's timing instrumentation
         self._tex_cache      = {}     # split mode: layer name -> (cairo surface, Gdk.Texture)
         self._map_ticks      = None   # see _need_surface / _on_group_tick
+        self._warm_state     = None   # see prewarm: set while its frame is pending
+        self._warm_ticks     = 0
 
         # ── Drawing area ──────────────────────────────────────────────────
         da = _HudArea(self._snapshot)
@@ -366,9 +375,50 @@ class Win(Gtk.ApplicationWindow):
             # first frame is actually on screen instead.
             self._map_ticks = 0
             self.present()
+        elif needed and self._warm_state is not None and self._map_ticks is None:
+            # Opened while prewarm still holds the window for its first
+            # frame: the same stall, so the same restart.
+            self._map_ticks = 0
         elif not needed and self.get_visible():
             self.set_visible(False)
             self._map_ticks = None
+
+    def prewarm(self, state):
+        """Build every cached layer once at startup, before anything
+        is shown. The first open after a start otherwise does it inside its
+        first frame — measured 234-275ms, long enough that the HUD popped
+        open with no visible slide (B-02).
+
+        Done mapped, for one empty frame: only the surface knows the size
+        and fractional scale the layers are cached under (Gdk.Monitor's
+        scale is wrong on the Deck's rotated panel — 1.76 for a real 1.1),
+        and the first map's own setup cost is paid here too. Nothing shows:
+        no group is visible, the input region is empty, and the "dock"
+        namespace keeps KWin from animating it."""
+        if self.get_visible():
+            return False
+        self._warm_state = state
+        self._warm_ticks = 0
+        self.present()
+        self._da.add_tick_callback(self._on_prewarm_tick)
+        return False   # one shot when run from GLib.idle_add
+
+    def _on_prewarm_tick(self, _widget, _clock):
+        # Second tick = the empty first frame is on screen (see _on_group_tick).
+        self._warm_ticks += 1
+        if self._warm_ticks < 2:
+            return GLib.SOURCE_CONTINUE
+        sw, sh = self._da.get_width(), self._da.get_height()
+        scale = self.get_surface().get_scale()
+        t0 = time.perf_counter()
+        for name, surf in warm_all(self._warm_state, sw, sh, dev_scale=scale).items():
+            self._texture(name, surf)
+        print(f"[deckery-hud] prewarm: {(time.perf_counter() - t0) * 1000:.1f}ms "
+              f"({sw}x{sh}@{scale:.3g})", flush=True)
+        self._warm_state = None
+        if not self.visible_groups():
+            self._need_surface(False)
+        return GLib.SOURCE_REMOVE
 
     def _start_ticking(self):
         if self._tick_id is None and (any(a.running for a in self._anims.values()) or self._xfade):
