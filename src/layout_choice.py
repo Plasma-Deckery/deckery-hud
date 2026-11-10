@@ -7,9 +7,9 @@ switching rebuilds the window by reloading win.py, so the choice has to live
 in a module that is not reloaded with it.
 
 For now the in-HUD choice only lasts until the service restarts. Persisting
-it is planned to come from the HUD settings file (backlog B-15); this module
-is where that hooks in, and the button choice must keep precedence over
-DECKERY_HUD_LAYOUT there, or a systemd drop-in would undo it on every restart.
+it comes with the HUD settings file (backlog B-15): these two functions then
+become settings.load().layout.design and settings.remember("layout.design",
+mode), and DECKERY_HUD_LAYOUT is no longer read at all.
 """
 
 import os

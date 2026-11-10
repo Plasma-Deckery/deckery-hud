@@ -312,8 +312,13 @@ class App(Gtk.Application):
         start_pin_change()
         return False   # one shot
 
-    def switch_layout(self, mode):
+    def switch_layout(self, mode, persist=True):
         """Switch between the classic and split design (the in-HUD buttons).
+
+        No-op if the window already runs `mode`. persist=False is for a
+        switch that came *from* the stored choice (the settings file edited
+        by hand, B-15): the source already holds `mode`, so it is not
+        written back.
 
         win.py picks its design once at import and only sets up what that
         design needs, so the window is rebuilt rather than switched: reload
@@ -323,7 +328,10 @@ class App(Gtk.Application):
         Everything that lives here (OSD/remap toggles, makima pause) is
         untouched; an open HUD stays open in the new design."""
         def _switch():
-            layout_choice.remember(mode)
+            if win._LAYOUT_MODE == mode:
+                return False
+            if persist:
+                layout_choice.remember(mode)
             was_open = self._win.is_visible()
             old = self._win
             importlib.reload(win)
