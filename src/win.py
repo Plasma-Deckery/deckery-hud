@@ -30,8 +30,10 @@ from anim import HoverAnim
 _LAYOUT_MODE = os.environ.get("DECKERY_HUD_LAYOUT", "classic")
 if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
-                                split_layers, draw_split_live, _side_slide_offset,
+                                group_layers, live_rect, draw_group_live, _side_slide_offset,
                                 draw_gesture_connector_live)
+    from reveal import FULL
+    from clusters import LEFT_STACK, RIGHT_STACK
     from layout_split import compute_layout, center_badge_rect, center_close_rect
     from viewmodel import classify_all
     from callouts import _BTNS
@@ -506,13 +508,13 @@ class Win(Gtk.ApplicationWindow):
         Drawing everything through a single full-screen append_cairo() meant
         GTK re-rasterized the whole screen in software and uploaded it as a
         fresh texture on every frame open_t changed — measured at 22-33ms
-        per frame during the slide on a 90Hz panel (~30-45fps). Here the
-        cached layers (backdrop halves, both sides, centre column) are
-        textures uploaded only when their content changes, and the slide
-        and fade are snapshot translate/opacity — composited on the GPU.
-        Only the genuinely live bits (trackpad dots, moving stick rings,
-        mid-press buttons) stay cairo, in two narrow strips over the
-        cluster columns rather than a full-screen node."""
+        per frame during the slide on a 90Hz panel (~30-45fps). Here every
+        group (the eight clusters and the centre column) is a cached
+        texture uploaded only when its content changes, with its own shadow
+        under it, and each group's slide and fade are snapshot translate/
+        opacity — composited on the GPU. Only the genuinely live bits
+        (trackpad dots, moving stick rings, mid-press buttons) stay cairo,
+        in one narrow strip per group rather than a full-screen node."""
         mid_anim = 0.0 < self._open_anim.value < 1.0
         t0 = time.perf_counter() if mid_anim else None
         self._set_split_input_region()
@@ -521,66 +523,50 @@ class Win(Gtk.ApplicationWindow):
         press_t = {k: a.value for k, a in self._press_anims.items()}
         surface = self.get_surface()
         scale = surface.get_scale() if surface is not None else 1.0
-        layers = split_layers(self._state, sw, sh, press_t, dev_scale=scale)
-        dx = {side: _side_slide_offset(side, sw, open_t) for side in ("left", "right")}
+        names = LEFT_STACK + RIGHT_STACK + ("center",)
+        layers = group_layers(self._state, sw, sh, {n: FULL for n in names}, press_t, dev_scale=scale)
+        groups = layers["groups"]
+        dx = {n: _side_slide_offset(groups[n].side, sw, open_t) if groups[n].side else 0.0
+              for n in names}
 
         def rect(x, y, w, h):
             return Graphene.Rect().init(x, y, w, h)
 
-        def full(surf):
-            # Exactly the texture's own device size in logical px, so it maps
-            # 1:1 onto the device pixel grid at rest — no resampling blur.
-            return rect(0, 0, surf.get_width() / scale, surf.get_height() / scale)
-
-        for (bx, bw, half), side in zip(layers["backdrop"], ("left", "right")):
+        def placed(name, append):
             snapshot.save()
-            snapshot.translate(Graphene.Point().init(dx[side], 0))
+            snapshot.translate(Graphene.Point().init(dx[name], 0))
             snapshot.push_opacity(open_t)
-            snapshot.append_scaled_texture(self._texture("backdrop_" + side, half),
-                                           Gsk.ScalingFilter.LINEAR, rect(bx, 0, bw, sh))
+            append()
             snapshot.pop()
             snapshot.restore()
 
-        for side in ("left", "right"):
-            surf = layers["sides"][side]
-            snapshot.save()
-            snapshot.translate(Graphene.Point().init(dx[side], 0))
-            snapshot.push_opacity(open_t)
-            snapshot.append_texture(self._texture(side, surf), full(surf))
-            snapshot.pop()
-            snapshot.restore()
-
-        # Live overlays: each strip covers its side's cluster column, plus
-        # room for a pressed button's adjacent action text while one is down.
-        col_left, _y0, col_right, _y1 = layers["center"]
-        for side in ("left", "right"):
-            prefix = "l_" if side == "left" else "r_"
-            pressed = any(_SCALE_ANIM_PARTS[k][1].startswith(prefix) for k in layers["active_press"])
-            extra = sw * 0.3 if pressed else 16
-            if side == "left":
-                x0, w = dx[side], col_left + extra
-            else:
-                x0, w = col_right - extra + dx[side], sw - col_right + extra
-            snapshot.push_opacity(open_t)
-            cr = snapshot.append_cairo(rect(x0, 0, w, sh))
-            draw_split_live(cr, self._state, layers, sw, sh, open_t, press_t, draw_dpad=False)
-            snapshot.pop()
+        # Every shadow before any content, so no group's shadow darkens a
+        # neighbour's text.
+        for name in names:
+            surf, x, y, w, h = groups[name].shadow
+            placed(name, lambda: snapshot.append_scaled_texture(
+                self._texture("shadow_" + name, surf), Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+        for name in names:
+            layer = groups[name]
+            placed(name, lambda: snapshot.append_texture(self._texture(name, layer.surface),
+                                                         rect(*layer.rect)))
+        for name in names:
+            if groups[name].tx is None:
+                continue
+            def live():
+                cr = snapshot.append_cairo(rect(*live_rect(name, layers, sw, sh)))
+                draw_group_live(cr, name, self._state, layers, 0.0, press_t, draw_dpad=False)
+            placed(name, live)
 
         # Two pads touching at once connects across screen centre — needs
-        # its own full-width, unclipped pass; the two strips just above
-        # each stop well short of centre (see draw_gesture_connector_live's
-        # own docstring for what went wrong trying to fold this into them).
+        # its own full-width, unclipped pass; the per-group strips each stop
+        # well short of centre (see draw_gesture_connector_live).
         pv = layers.get("pv")
         if pv is not None and pv.gesture:
             snapshot.push_opacity(open_t)
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
-            draw_gesture_connector_live(cr, layers, sw, open_t)
+            draw_gesture_connector_live(cr, layers, sw, dx["l_pad"], dx["r_pad"])
             snapshot.pop()
-
-        center_surf = layers["center_surf"]
-        snapshot.push_opacity(open_t)
-        snapshot.append_texture(self._texture("center", center_surf), full(center_surf))
-        snapshot.pop()
 
         self._draw_dpad_3d(snapshot, sw, sh)
 

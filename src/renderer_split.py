@@ -15,17 +15,20 @@ with the classic renderer (renderer.py) — only the geometry differs here.
 
 import math
 import time
+from dataclasses import dataclass, replace
+
 import cairo
 
 from helpers import _rrect, _txt, _txt_smooth, _txt_size, _pill_row, C_MOD, C_LAYER
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
-from trackpads import draw_trackpads, _LPAD, _RPAD
+from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
 from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
 from layout_split import compute_layout, center_badge_rect, center_close_rect
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, _DEFAULT_COLOR, _DEFAULT_LW
 from metaball import render_field, paint_scaled
 import icons
+from reveal import FULL
 
 _BG = (0.031, 0.031, 0.071)
 
@@ -238,66 +241,54 @@ _BD_HIGH       = 1.25
 _BD_ALPHA      = 0.62
 
 
-def _backdrop_blobs(sw, sh):
+def _group_blobs(sw, sh):
+    """{group: blob} — one soft elliptical blob per cluster, centred on its
+    legend column, plus a lighter one behind the centre column."""
     clusters, _anchor_x, center = compute_layout(sw, sh)
-    blobs = []
+    blobs = {}
     for stack, cx in ((LEFT_STACK, center[0] + _BD_SIDE_CX * sw),
                       (RIGHT_STACK, center[2] - _BD_SIDE_CX * sw)):
         for name in stack:
             _x, y, _w, h, _s = clusters[name]
-            blobs.append((cx, y + h / 2, _BD_SIDE_RX * sw, h / 2 + _BD_SIDE_RY * sh, 1.0))
+            blobs[name] = (cx, y + h / 2, _BD_SIDE_RX * sw, h / 2 + _BD_SIDE_RY * sh, 1.0)
     _bx, by, _bw, bh = center_badge_rect(center)
-    blobs.append((sw / 2, by + bh / 2 + 10, _BD_CENTER_RX * sw, _BD_CENTER_RY * sh, _BD_CENTER_W))
+    blobs["center"] = (sw / 2, by + bh / 2 + 10, _BD_CENTER_RX * sw, _BD_CENTER_RY * sh, _BD_CENTER_W)
     return blobs
 
 
-# Built once per screen size — never per frame, never on button state. The
-# merged field is cut at the midline into two half-images; each slides with
-# its own side during open/close. Recomputing the field at the moving blob
-# positions instead measured ~18-22ms per frame of the slide (vs. ~3ms to
-# just paint), which would have made the slide-in itself slower. The centre
-# spot splits with it: its halves converge as the sides slide in and meet
-# seamlessly at rest.
-_backdrop_cache = {"key": None, "halves": None}
+# Per-group shadow, the slot B-14's shape-following shadows will fill. Until
+# then each group carries just its own metaball blob, rendered on its own:
+# that gives up the merged band (overlaps now stack instead of fusing), but a
+# group's shadow can fade and slide with it, which one shared field can't.
+# Built once per screen size, cropped to the blob's own box.
+_shadow_cache = {}
 
 
-def _backdrop_halves(sw, sh):
-    if _backdrop_cache["key"] != (sw, sh):
-        field = render_field(sw, sh, _backdrop_blobs(sw, sh),
-                             low=_BD_LOW, high=_BD_HIGH, max_alpha=_BD_ALPHA,
+def _group_shadow(name, sw, sh):
+    key = (name, sw, sh)
+    if key not in _shadow_cache:
+        cx, cy, rx, ry, _w = blob = _group_blobs(sw, sh)[name]
+        field = render_field(sw, sh, [blob], low=_BD_LOW, high=_BD_HIGH, max_alpha=_BD_ALPHA,
                              downscale=_BD_DOWNSCALE)
         fw, fh = field.get_width(), field.get_height()
-        mid = fw // 2
-        halves = []
-        for x0, x1 in ((0, mid), (mid, fw)):
-            half = cairo.ImageSurface(cairo.FORMAT_ARGB32, x1 - x0, fh)
-            hcr = cairo.Context(half)
-            hcr.set_operator(cairo.OPERATOR_SOURCE)
-            hcr.set_source_surface(field, -x0, 0)
-            hcr.paint()
-            halves.append((x0 * sw / fw, (x1 - x0) * sw / fw, half))
-        _backdrop_cache.update(key=(sw, sh), halves=halves)
-    return _backdrop_cache["halves"]
-
-
-def _draw_backdrop(cr, sw, sh, dx_left, dx_right, open_t):
-    for (sx, swid, half), dx in zip(_backdrop_halves(sw, sh), (dx_left, dx_right)):
-        cr.save()
-        cr.translate(sx + dx, 0)
-        paint_scaled(cr, half, swid, sh, open_t)
-        cr.restore()
-
-
-# Per-side bitmap cache — see _get_side_surface. Keyed on content that
-# actually changes what's drawn (vms, pv, screen size), not on open_t: the
-# whole point is that an animation tick alone never invalidates it.
-_side_cache = {"left": None, "right": None}
+        fx0 = max(0, int((cx - rx) * fw / sw))
+        fx1 = min(fw, int(math.ceil((cx + rx) * fw / sw)))
+        fy0 = max(0, int((cy - ry) * fh / sh))
+        fy1 = min(fh, int(math.ceil((cy + ry) * fh / sh)))
+        crop = cairo.ImageSurface(cairo.FORMAT_ARGB32, fx1 - fx0, fy1 - fy0)
+        ccr = cairo.Context(crop)
+        ccr.set_operator(cairo.OPERATOR_SOURCE)
+        ccr.set_source_surface(field, -fx0, -fy0)
+        ccr.paint()
+        _shadow_cache[key] = (crop, fx0 * sw / fw, fy0 * sh / fh,
+                              (fx1 - fx0) * sw / fw, (fy1 - fy0) * sh / fh)
+    return _shadow_cache[key]
 
 
 def _side_slide_offset(side, sw, open_t):
-    """How far this side's cached bitmap (and its live trackpad/stick
-    overlay) is shifted from its resting position, as one rigid block —
-    not per-cluster, so the legend moves exactly with the art it labels
+    """How far a side's groups (cached bitmap and live overlay alike) are
+    shifted from their resting position. One offset per side, the same for
+    every group on it, so a legend moves exactly with the art it labels
     instead of its callout lines re-angling every frame."""
     travel = sw * 0.5
     return -travel * (1 - open_t) if side == "left" else travel * (1 - open_t)
@@ -315,55 +306,117 @@ def _dev_surface(sw, sh, dev_scale):
     return surf
 
 
-def _build_side_surface(stack, side, vms, pv, anchor_x_val, sw, sh, active_press=frozenset(),
-                        dev_scale=1.0):
-    """Render one side's clusters + callouts (not the backdrop — see
-    _draw_backdrop) at their resting (open_t=1) position onto a fresh
-    surface. Expensive (per-label Pango layout for every callout) — only
-    called when _get_side_surface's cache misses."""
-    surf = _dev_surface(sw, sh, dev_scale)
-    cr2 = cairo.Context(surf)
+def _render_cropped(draw, sw, sh, dev_scale, pad=2):
+    """Run draw(cr) once into a recording surface, then replay it onto a
+    device-resolution surface cut to its ink, aligned to whole device
+    pixels so the texture still lands 1:1 on the pixel grid. Returns
+    (surface, (x, y, w, h)) with the rect in logical screen px."""
+    rec = cairo.RecordingSurface(cairo.CONTENT_COLOR_ALPHA, None)
+    draw(cairo.Context(rec))
+    ix, iy, iw, ih = rec.ink_extents()
+    s = dev_scale
+    if iw <= 0 or ih <= 0:
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
+        surf.set_device_scale(s, s)
+        return surf, (0.0, 0.0, 1 / s, 1 / s)
+    dx0 = max(0, math.floor((ix - pad) * s))
+    dy0 = max(0, math.floor((iy - pad) * s))
+    dx1 = min(math.ceil(sw * s), math.ceil((ix + iw + pad) * s))
+    dy1 = min(math.ceil(sh * s), math.ceil((iy + ih + pad) * s))
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, dx1 - dx0, dy1 - dy0)
+    surf.set_device_scale(s, s)
+    cr = cairo.Context(surf)
+    cr.translate(-dx0 / s, -dy0 / s)
+    cr.set_source_surface(rec, 0, 0)
+    cr.paint()
+    return surf, (dx0 / s, dy0 / s, (dx1 - dx0) / s, (dy1 - dy0) / s)
+
+
+@dataclass
+class GroupLayer:
+    """One group's cached layers, at rest. win.py places them with the
+    group's own translate/opacity; draw_hud_split does the same in cairo."""
+    name: str
+    side: str            # "left" | "right" | None (center)
+    surface: object      # cairo.ImageSurface, device resolution, cut to its ink
+    rect: tuple          # (x, y, w, h) logical px — where surface goes
+    tx: tuple            # (ox, oy, scale) of the cluster; None for center
+    shadow: tuple        # (surface, x, y, w, h), surface may be downscaled
+    vms: dict            # the ButtonVMs this group draws with (content-masked)
+
+
+def _group_side(name):
+    if name in LEFT_STACK:
+        return "left"
+    if name in RIGHT_STACK:
+        return "right"
+    return None
+
+
+def _cluster_tx(name, sw, sh):
     clusters, _anchor_x, _center = compute_layout(sw, sh)
-    cluster_tx = {}
-    for name in stack:
-        x, y, w, h, scale = clusters[name]
-        svg_name, (x0, y0, x1, y1) = CLUSTERS[name]
-        ox, oy = x - x0 * scale, y - y0 * scale
-        if name in ("l_pad", "r_pad"):
-            oy += _PAD_Y_NUDGE
-        cluster_tx[name] = (ox, oy, scale)
-        _render_part_cluster(cr2, name, ox, oy, scale, vms, active_press=active_press, pv=pv)
-    _draw_cluster_callouts(cr2, side, stack, cluster_tx, vms, pv, anchor_x_val)
-    return surf, cluster_tx
+    x, y, w, h, scale = clusters[name]
+    _svg, (x0, y0, x1, y1) = CLUSTERS[name]
+    ox, oy = x - x0 * scale, y - y0 * scale
+    if name in ("l_pad", "r_pad"):
+        oy += _PAD_Y_NUDGE
+    return ox, oy, scale
 
 
-def _get_side_surface(stack, side, vms, pv, anchor_x_val, sw, sh, active_press=frozenset(),
-                      dev_scale=1.0):
-    # Keyed only on what this side actually draws: its own clusters' buttons
-    # and its own pad. Keying on the full state made every input anywhere —
-    # a touch on the *other* trackpad, a press on the other side — rebuild
-    # both sides (~8ms each, plus a texture re-upload) for no visible change.
-    side_btns = {b for name in stack for b in CLUSTER_BUTTONS.get(name, ())}
-    vms_key = {k: v for k, v in vms.items() if k in side_btns}
-    pv_key = ((pv.lpad_label, pv.lpad_active) if side == "left"
-              else (pv.rpad_label, pv.rpad_active)) + (pv.gesture,)
-    press_key = frozenset(k for k in active_press if k in side_btns)
-    c = _side_cache[side]
-    if (c is not None and c["vms"] == vms_key and c["pv"] == pv_key and c["sw"] == sw
-            and c["sh"] == sh and c["active_press"] == press_key and c["dev_scale"] == dev_scale):
-        return c["surface"], c["cluster_tx"]
+def _mask_vms(vms, name, content):
+    """A group showing only some legends still draws all its art, so the
+    buttons it leaves out keep their art state (pressed, held, available
+    modifier) and lose only what they're bound to — which is what every
+    adjacent/in-shape action text keys off."""
+    if content.legends is None:
+        return vms
+    masked = dict(vms)
+    for k in CLUSTER_BUTTONS.get(name, ()):
+        if k not in content.legends and k in masked:
+            masked[k] = replace(masked[k], bound=False, action="—", layer_override=False,
+                                is_combo=False, is_hint=False, sub_label=None)
+    return masked
+
+
+# Per-group bitmap cache, keyed only on what that group draws: its own
+# buttons, its own pad, its own presses, its content. Keying on more made
+# every input anywhere — a touch on the *other* trackpad, a press on the
+# other side — rebuild for no visible change.
+_group_cache = {}
+
+
+def _get_group_layer(name, content, vms, pv, anchor_x_val, sw, sh, active_press, dev_scale):
+    side = _group_side(name)
+    gvms = _mask_vms(vms, name, content)
+    own = set(CLUSTER_BUTTONS.get(name, ()))
+    vms_key = {k: v for k, v in gvms.items() if k in own}
+    if name == "l_pad":
+        pv_key = (pv.lpad_label, pv.lpad_active, pv.gesture)
+    elif name == "r_pad":
+        pv_key = (pv.rpad_label, pv.rpad_active, pv.gesture)
+    else:
+        pv_key = None
+    key = (content, frozenset(k for k in active_press if k in own), pv_key, sw, sh, dev_scale)
+    c = _group_cache.get(name)
+    if c is not None and c["key"] == key and c["vms"] == vms_key:
+        return c["layer"]
+
+    tx = _cluster_tx(name, sw, sh)
+
+    def draw(cr):
+        _render_part_cluster(cr, name, *tx, gvms, active_press=active_press, pv=pv, art=content.art)
+        _draw_cluster_callouts(cr, side, name, tx, gvms, pv, anchor_x_val, content)
+
     _t0 = time.perf_counter()
-    surf, cluster_tx = _build_side_surface(stack, side, vms, pv, anchor_x_val, sw, sh,
-                                           active_press, dev_scale)
-    print(f"[deckery-hud] {side} side surface REBUILT: "
+    surf, rect = _render_cropped(draw, sw, sh, dev_scale)
+    print(f"[deckery-hud] {name} group surface REBUILT: "
           f"{(time.perf_counter() - _t0) * 1000:.1f}ms ({sw}x{sh}@{dev_scale:.3g})", flush=True)
     if c is not None:
-        _diff_vms(side, c["vms"], vms_key)
-        _diff_pv(side, c["pv"], pv_key)
-    _side_cache[side] = {"surface": surf, "vms": vms_key, "pv": pv_key, "sw": sw, "sh": sh,
-                          "cluster_tx": cluster_tx, "active_press": press_key,
-                          "dev_scale": dev_scale}
-    return surf, cluster_tx
+        _diff_vms(name, c["vms"], vms_key)
+    layer = GroupLayer(name=name, side=side, surface=surf, rect=rect, tx=tx,
+                       shadow=_group_shadow(name, sw, sh), vms=gvms)
+    _group_cache[name] = {"key": key, "vms": vms_key, "layer": layer}
+    return layer
 
 
 def _diff_vms(side, old, new):
@@ -381,28 +434,26 @@ def _diff_vms(side, old, new):
         print(f"[deckery-hud] {side} vms changed: {changed} {' '.join(detail)}", flush=True)
 
 
-def _diff_pv(side, old, new):
-    if old is not None and old != new:
-        print(f"[deckery-hud] {side} pv changed: {old} -> {new}", flush=True)
-
-
 # Centre column (title, status badge, breadcrumb, active-output pills, close
-# affordance) — cached like the sides, drawn at full opacity; open_t fades
-# it as a whole at blit time. Keyed only on the state it actually reads.
-_center_cache = {"key": None, "surface": None}
+# affordance) — the ninth group. Cached like the clusters, drawn at full
+# opacity; its visibility fades it as a whole at blit time. Keyed only on
+# the state it actually reads.
+_center_cache = {"key": None, "layer": None}
 
 
-def _get_center_surface(state, center, sw, sh, dev_scale=1.0):
+def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
     ctx = state.get("context") or {}
     outs = tuple(e.get("key", "") if isinstance(e, dict) else e
                  for e in ctx.get("active_outputs") or ())
     key = (sw, sh, dev_scale, tuple(ctx.get("config_stack") or ()),
            tuple(ctx.get("held_modifiers") or ()), bool(ctx.get("paused", False)), outs)
     if _center_cache["key"] != key:
-        surf = _dev_surface(sw, sh, dev_scale)
-        _draw_center(cairo.Context(surf), state, center, 1.0)
-        _center_cache.update(key=key, surface=surf)
-    return _center_cache["surface"]
+        surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
+                                     sw, sh, dev_scale)
+        layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
+                           shadow=_group_shadow("center", sw, sh), vms={})
+        _center_cache.update(key=key, layer=layer)
+    return _center_cache["layer"]
 
 
 # The pad *mode* labels only exist while makima's analog export is on, which
@@ -429,13 +480,13 @@ def _sticky_pad_vm(state):
     return pv
 
 
-def split_layers(state, sw, sh, press_t=None, dev_scale=1.0):
-    """Everything for one frame that doesn't depend on open_t: the cached
-    bitmaps (backdrop halves, both sides, centre column) plus what the live
-    overlays need. Shared by draw_hud_split (pure-cairo path: fixtures, or
-    anything without a GTK snapshot) and win.py's GPU path, which turns the
-    same bitmaps into textures and does the slide/fade as snapshot
-    transforms instead of re-rasterizing them in software every frame."""
+def group_layers(state, sw, sh, contents, press_t=None, dev_scale=1.0):
+    """Everything for one frame that doesn't depend on any group's
+    visibility: the cached layers of every group in `contents` (name ->
+    reveal.Content) plus what the live overlays need. Shared by
+    draw_hud_split (pure-cairo path: fixtures) and win.py's GPU path,
+    which turns the same bitmaps into textures and does each group's
+    slide/fade as snapshot transforms."""
     _clusters, anchor_x, center = compute_layout(sw, sh)
     vms = classify_all(state, _BTNS.keys())
     pv = _sticky_pad_vm(state)
@@ -446,88 +497,98 @@ def split_layers(state, sw, sh, press_t=None, dev_scale=1.0):
     # live overlay draws. A plain hold keeps this set unchanged for the
     # whole hold, so the cache only misses at the start and end of a press.
     active_press = frozenset(k for k in _SCALE_ANIM_PARTS if pt.get(k, 0.0) > 0.001)
-    left_surf, left_tx = _get_side_surface(LEFT_STACK, "left", vms, pv, anchor_x["left"],
-                                           sw, sh, active_press, dev_scale)
-    right_surf, right_tx = _get_side_surface(RIGHT_STACK, "right", vms, pv, anchor_x["right"],
-                                             sw, sh, active_press, dev_scale)
+    groups = {}
+    for name, content in contents.items():
+        if name == "center":
+            groups[name] = _get_center_layer(state, center, sw, sh, dev_scale)
+        else:
+            groups[name] = _get_group_layer(name, content, vms, pv, anchor_x[_group_side(name)],
+                                            sw, sh, active_press, dev_scale)
     return {
+        "groups": groups,
+        "contents": dict(contents),
         "center": center,
         "vms": vms,
         "pv": pv,
         "active_press": active_press,
-        "backdrop": _backdrop_halves(sw, sh),
-        "sides": {"left": left_surf, "right": right_surf},
-        "tx_rest": {"left": left_tx, "right": right_tx},
-        "center_surf": _get_center_surface(state, center, sw, sh, dev_scale),
     }
 
 
-def draw_split_live(cr, state, layers, sw, sh, open_t, press_t=None, draw_dpad=True):
-    """The per-frame overlays that can't be cached — trackpad dots, the
-    moving stick rings, mid-press buttons — at their slid position, so they
-    move with the cached bitmap they sit on instead of detaching from it."""
+def live_rect(name, layers, sw, sh):
+    """The strip one group's live overlay is drawn into, at rest: the
+    group's own rows, from its screen edge to just past the cluster
+    column, plus room for a pressed button's adjacent action text."""
+    x, y, w, h = layers["groups"][name].rect
+    col_left, _y0, col_right, _y1 = layers["center"]
+    pressed = any(_SCALE_ANIM_PARTS[k][1] == name for k in layers["active_press"])
+    extra = sw * 0.3 if pressed else 16
+    y0 = max(0, y - 24)
+    y1 = min(sh, y + h + 24)
+    if _group_side(name) == "left":
+        return 0, y0, max(x + w, col_left + extra), y1 - y0
+    x0 = min(x, col_right - extra)
+    return x0, y0, sw - x0, y1 - y0
+
+
+def draw_group_live(cr, name, state, layers, dx, press_t=None, draw_dpad=True):
+    """One group's per-frame overlays that can't be cached — trackpad dots,
+    the moving stick rings, mid-press buttons — shifted by the group's
+    current slide offset dx, so they move with the cached bitmap they sit
+    on instead of detaching from it."""
+    layer = layers["groups"][name]
+    if layer.tx is None:
+        return
     pt = press_t or {}
-    vms = layers["vms"]
-    cluster_tx = {}
-    for side in ("left", "right"):
-        dx = _side_slide_offset(side, sw, open_t)
-        for name, (ox, oy, scale) in layers["tx_rest"][side].items():
-            cluster_tx[name] = (ox + dx, oy, scale)
+    ox, oy, scale = layer.tx
+    ox += dx
+    content = layers["contents"][name]
+    pads = state.get("trackpads") or {}
+    gesture = (pads.get("gesture") or {}).get("touching", False)
+    sticks = state.get("sticks") or {}
 
-    # Stick tx gets its own y-nudge on top of the face cluster's transform
-    # (_STICK_Y_NUDGE) — these live-drawn rings aren't a parts.py shape, so
-    # they don't pick up _PART_OFFSET the way the static outer bezel does.
-    lf = cluster_tx.get("l_face")
-    rf = cluster_tx.get("r_face")
-    l_stick_tx = (lf[0], lf[1] + _STICK_Y_NUDGE, lf[2]) if lf else None
-    r_stick_tx = (rf[0], rf[1] + _STICK_Y_NUDGE, rf[2]) if rf else None
-    draw_trackpads(cr, state, left_tx=cluster_tx.get("l_pad"), right_tx=cluster_tx.get("r_pad"),
-                   left_stick_tx=l_stick_tx, right_stick_tx=r_stick_tx,
-                   erase_mode="none", dim=True,
-                   left_stick_press=pt.get("BTN_THUMBL", 0.0),
-                   right_stick_press=pt.get("BTN_THUMBR", 0.0),
-                   fill_rings=True)
+    if name in ("l_pad", "r_pad"):
+        pad_side = "left" if name == "l_pad" else "right"
+        _draw_pad(cr, pads.get(pad_side) or {}, _LPAD if name == "l_pad" else _RPAD,
+                  gesture, tx=(ox, oy, scale), dim=True)
+    elif name in ("l_face", "r_face"):
+        # Stick tx gets its own y-nudge on top of the face cluster's
+        # transform — these live-drawn rings aren't a parts.py shape, so
+        # they don't pick up _PART_OFFSET the way the static bezel does.
+        left = name == "l_face"
+        _draw_stick(cr, sticks.get("lstick" if left else "rstick", {}), _LSTICK if left else _RSTICK,
+                    tx=(ox, oy + _STICK_Y_NUDGE, scale), erase_mode="none",
+                    press=pt.get("BTN_THUMBL" if left else "BTN_THUMBR", 0.0), fill_rings=True)
+        if left and draw_dpad:
+            # draw_dpad=False when win.py drives a real 3D perspective
+            # transform for the d-pad instead (win.py:_draw_dpad_3d) — that
+            # needs its own snapshot block, which a flat cairo.Context has
+            # no access to.
+            draw_dpad_live(cr, ox, oy, scale, layer.vms, press_t)
 
-    if draw_dpad and "l_face" in cluster_tx:
-        # draw_dpad=False when win.py drives a real 3D perspective transform
-        # for the d-pad instead (win.py:_draw_dpad_3d) — that needs its own
-        # snapshot block, which a flat cairo.Context has no access to.
-        fox, foy, fscale = cluster_tx["l_face"]
-        draw_dpad_live(cr, fox, foy, fscale, vms, press_t)
-
+    if content.art != "all":
+        return
     for btn_key in layers["active_press"]:
         part_name, cluster_name = _SCALE_ANIM_PARTS[btn_key]
-        if cluster_name not in cluster_tx:
-            continue
-        bx, by, bscale = cluster_tx[cluster_name]
-        _draw_scale_button_live(cr, btn_key, part_name, bx, by, bscale,
-                                 vms[btn_key], pt.get(btn_key, 0.0))
+        if cluster_name == name:
+            _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale,
+                                     layer.vms[btn_key], pt.get(btn_key, 0.0))
 
 
-def draw_gesture_connector_live(cr, layers, sw, open_t):
+def draw_gesture_connector_live(cr, layers, sw, dx_left, dx_right):
     """The two-pads-touching-at-once connector (see _draw_gesture_connector)
-    — deliberately its *own* entry point, not folded into draw_split_live:
-    win.py draws that function's output through two narrow per-side cairo
-    strips (one clipped to roughly the left cluster column, one to the
-    right — see win.py's do_snapshot), and a connector spanning screen
-    centre needs a full-width, unclipped pass or each strip only ever shows
-    the sliver of it that happens to fall inside that one strip — which is
-    exactly what "two short stubs, no text" (text sits dead centre, inside
-    neither strip) turned out to be live. draw_hud_split (the cairo-only
-    fixture/reference path) calls this once, unclipped, right after its own
-    single draw_split_live call, so both paths agree."""
+    — deliberately its *own* entry point, not part of draw_group_live:
+    win.py draws each group's live overlay through its own narrow strip,
+    and a connector spanning screen centre needs a full-width, unclipped
+    pass or each strip only ever shows the sliver of it that happens to
+    fall inside that one strip. Draws only while both pad groups are
+    present; each end follows its own side's offset."""
     pv = layers.get("pv")
-    if pv is None or not pv.gesture:
+    groups = layers["groups"]
+    if pv is None or not pv.gesture or "l_pad" not in groups or "r_pad" not in groups:
         return
-    cluster_tx = {}
-    for side in ("left", "right"):
-        dx = _side_slide_offset(side, sw, open_t)
-        for name in ("l_pad", "r_pad"):
-            if name in layers["tx_rest"][side]:
-                ox, oy, scale = layers["tx_rest"][side][name]
-                cluster_tx[name] = (ox + dx, oy, scale)
-    if "l_pad" in cluster_tx and "r_pad" in cluster_tx:
-        _draw_gesture_connector(cr, cluster_tx["l_pad"], cluster_tx["r_pad"], pv, sw)
+    lox, loy, ls = groups["l_pad"].tx
+    rox, roy, rs = groups["r_pad"].tx
+    _draw_gesture_connector(cr, (lox + dx_left, loy, ls), (rox + dx_right, roy, rs), pv, sw)
 
 
 def _draw_gesture_connector(cr, l_tx, r_tx, pv, sw):
@@ -539,7 +600,7 @@ def _draw_gesture_connector(cr, l_tx, r_tx, pv, sw):
     'Gestures' text on its own side.
 
     l_tx/r_tx: that pad's (ox, oy, scale) at its *current* (slid) position
-    — same ones draw_split_live's caller already has — so this lines up
+    — the same ones the live overlays use — so this lines up
     with the cached art at every point in the open/close animation, not
     just at rest. dot_y is computed exactly like the normal per-pad legend
     row's own dot_y (_draw_cluster_callouts) so the row sits at the same
@@ -578,11 +639,14 @@ def _draw_gesture_connector(cr, l_tx, r_tx, pv, sw):
     _txt(cr, cx, cy, label, size=13, ha="center", va="mid")
 
 
-def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, reveal=None, reveal_t=0.0,
-                    press_t=None, draw_dpad=True):
+def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=None,
+                   draw_dpad=True, groups=None):
     """Pure-cairo path. The live HUD uses win.py's GPU path instead (same
-    layers, see split_layers); this one stays for fixtures and as the
-    reference for what a frame should look like."""
+    layers, see group_layers); this one stays for fixtures and as the
+    reference for what a frame should look like.
+
+    groups: {name: (opacity, dx, Content)} — None means the full HUD, every
+    group FULL, faded by open_t and slid by its side's offset."""
     # No full-screen fill here, deliberately: this spans the whole screen,
     # and an opaque background would black out the desktop/game underneath.
     if state.get("unreadable"):
@@ -594,26 +658,40 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, reveal=No
              size=12, ha="center", va="center")
         return
 
+    if groups is None:
+        groups = {name: (open_t, _side_slide_offset(_group_side(name), sw, open_t)
+                         if _group_side(name) else 0.0, FULL)
+                  for name in LEFT_STACK + RIGHT_STACK + ("center",)}
     t0 = time.perf_counter()
-    layers = split_layers(state, sw, sh, press_t)
+    layers = group_layers(state, sw, sh, {n: g[2] for n, g in groups.items()}, press_t)
     t1 = time.perf_counter()
-    dx_left = _side_slide_offset("left", sw, open_t)
-    dx_right = _side_slide_offset("right", sw, open_t)
 
-    # Whole backdrop first, as one layer, *then* both sides on top — never
-    # a side's backdrop and text interleaved, or the second side's backdrop
-    # spillover lands on the first side's finished text and dims it.
-    _draw_backdrop(cr, sw, sh, dx_left, dx_right, open_t)
-    for side, dx in (("left", dx_left), ("right", dx_right)):
+    # Every shadow first, as one pass, *then* every group's content on top —
+    # never one group's shadow and text interleaved, or the next group's
+    # shadow spillover lands on the first group's finished text and dims it.
+    for name, (opacity, dx, _c) in groups.items():
+        surf, x, y, w, h = layers["groups"][name].shadow
+        cr.save()
+        cr.translate(x + dx, y)
+        paint_scaled(cr, surf, w, h, opacity)
+        cr.restore()
+    for name, (opacity, dx, _c) in groups.items():
+        layer = layers["groups"][name]
         cr.save()
         cr.translate(dx, 0)
-        cr.set_source_surface(layers["sides"][side], 0, 0)
-        cr.paint_with_alpha(open_t)
+        cr.set_source_surface(layer.surface, layer.rect[0], layer.rect[1])
+        cr.paint_with_alpha(opacity)
         cr.restore()
-    draw_split_live(cr, state, layers, sw, sh, open_t, press_t, draw_dpad)
-    draw_gesture_connector_live(cr, layers, sw, open_t)
-    cr.set_source_surface(layers["center_surf"], 0, 0)
-    cr.paint_with_alpha(open_t)
+    for name, (opacity, dx, _c) in groups.items():
+        cr.push_group()
+        draw_group_live(cr, name, state, layers, dx, press_t, draw_dpad)
+        cr.pop_group_to_source()
+        cr.paint_with_alpha(opacity)
+    if "l_pad" in groups and "r_pad" in groups:
+        cr.push_group()
+        draw_gesture_connector_live(cr, layers, sw, groups["l_pad"][1], groups["r_pad"][1])
+        cr.pop_group_to_source()
+        cr.paint_with_alpha(min(groups["l_pad"][0], groups["r_pad"][0]))
     t2 = time.perf_counter()
 
     if (t2 - t0) * 1000 > 5.0:
@@ -717,7 +795,8 @@ _PAD_DISABLED_COLOR = (1.0, 1.0, 1.0, 0.26)   # dimmer than _DEFAULT_COLOR's 0.5
                                                 # (now-hidden) legend text
 
 
-def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(), pv=None):
+def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(), pv=None,
+                         art="all"):
     """Draw every part belonging to this cluster, with an active-state fill
     wash under any part whose button is currently pressed. ox, oy, scale:
     the same per-cluster transform used everywhere else (dot positions,
@@ -736,6 +815,10 @@ def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(),
     actually in flight, which is rare compared to idle frames."""
     for part_name in _CLUSTER_PARTS[name]:
         if part_name == "dpad":
+            continue
+        if art == "pad" and not part_name.startswith("trackpad"):
+            # A pad shown on its own (reveal.PAD_ONLY) is just the pad and
+            # its mode label — not the Steam/QAM pill sharing its cluster.
             continue
         if part_name in _SCALE_ANIM_PART_NAMES and _SCALE_ANIM_BTN_BY_PART[part_name] in active_press:
             # Mid-press right now — drawn live every frame instead (see
@@ -1314,160 +1397,163 @@ _HIDDEN_PAD_LEGEND = {"Disabled"}
 _ICON_PAD_LEGEND = {"Mt Trackpad"}
 
 
-def _draw_cluster_callouts(cr, side, stack, cluster_tx, vms, pv, ax):
-    for name in stack:
-        ox, oy, scale = cluster_tx[name]
-        entries = []
-        pad_icon = None   # (dot_x, dot_y, active) for an _ICON_PAD_LEGEND mode, set below
-        for btn_key, (sx, sy, btn_side, short, view) in _BTNS.items():
-            if _cluster_of(btn_key, name) is None:
-                continue
-            vm = vms[btn_key]
-            if not vm.bound and not _SHOW_ALL and not vm.is_active:
-                continue
-            if btn_key in _ADJACENT_LABELED:
-                continue
-            has_inshape = btn_key in _INSHAPE_LABELED
-            # is_avail_mod/app/virt deliberately excluded from this check for
-            # has_inshape buttons: that signal now lives on the shape itself
-            # (see _avail_mod_color — the amber outline replaces the legend's
-            # old diamond marker), so it no longer justifies keeping an
-            # otherwise-empty row alive on its own.
-            if has_inshape and not (vm.bound or vm.is_hint or
-                                     vm.sub_label or vm.layer_override or vm.is_combo):
-                # Nothing here the in-shape label didn't already say — an
-                # unbound button with no hint/combo/pending-modifier content
-                # is just "X: —", and the shape already drew the "X".
-                continue
-            if btn_key in _BTN_POS_OVERRIDE:
-                psx, psy = _BTN_POS_OVERRIDE[btn_key]
-                dot_x, dot_y = ox + psx * scale, oy + psy * scale
-            else:
-                odx, ody = _BTN_OFFSET.get(btn_key, (0, 0))
-                # ABXY: dot sits at the button's own left edge instead of its
-                # centre — on request, so the callout line starts at the
-                # circle's rim rather than appearing to float inside it.
-                bx = (sx - _ABXY_RADIUS) if btn_key in _ABXY_BTNS else sx
-                dot_x = ox + bx * scale + odx
-                dot_y = oy + sy * scale + ody
+def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, content=FULL):
+    """Legend rows for one cluster. content (reveal.Content) narrows them
+    to a subset of buttons and decides whether the pad's mode row shows."""
+    ox, oy, scale = tx
+    entries = []
+    pad_icon = None   # (dot_x, dot_y, active) for an _ICON_PAD_LEGEND mode, set below
+    for btn_key, (sx, sy, btn_side, short, view) in _BTNS.items():
+        if _cluster_of(btn_key, name) is None:
+            continue
+        if content.legends is not None and btn_key not in content.legends:
+            continue
+        vm = vms[btn_key]
+        if not vm.bound and not _SHOW_ALL and not vm.is_active:
+            continue
+        if btn_key in _ADJACENT_LABELED:
+            continue
+        has_inshape = btn_key in _INSHAPE_LABELED
+        # is_avail_mod/app/virt deliberately excluded from this check for
+        # has_inshape buttons: that signal now lives on the shape itself
+        # (see _avail_mod_color — the amber outline replaces the legend's
+        # old diamond marker), so it no longer justifies keeping an
+        # otherwise-empty row alive on its own.
+        if has_inshape and not (vm.bound or vm.is_hint or
+                                 vm.sub_label or vm.layer_override or vm.is_combo):
+            # Nothing here the in-shape label didn't already say — an
+            # unbound button with no hint/combo/pending-modifier content
+            # is just "X: —", and the shape already drew the "X".
+            continue
+        if btn_key in _BTN_POS_OVERRIDE:
+            psx, psy = _BTN_POS_OVERRIDE[btn_key]
+            dot_x, dot_y = ox + psx * scale, oy + psy * scale
+        else:
+            odx, ody = _BTN_OFFSET.get(btn_key, (0, 0))
+            # ABXY: dot sits at the button's own left edge instead of its
+            # centre — on request, so the callout line starts at the
+            # circle's rim rather than appearing to float inside it.
+            bx = (sx - _ABXY_RADIUS) if btn_key in _ABXY_BTNS else sx
+            dot_x = ox + bx * scale + odx
+            dot_y = oy + sy * scale + ody
+        entries.append(_Callout(
+            sort_y=dot_y, dot_x=dot_x, dot_y=dot_y, name=short, action=vm.action,
+            layer_override=vm.layer_override, bound=vm.bound, active=vm.is_active,
+            active_mod=vm.active_mod, is_combo=vm.is_combo,
+            # The diamond is the legend's way of saying "available
+            # modifier" — for has_inshape buttons that's now the amber
+            # outline instead (_avail_mod_color), so the diamond would
+            # just be saying the same thing twice. Suppressed here only;
+            # buttons with no in-shape twin (d-pad, View) still show it.
+            is_avail_mod=False if has_inshape else vm.is_avail_mod,
+            is_avail_app_mod=False if has_inshape else vm.is_avail_app_mod,
+            is_avail_virt_mod=False if has_inshape else vm.is_avail_virt_mod,
+            sub_label=vm.sub_label, sub_active=vm.sub_active,
+            is_hint=vm.is_hint,
+            # QAM's own in-shape label is three small dots — about the
+            # same size as this marker dot, so at BTN_BASE's position
+            # (dead centre of the pill, same spot the label sits) the
+            # two visually merge into one blob instead of reading as
+            # either. Every other in-shape label is a letter/word, large
+            # and solid enough that the marker dot sitting on top of it
+            # doesn't cause the same confusion, so this is QAM-specific.
+            show_dot=(btn_key != "BTN_BASE"),
+            # Every split-renderer legend row drops its "Name:" prefix,
+            # not just the in-shape-labeled ones — the callout line
+            # already runs straight to the exact button it's labelling
+            # (d-pad arrows and View included), so the name was never
+            # doing identification work the line doesn't already do.
+            show_name=False,
+            # ABXY's dot sits right on the circle's own edge now (see
+            # _ABXY_RADIUS) — growing it on press reads as the dot
+            # itself reacting rather than the button, on top of the
+            # button's own fill wash already doing that job.
+            grow_on_active=(btn_key not in _ABXY_BTNS),
+        ))
+
+    if name in ("l_pad", "r_pad") and content.pad_label:
+        pad_key = "l" if name == "l_pad" else "r"
+        bounds = _LPAD if pad_key == "l" else _RPAD
+        # Inner vertical edge at mid-height — left pad's right edge,
+        # right pad's left edge — not the bottom edge (previous version):
+        # both pads sit toward the screen edge, so their *inner* edge is
+        # the one actually facing the centre column the legend text sits
+        # in, which reads more directly than anchoring off the bottom.
+        inner_x = bounds["x"] + bounds["w"] if pad_key == "l" else bounds["x"]
+        dot_x = ox + inner_x * scale
+        dot_y = oy + (bounds["y"] + bounds["h"] / 2) * scale
+        label = pv.lpad_label if pad_key == "l" else pv.rpad_label
+        active = pv.lpad_active if pad_key == "l" else pv.rpad_active
+        # "—" means no real mode to report — same "nothing beyond the
+        # name" case as an unbound button, and LPad/RPad's own corner
+        # label already says which pad this is. _HIDDEN_PAD_LEGEND modes
+        # (Disabled) have nothing worth a row either — the shape itself
+        # already shows it (see _PAD_DISABLED_COLOR). _ICON_PAD_LEGEND
+        # modes (Mt Trackpad) still get a row, just drawn as a glyph
+        # after _callouts() below instead of as a normal text _Callout.
+        if pv.gesture:
+            # Both pads touching at once is one shared event, not two —
+            # drawn as a single connector across the whole centre
+            # column instead (see _draw_gesture_connector, called from
+            # draw_gesture_connector_live once both pads' positions are known),
+            # so neither side gets its own separate row here.
+            pass
+        elif label in _ICON_PAD_LEGEND:
+            pad_icon = (dot_x, dot_y, active)
+        elif label != "—" and label not in _HIDDEN_PAD_LEGEND:
             entries.append(_Callout(
-                sort_y=dot_y, dot_x=dot_x, dot_y=dot_y, name=short, action=vm.action,
-                layer_override=vm.layer_override, bound=vm.bound, active=vm.is_active,
-                active_mod=vm.active_mod, is_combo=vm.is_combo,
-                # The diamond is the legend's way of saying "available
-                # modifier" — for has_inshape buttons that's now the amber
-                # outline instead (_avail_mod_color), so the diamond would
-                # just be saying the same thing twice. Suppressed here only;
-                # buttons with no in-shape twin (d-pad, View) still show it.
-                is_avail_mod=False if has_inshape else vm.is_avail_mod,
-                is_avail_app_mod=False if has_inshape else vm.is_avail_app_mod,
-                is_avail_virt_mod=False if has_inshape else vm.is_avail_virt_mod,
-                sub_label=vm.sub_label, sub_active=vm.sub_active,
-                is_hint=vm.is_hint,
-                # QAM's own in-shape label is three small dots — about the
-                # same size as this marker dot, so at BTN_BASE's position
-                # (dead centre of the pill, same spot the label sits) the
-                # two visually merge into one blob instead of reading as
-                # either. Every other in-shape label is a letter/word, large
-                # and solid enough that the marker dot sitting on top of it
-                # doesn't cause the same confusion, so this is QAM-specific.
-                show_dot=(btn_key != "BTN_BASE"),
-                # Every split-renderer legend row drops its "Name:" prefix,
-                # not just the in-shape-labeled ones — the callout line
-                # already runs straight to the exact button it's labelling
-                # (d-pad arrows and View included), so the name was never
-                # doing identification work the line doesn't already do.
+                sort_y=dot_y, dot_x=dot_x, dot_y=dot_y,
+                name="LPad" if pad_key == "l" else "RPad", action=label,
+                bound=True, active=active, active_mod=pv.gesture, show_dot=False,
                 show_name=False,
-                # ABXY's dot sits right on the circle's own edge now (see
-                # _ABXY_RADIUS) — growing it on press reads as the dot
-                # itself reacting rather than the button, on top of the
-                # button's own fill wash already doing that job.
-                grow_on_active=(btn_key not in _ABXY_BTNS),
             ))
 
-        if name in ("l_pad", "r_pad"):
-            pad_key = "l" if name == "l_pad" else "r"
-            bounds = _LPAD if pad_key == "l" else _RPAD
-            # Inner vertical edge at mid-height — left pad's right edge,
-            # right pad's left edge — not the bottom edge (previous version):
-            # both pads sit toward the screen edge, so their *inner* edge is
-            # the one actually facing the centre column the legend text sits
-            # in, which reads more directly than anchoring off the bottom.
-            inner_x = bounds["x"] + bounds["w"] if pad_key == "l" else bounds["x"]
-            dot_x = ox + inner_x * scale
-            dot_y = oy + (bounds["y"] + bounds["h"] / 2) * scale
-            label = pv.lpad_label if pad_key == "l" else pv.rpad_label
-            active = pv.lpad_active if pad_key == "l" else pv.rpad_active
-            # "—" means no real mode to report — same "nothing beyond the
-            # name" case as an unbound button, and LPad/RPad's own corner
-            # label already says which pad this is. _HIDDEN_PAD_LEGEND modes
-            # (Disabled) have nothing worth a row either — the shape itself
-            # already shows it (see _PAD_DISABLED_COLOR). _ICON_PAD_LEGEND
-            # modes (Mt Trackpad) still get a row, just drawn as a glyph
-            # after _callouts() below instead of as a normal text _Callout.
-            if pv.gesture:
-                # Both pads touching at once is one shared event, not two —
-                # drawn as a single connector across the whole centre
-                # column instead (see _draw_gesture_connector, called from
-                # draw_split_live once both sides' dot positions are known),
-                # so neither side gets its own separate row here.
-                pass
-            elif label in _ICON_PAD_LEGEND:
-                pad_icon = (dot_x, dot_y, active)
-            elif label != "—" and label not in _HIDDEN_PAD_LEGEND:
-                entries.append(_Callout(
-                    sort_y=dot_y, dot_x=dot_x, dot_y=dot_y,
-                    name="LPad" if pad_key == "l" else "RPad", action=label,
-                    bound=True, active=active, active_mod=pv.gesture, show_dot=False,
-                    show_name=False,
-                ))
+    entries.sort(key=lambda e: e.sort_y)
+    # _callouts()'s `side` argument means "which side does the text sit
+    # on relative to the anchor", not "which side of the screen is this".
+    # In the classic renderer those are the same thing (controller
+    # centred, text radiates outward to screen-left/right). Here the
+    # clusters are pinned to the screen edges and text radiates inward
+    # instead — opposite direction — so the flag has to be inverted or
+    # the text ends up back-to-front, overlapping the cluster it
+    # labels instead of extending into the centre column.
+    text_side = "right" if side == "left" else "left"
+    # Only l_face/r_face pack several close-together entries (d-pad arrows,
+    # View/Start, the stick) that actually need the auto-stacked spacing
+    # to avoid overlapping each other. Every other cluster has at most two
+    # entries with plenty of natural vertical separation, so the stacking
+    # math was only ever adding an unnecessary kink there.
+    straight = name not in ("l_face", "r_face")
+    # l_face/r_face's own four-item legend (d-pad arrows on the left,
+    # ABXY on the right) — pushed *down* now (+18, having gone from -8
+    # to 0 to this, per repeated feedback that it kept reading as too
+    # high), and spaced tighter still (22, down from 29). anchor_row=38
+    # keeps computing the block's own anchor as if row were still 38 —
+    # this is about keeping the *compression* (row changes) from moving
+    # the top row on its own; y_nudge on top of that is the actual
+    # "move the whole block" control.
+    is_four = name in ("l_face", "r_face")
+    y_nudge = 32 if is_four else 0
+    row = 22 if is_four else 26
+    anchor_row = 38 if is_four else None
+    _callouts(cr, entries, text_side, ax, size=13, row=row, straight=straight,
+              y_nudge=y_nudge, anchor_row=anchor_row)
 
-        entries.sort(key=lambda e: e.sort_y)
-        # _callouts()'s `side` argument means "which side does the text sit
-        # on relative to the anchor", not "which side of the screen is this".
-        # In the classic renderer those are the same thing (controller
-        # centred, text radiates outward to screen-left/right). Here the
-        # clusters are pinned to the screen edges and text radiates inward
-        # instead — opposite direction — so the flag has to be inverted or
-        # the text ends up back-to-front, overlapping the cluster it
-        # labels instead of extending into the centre column.
-        text_side = "right" if side == "left" else "left"
-        # Only l_face/r_face pack several close-together entries (d-pad arrows,
-        # View/Start, the stick) that actually need the auto-stacked spacing
-        # to avoid overlapping each other. Every other cluster has at most two
-        # entries with plenty of natural vertical separation, so the stacking
-        # math was only ever adding an unnecessary kink there.
-        straight = name not in ("l_face", "r_face")
-        # l_face/r_face's own four-item legend (d-pad arrows on the left,
-        # ABXY on the right) — pushed *down* now (+18, having gone from -8
-        # to 0 to this, per repeated feedback that it kept reading as too
-        # high), and spaced tighter still (22, down from 29). anchor_row=38
-        # keeps computing the block's own anchor as if row were still 38 —
-        # this is about keeping the *compression* (row changes) from moving
-        # the top row on its own; y_nudge on top of that is the actual
-        # "move the whole block" control.
-        is_four = name in ("l_face", "r_face")
-        y_nudge = 32 if is_four else 0
-        row = 22 if is_four else 26
-        anchor_row = 38 if is_four else None
-        _callouts(cr, entries, text_side, ax, size=13, row=row, straight=straight,
-                  y_nudge=y_nudge, anchor_row=anchor_row)
-
-        if pad_icon is not None:
-            # No legend row at all here on request — no dot, no line out to
-            # the centre column, just the glyph itself sitting right beside
-            # the pad's own inner edge (same "inward" direction text_side
-            # already encodes), twice the active-outputs strip's own icon
-            # size since it's standing on its own instead of inline with text.
-            bx, by, active = pad_icon
-            gap = 10
-            if text_side == "right":
-                icon_x, icon_ha = bx + gap, "left"
-            else:
-                icon_x, icon_ha = bx - gap, "right"
-            _draw_mouse_icon(cr, icon_x, by, icon_ha,
-                              (1.0, 1.0, 1.0, 1.0 if active else 0.6),
-                              size=_MOUSE_SIZE * 2)
+    if pad_icon is not None:
+        # No legend row at all here on request — no dot, no line out to
+        # the centre column, just the glyph itself sitting right beside
+        # the pad's own inner edge (same "inward" direction text_side
+        # already encodes), twice the active-outputs strip's own icon
+        # size since it's standing on its own instead of inline with text.
+        bx, by, active = pad_icon
+        gap = 10
+        if text_side == "right":
+            icon_x, icon_ha = bx + gap, "left"
+        else:
+            icon_x, icon_ha = bx - gap, "right"
+        _draw_mouse_icon(cr, icon_x, by, icon_ha,
+                          (1.0, 1.0, 1.0, 1.0 if active else 0.6),
+                          size=_MOUSE_SIZE * 2)
 
 
 def _cluster_of(btn_key, cluster_name):
