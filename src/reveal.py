@@ -249,6 +249,12 @@ class GroupAnim:
             self._v = self._from
             self._start = now
 
+    def delay(self, seconds):
+        """Take a stall out of a running transition's time: it continues
+        from where it was instead of jumping ahead by the stall."""
+        if self.running:
+            self._start += seconds
+
     @property
     def value(self):
         return self._v

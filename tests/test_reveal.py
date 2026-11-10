@@ -269,3 +269,16 @@ def test_hold_fires_when_raw_returns_after_threshold():
     h.update(False, 1.4)
     assert not h.update(False, 1.6)
     assert h.update(True, 1.7)
+
+
+def test_anim_delay_shifts_running_transition():
+    """A stalled frame (e.g. a cold layer build) is taken out of the
+    animation's time instead of skipping most of it."""
+    a = GroupAnim(S)
+    a.set_target(True, "full", 0.0)
+    a.tick(0.05)
+    v = a.value
+    a.delay(0.4)
+    assert a.tick(0.45)
+    assert abs(a.value - v) < 1e-9
+    assert not a.tick(0.66)

@@ -93,6 +93,11 @@ _PRESS_ANIM_MS = 90
 # this is the midpoint between the two, biased toward keeping that more
 # dramatic perspective while pulling the angle back down.
 _DPAD_3D_MAX_ANGLE = 24.0
+
+# Group animations: a tick gap longer than _STALL_S counts as a stall and
+# is taken out of the running transitions, minus one ordinary frame.
+_STALL_S = 0.05
+_FRAME_S = 1 / 90
 _DPAD_3D_DEPTH = 260.0
 
 
@@ -373,8 +378,15 @@ class Win(Gtk.ApplicationWindow):
         # Measures the tick-to-tick interval (is the frame clock on
         # schedule?) separately from draw cost (snapshot_split's own print).
         if self._last_tick is not None:
-            print(f"[deckery-hud] group_anim tick +{(now - self._last_tick) * 1000:.1f}ms",
-                  flush=True)
+            gap = now - self._last_tick
+            print(f"[deckery-hud] group_anim tick +{gap * 1000:.1f}ms", flush=True)
+            # A frame that took far longer than a frame (a cold layer build
+            # when the full HUD opens over an already visible group, measured
+            # ~390ms) would otherwise eat the whole slide. Count it as one
+            # ordinary frame instead.
+            if gap > _STALL_S:
+                for a in self._anims.values():
+                    a.delay(gap - _FRAME_S)
         self._last_tick = now
 
         # Until the second tick after mapping — the first frame has been
