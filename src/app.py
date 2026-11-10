@@ -19,7 +19,7 @@ from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_of
 import win
 from win import Win
 from osd_win import OsdWin
-from reveal import Reveal, RevealSettings
+from reveal import Reveal, RevealSettings, deadline_delay_ms
 
 def _split_mode():
     """Read at call time, not import: the layout can be switched while
@@ -148,8 +148,8 @@ class App(Gtk.Application):
         self._win.set_wants(wants)
         deadline = self._reveal.next_deadline()
         if deadline is not None:
-            ms = max(1, int((deadline - time.monotonic()) * 1000) + 1)
-            self._deadline_src = GLib.timeout_add(ms, self._on_reveal_deadline)
+            self._deadline_src = GLib.timeout_add(deadline_delay_ms(deadline, time.monotonic()),
+                                                  self._on_reveal_deadline)
 
     def _on_reveal_deadline(self):
         self._deadline_src = None

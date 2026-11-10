@@ -208,6 +208,13 @@ class Reveal:
         return min(times) if times else None
 
 
+def deadline_delay_ms(deadline, now):
+    """Milliseconds until `deadline` for GLib.timeout_add: at least 1,
+    rounded up, and at most an hour — its interval is 32-bit, and a huge
+    threshold from the settings file would overflow it."""
+    return max(1, min(3_600_000, int((deadline - now) * 1000) + 1))
+
+
 class GroupAnim:
     """One group's visibility, 0..1, with its transition style.
 
