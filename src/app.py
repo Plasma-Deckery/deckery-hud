@@ -317,8 +317,9 @@ class App(Gtk.Application):
 
         No-op if the window already runs `mode`. persist=False is for a
         switch that came *from* the stored choice (the settings file edited
-        by hand, B-15): the source already holds `mode`, so it is not
-        written back.
+        by hand): the file already holds `mode`, so it is not written back.
+        If saving fails the switch still happens, it just won't survive a
+        restart.
 
         win.py picks its design once at import and only sets up what that
         design needs, so the window is rebuilt rather than switched: reload
@@ -334,7 +335,8 @@ class App(Gtk.Application):
                 layout_choice.remember(mode)
             was_open = self._win.is_visible()
             old = self._win
-            importlib.reload(win)
+            with layout_choice.building(mode):
+                importlib.reload(win)
             self._win = win.Win(application=self, settings=self._settings.reveal)
             old.retire()
             if was_open:

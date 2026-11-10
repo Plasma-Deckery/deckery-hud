@@ -6,28 +6,38 @@ switch buttons, via App.switch_layout). Kept out of win.py on purpose:
 switching rebuilds the window by reloading win.py, so the choice has to live
 in a module that is not reloaded with it.
 
-For now the in-HUD choice only lasts until the service restarts. Persisting
-it comes with the HUD settings file (backlog B-15): these two functions then
-become settings.load().layout.design and settings.remember("layout.design",
-mode), and DECKERY_HUD_LAYOUT is no longer read at all.
+The stored choice is `layout.design` in the HUD settings file (settings.py);
+DECKERY_HUD_LAYOUT is not read any more.
 """
 
-import os
+from contextlib import contextmanager
 
-_MODES = ("classic", "split")
-_chosen = None   # set by remember(); None = nothing chosen in this run
+import settings
+
+_building = None   # the design a switch is rebuilding win.py for, see building()
 
 
 def current():
-    """The design to use: the in-HUD choice, else DECKERY_HUD_LAYOUT, else classic."""
-    if _chosen is not None:
-        return _chosen
-    mode = os.environ.get("DECKERY_HUD_LAYOUT", "classic")
-    return mode if mode in _MODES else "classic"
+    """The design win.py sets itself up for."""
+    if _building is not None:
+        return _building
+    return settings.load().layout.design
 
 
 def remember(mode):
-    global _chosen
-    if mode not in _MODES:
-        raise ValueError(f"unknown HUD layout {mode!r}")
-    _chosen = mode
+    """Store the choice for the next start. False if it could not be saved
+    (settings.remember has already warned); the switch happens anyway."""
+    return settings.remember("layout.design", mode)
+
+
+@contextmanager
+def building(mode):
+    """Make current() return `mode` while win.py is reloaded for a switch —
+    so the switch happens even when the choice could not be saved, or the
+    file says something else by the time it is read."""
+    global _building
+    _building = mode
+    try:
+        yield
+    finally:
+        _building = None
