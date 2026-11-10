@@ -1256,10 +1256,11 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
 
 
 
-# Mouse/keyboard glyphs — the real Breeze symbolic icons (see icons.py),
-# not hand-drawn: no reason to redraw a mouse by hand when the system
-# already ships one, including the left/right-highlighted variants a
-# hand-drawn glyph can't cheaply tell apart from a flat recolour.
+# Mouse glyphs — the real Breeze symbolic icons (see icons.py), not
+# hand-drawn: no reason to redraw a mouse by hand when the system already
+# ships one, including the left/right-highlighted variants a hand-drawn
+# glyph can't cheaply tell apart from a flat recolour. The keyboard glyph
+# is the exception, see _draw_kbd_icon.
 _MOUSE_SIZE = 16     # idle (MT-Trackpad's legend glyph), doubled at its call site
 _CLICK_SIZE = 30     # LClick/RClick beside L1/L2/R1/R2 etc. (_place_action_text) — picked
                      # from a side-by-side render, the largest of the candidates shown
@@ -1271,7 +1272,6 @@ _PILL_ICON_SIZE = 26   # LClick/RClick and the keyboard prefix glyph, both insid
 _MOUSE_ICON_NAME = "input-mouse-symbolic"
 _CLICK_ICON_NAME = {"BTN_LEFT": "input-mouse-click-left-symbolic",
                      "BTN_RIGHT": "input-mouse-click-right-symbolic"}
-_KBD_ICON_NAME = "input-keyboard-symbolic"
 
 
 def _icon_cx(x, ha, size):
@@ -1301,7 +1301,45 @@ def _draw_click_icon(cr, which, x, y, ha, color, size=_CLICK_SIZE):
 
 
 def _draw_kbd_icon(cr, x, y, ha, color, size=_PILL_ICON_SIZE):
-    icons.draw_icon(cr, _KBD_ICON_NAME, _icon_cx(x, ha, size), y, size, color)
+    """Keyboard glyph, hand-drawn rather than themed — on request (B-06):
+    Breeze's input-keyboard-symbolic read busier and heavier than the mouse
+    beside it, and the other themed keyboards (Breeze sizes, Adwaita) were
+    just as dense or a solid filled block. This one shares the mouse's 1px
+    outline: two rows of five 2x2 keys and a spacebar, built in whole
+    *device* pixels so it stays crisp under fractional scaling (the Deck
+    runs at 1.1, where a logical-pixel grid would land between pixels).
+    Same placement convention as _draw_mouse_icon."""
+    ds = cr.get_target().get_device_scale()[0]
+    m = cr.get_matrix()
+    cx = _icon_cx(x, ha, size)
+    cr.save()
+    if (m.xx, m.yx, m.xy, m.yy) == (1, 0, 0, 1):
+        # Translation-only CTM: switch to device pixels and snap to them.
+        cx, cy = (cx + m.x0) * ds, (y + m.y0) * ds
+        cr.identity_matrix()
+        cr.scale(1 / ds, 1 / ds)
+        u = size * ds / 26
+    else:
+        cy, u = y, size / 26
+    key, gap, lw = max(1, round(2 * u)), max(1, round(u)), max(1, round(u))
+    hpad, vpad = round(2 * u), max(1, round(u))
+    row_w = 5 * key + 4 * gap
+    space_w = round(8 * u)
+    space_w += (row_w - space_w) % 2  # keep it centred on whole pixels
+    bw = row_w + 2 * (hpad + lw)
+    bh = 3 * key + 2 * gap + 2 * (vpad + lw)
+    bx, by = round(cx - bw / 2), round(cy - bh / 2)
+    cr.set_source_rgba(*color)
+    _rrect(cr, bx + lw / 2, by + lw / 2, bw - lw, bh - lw, 2 * u)
+    cr.set_line_width(lw)
+    cr.stroke()
+    kx, ky = bx + lw + hpad, by + lw + vpad
+    for row in range(2):
+        for i in range(5):
+            cr.rectangle(kx + i * (key + gap), ky + row * (key + gap), key, key)
+    cr.rectangle(kx + (row_w - space_w) // 2, ky + 2 * (key + gap), space_w, key)
+    cr.fill()
+    cr.restore()
 
 
 # Pad legend labels with nothing useful to say as text — the shape itself
