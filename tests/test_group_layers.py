@@ -129,16 +129,30 @@ def test_content_union():
 
 
 def test_shadow_sits_behind_its_element():
-    """Interim shadow (until B-14): centred on the element's own shape."""
+    """Each element's shadow layers cover everything it draws — its shape
+    and its legend — so nothing it shows sits outside its own shadow, and
+    the shadow isn't shifted off toward the screen centre."""
     from renderer_split import element_box
     groups = _layers(SAMPLES["base_only"], {e: FULL for e in ELEMENT_IDS})
     for name, layer in groups.items():
-        if name == "center":
-            continue
-        bx, by, bw, bh = element_box(ELEMENTS[name], layer.tx)
-        _f, sx, sy, sw_, sh_ = layer.shadow
-        assert abs((sx + sw_ / 2) - (bx + bw / 2)) < 1, name
-        assert abs((sy + sh_ / 2) - (by + bh / 2)) < 1, name
+        x, y, w, h = layer.rect
+        for slot in (layer.shadow, layer.bleed):
+            _f, sx, sy, sw_, sh_ = slot
+            assert sx <= x and sy <= y, name
+            assert sx + sw_ >= x + w and sy + sh_ >= y + h, name
+        if name != "center":
+            bx, by, bw, bh = element_box(ELEMENTS[name], layer.tx)
+            assert sx <= bx and sx + sw_ >= bx + bw, name
+
+
+def test_shoulder_halves_cast_separate_shadows():
+    """L1 and L2 share one wedge; each casts only its own half."""
+    groups = _layers(SAMPLES["base_only"], {e: FULL for e in ("L1", "L2")})
+    from renderer_split import _shadow_layer_cache
+    l1 = _shadow_layer_cache["L1"][0][0]
+    l2 = _shadow_layer_cache["L2"][0][0]
+    assert l1.parts[0][4] and l2.parts[0][4]
+    assert l1.parts[0][4] != l2.parts[0][4]
 
 
 @pytest.mark.parametrize("btn", ["BTN_GRIPL", "BTN_GRIPL2", "BTN_GRIPR", "BTN_GRIPR2",
@@ -166,4 +180,5 @@ def test_live_strip_covers_a_pressed_button(btn):
 def test_warm_all_names_match_textures():
     from renderer_split import warm_all
     surfaces = warm_all(SAMPLES["base_only"], SW, SH, 1.0)
-    assert set(surfaces) == set(ELEMENT_IDS) | {"shadow_" + e for e in ELEMENT_IDS}
+    assert set(surfaces) == (set(ELEMENT_IDS) | {"shadow_" + e for e in ELEMENT_IDS}
+                             | {"bleed_" + e for e in ELEMENT_IDS})

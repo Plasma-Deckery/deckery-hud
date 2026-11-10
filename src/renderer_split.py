@@ -19,14 +19,16 @@ from dataclasses import dataclass, replace
 
 import cairo
 
-from helpers import _rrect, _txt, _txt_smooth, _txt_size, _pill_row, C_MOD, C_LAYER
+from helpers import (_rrect, _txt, _txt_smooth, _txt_size, _pill_row, C_MOD, C_LAYER,
+                     capture_text_boxes)
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
 from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
 from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
 from layout_split import compute_layout, center_badge_rect, center_close_rect
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, _DEFAULT_COLOR, _DEFAULT_LW
-from metaball import render_field, paint_scaled
+from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
+                    style_from_env)
 import icons
 from reveal import FULL
 from elements import ELEMENTS, ELEMENT_IDS, side_of
@@ -217,24 +219,14 @@ _BTN_POS_OVERRIDE = {
 _ABXY_BTNS = {"BTN_NORTH", "BTN_WEST", "BTN_EAST", "BTN_SOUTH"}
 _ABXY_RADIUS = 15.07
 
-# Legibility shadow behind each element — interim, until B-14 replaces it
-# with shadows that follow each shape. One soft elliptical metaball blob
-# (see metaball.py) per element, centred on its own shape and reaching a
-# margin past it; the centre column's sits behind title, badge and
-# breadcrumb. Earlier versions centred blobs on the legend column, then on
-# whole cluster boxes; shown one by one, both read as shifted toward the
-# centre (live).
-# A real blur-behind would need compositor support this stack doesn't have
-# (gtk4-layer-shell doesn't expose KDE's blur protocol).
-_BD_DOWNSCALE  = 4      # field is low-frequency; computed at 1/4 res, drawn bilinear-scaled
-_BD_MARGIN_X   = 0.03   # blob reach past the element's shape, × sw
-_BD_MARGIN_Y   = 0.03   # × sh
-_BD_CENTER_RX  = 0.20   # centre column's blob, × sw
-_BD_CENTER_RY  = 0.16   # × sh
-_BD_CENTER_W   = 0.75   # centre column's weight — a lighter spot than the buttons'
-_BD_LOW        = 0.04
-_BD_HIGH       = 1.25
-_BD_ALPHA      = 0.62
+# Legibility shadows (see shadow.py): each element casts its own, following
+# its shape — the trackpad's rounded rect, a pill's oval, a stick's circle,
+# one shoulder half, each legend line — built from exactly what that element
+# draws, so it looks the same shown alone or with others, and slides/fades
+# with it. Their wide soft clouds (the bleed) merge into each other instead
+# of stacking. A real blur-behind would need compositor support this stack
+# doesn't have (gtk4-layer-shell doesn't expose KDE's blur protocol).
+SHADOW_STYLE = style_from_env()
 
 
 def element_box(element, tx):
@@ -252,29 +244,56 @@ def element_box(element, tx):
     return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
 
 
-# Built once per screen size, only over the blob's own box.
-_shadow_cache = {}
+def _element_shadow_spec(element, tx, text_boxes, ink):
+    parts, rrects = [], []
+    if element.kind != "center":
+        ox, oy, scale = tx
+        halves = (shoulder_half_polys(element.cluster)
+                  if element.kind in ("upper", "lower") else {})
+        for part in element.parts:
+            if part in _FRAGMENTED_FILL_PARTS:
+                # Drawn as a rounded rect from its bbox (see _render_part_cluster).
+                dx, dy = _PART_OFFSET.get(part, (0, 0))
+                x0, y0, x1, y1 = part_bbox(part)
+                rrects.append((ox + dx + x0 * scale, oy + dy + y0 * scale, (x1 - x0) * scale,
+                               (y1 - y0) * scale, _PADDLE_CORNER_R * scale))
+                continue
+            if halves:
+                # One half of the shared shoulder wedge: no part offset (see
+                # element_box), cut by its own half-plane.
+                clip = tuple(halves[element.buttons[0]])
+                parts.append((part, ox, oy, scale, clip))
+                continue
+            dx, dy = _PART_OFFSET.get(part, (0, 0))
+            parts.append((part, ox + dx, oy + dy, scale, None))
+    # Sub-pixel jitter in a recorded box shouldn't count as a geometry change.
+    boxes = tuple(tuple(round(v) for v in b) for b in text_boxes)
+    return GroupShadowSpec(tuple(parts), tuple(rrects), boxes, tuple(round(v) for v in ink))
 
 
-def _element_shadow(element, sw, sh):
-    """(surface, x, y, w, h) — the blob behind an element; surface is
-    downscaled, to be stretched over (x, y, w, h)."""
-    key = (element.id, sw, sh)
-    if key not in _shadow_cache:
-        if element.kind == "center":
-            _clusters, _anchor_x, center = compute_layout(sw, sh)
-            _bx, by, _bw, bh = center_badge_rect(center)
-            cx, cy = sw / 2, by + bh / 2 + 10
-            rx, ry, weight = _BD_CENTER_RX * sw, _BD_CENTER_RY * sh, _BD_CENTER_W
-        else:
-            x, y, w, h = element_box(element, _cluster_tx(element.cluster, sw, sh))
-            cx, cy = x + w / 2, y + h / 2
-            rx, ry, weight = w / 2 + _BD_MARGIN_X * sw, h / 2 + _BD_MARGIN_Y * sh, 1.0
-        field = render_field(2 * rx, 2 * ry, [(rx, ry, rx, ry, weight)],
-                             low=_BD_LOW, high=_BD_HIGH, max_alpha=_BD_ALPHA,
-                             downscale=_BD_DOWNSCALE)
-        _shadow_cache[key] = (field, cx - rx, cy - ry, 2 * rx, 2 * ry)
-    return _shadow_cache[key]
+# Keyed on the shadow's geometry and the legend strings, not on the
+# element's bitmap: a press or a colour change rebuilds the element's layer
+# but leaves its shadow (and its GPU texture) alone. The edge shadow is
+# traced from the bitmap of the build that missed — the same strokes and
+# glyphs, since nothing in the key changed.
+_shadow_layer_cache = {}
+
+
+def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False):
+    """(shadow, bleed) slots of a GroupLayer — see shadow.group_shadow_layers."""
+    hit = _shadow_layer_cache.get(element.id)
+    if pressing and hit is not None:
+        # A mid-press button is drawn live, not into this bitmap — its label
+        # and adjacent text are missing from it. Keep the at-rest shadow
+        # rather than letting the legend's shadow blink out for the press.
+        return hit[1]
+    spec = _element_shadow_spec(element, tx, cap.boxes, rect)
+    key = (spec, tuple(cap.texts), SHADOW_STYLE, dev_scale)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    layers = group_shadow_layers(spec, SHADOW_STYLE, surf, rect, dev_scale)
+    _shadow_layer_cache[element.id] = (key, layers)
+    return layers
 
 
 def _side_slide_offset(side, sw, open_t):
@@ -335,7 +354,8 @@ class GroupLayer:
     surface: object      # cairo.ImageSurface, device resolution, cut to its ink
     rect: tuple          # (x, y, w, h) logical px — where surface goes
     tx: tuple            # (ox, oy, scale) of its cluster; None for center
-    shadow: tuple        # (surface, x, y, w, h), surface may be downscaled
+    shadow: tuple        # (surface, x, y, w, h): core + edge shadow, final alpha; or None
+    bleed: tuple         # (surface, x, y, w, h): pre-curve field, merged across elements; or None
     vms: dict            # the ButtonVMs this element draws with (masked)
 
 
@@ -397,13 +417,18 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
                                shown=shown, pad_row=element.kind == "pad")
 
     _t0 = time.perf_counter()
-    surf, rect = _render_cropped(draw, sw, sh, dev_scale)
+    with capture_text_boxes() as cap:
+        surf, rect = _render_cropped(draw, sw, sh, dev_scale)
+    _t1 = time.perf_counter()
+    shadow, bleed = _element_shadows(element, tx, cap, surf, rect, dev_scale,
+                                     pressing=bool(set(element.buttons) & active_press))
     print(f"[deckery-hud] {name} element surface REBUILT: "
-          f"{(time.perf_counter() - _t0) * 1000:.1f}ms ({sw}x{sh}@{dev_scale:.3g})", flush=True)
+          f"{(_t1 - _t0) * 1000:.1f}ms + shadow {(time.perf_counter() - _t1) * 1000:.1f}ms "
+          f"({sw}x{sh}@{dev_scale:.3g})", flush=True)
     if c is not None:
         _diff_vms(name, c["vms"], vms_key)
     layer = GroupLayer(name=name, side=side, surface=surf, rect=rect, tx=tx,
-                       shadow=_element_shadow(element, sw, sh), vms=gvms)
+                       shadow=shadow, bleed=bleed, vms=gvms)
     _group_cache[name] = {"key": key, "vms": vms_key, "layer": layer}
     return layer
 
@@ -437,10 +462,12 @@ def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
     key = (sw, sh, dev_scale, tuple(ctx.get("config_stack") or ()),
            tuple(ctx.get("held_modifiers") or ()), bool(ctx.get("paused", False)), outs)
     if _center_cache["key"] != key:
-        surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
-                                     sw, sh, dev_scale)
+        with capture_text_boxes() as cap:
+            surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
+                                         sw, sh, dev_scale)
+        shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap, surf, rect, dev_scale)
         layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
-                           shadow=_element_shadow(ELEMENTS["center"], sw, sh), vms={})
+                           shadow=shadow, bleed=bleed, vms={})
         _center_cache.update(key=key, layer=layer)
     return _center_cache["layer"]
 
@@ -512,7 +539,10 @@ def warm_all(state, sw, sh, dev_scale=1.0):
     out = {}
     for name, layer in layers["groups"].items():
         out[name] = layer.surface
-        out["shadow_" + name] = layer.shadow[0]
+        if layer.shadow is not None:
+            out["shadow_" + name] = layer.shadow[0]
+        if layer.bleed is not None:
+            out["bleed_" + name] = layer.bleed[0]
     return out
 
 
@@ -676,7 +706,13 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
     # Every shadow first, as one pass, *then* every group's content on top —
     # never one group's shadow and text interleaved, or the next group's
     # shadow spillover lands on the first group's finished text and dims it.
+    # The bleed goes first and as one merged pass (see shadow.paint_bleed).
+    paint_bleed(cr, [(layers["groups"][n].bleed, dx, opacity)
+                     for n, (opacity, dx, _c) in groups.items() if layers["groups"][n].bleed],
+                sw, sh, SHADOW_STYLE)
     for name, (opacity, dx, _c) in groups.items():
+        if layers["groups"][name].shadow is None:
+            continue
         surf, x, y, w, h = layers["groups"][name].shadow
         cr.save()
         cr.translate(x + dx, y)

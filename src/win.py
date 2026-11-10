@@ -32,7 +32,8 @@ _LAYOUT_MODE = os.environ.get("DECKERY_HUD_LAYOUT", "classic")
 if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
-                                draw_gesture_connector_live)
+                                draw_gesture_connector_live, SHADOW_STYLE)
+    from shadow import bleed_transfer
     from layout_split import compute_layout, center_badge_rect, center_close_rect
 
 
@@ -573,6 +574,14 @@ class Win(Gtk.ApplicationWindow):
         self._tex_cache[name] = (surf, tex)
         return tex
 
+    def _bleed_transfer(self):
+        """(ramp, curve) — see shadow.bleed_transfer; the ramp applies first."""
+        if getattr(self, "_bleed_ct", None) is None:
+            m, b, table = bleed_transfer(SHADOW_STYLE)
+            self._bleed_ct = (Gsk.ComponentTransfer.new_linear(m, b),
+                              Gsk.ComponentTransfer.new_table(table))
+        return self._bleed_ct
+
     def _snapshot_split(self, snapshot, sw, sh):
         """Split mode as GPU layers instead of one full-screen cairo node.
 
@@ -619,9 +628,26 @@ class Win(Gtk.ApplicationWindow):
             snapshot.pop()
             snapshot.restore()
 
-        # Every shadow before any content, so no group's shadow darkens a
-        # neighbour's text.
+        # Every shadow before any content, so no element's shadow darkens a
+        # neighbour's text. First the bleed: each element's soft field with
+        # its own slide/fade, all in one pass that is only then mapped to
+        # alpha — so neighbouring clouds fuse into one shape instead of
+        # stacking (see shadow.py). Then each element's own core/edge shadow.
+        bleeds = [g for g in shown if groups[g].bleed is not None]
+        if bleeds:
+            ident = Gsk.ComponentTransfer.new_identity()
+            ramp, curve = self._bleed_transfer()
+            snapshot.push_component_transfer(ident, ident, ident, curve)
+            snapshot.push_component_transfer(ident, ident, ident, ramp)
+            for g in bleeds:
+                surf, x, y, w, h = groups[g].bleed
+                placed(g, lambda: snapshot.append_scaled_texture(
+                    self._texture("bleed_" + g, surf), Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+            snapshot.pop()
+            snapshot.pop()
         for g in shown:
+            if groups[g].shadow is None:
+                continue
             surf, x, y, w, h = groups[g].shadow
             placed(g, lambda: snapshot.append_scaled_texture(
                 self._texture("shadow_" + g, surf), Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
