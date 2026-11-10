@@ -23,6 +23,13 @@ _SUPPRESS_S     = 0.4   # how long to hide pills that are covered by the toast
 _C_ACT = (0.333, 0.867, 1.0)   # cyan — same as center strip
 
 
+def _drawn_fields(state):
+    """The parts of the state `_draw_inner` reads, for change detection."""
+    ctx = state.get("context", {})
+    return (ctx.get("paused", False), repr(ctx.get("active_outputs")),
+            repr(state.get("last_action")))
+
+
 class OsdWin(Gtk.ApplicationWindow):
     def __init__(self, application):
         super().__init__(application=application)
@@ -44,6 +51,7 @@ class OsdWin(Gtk.ApplicationWindow):
         self._active_toasts  = []
         self._last_action_ts = 0.0
         self._toast_source   = None
+        self._drawn          = None
 
         # ── Drawing area ─────────────────────────────────────────────────
         da = Gtk.DrawingArea()
@@ -55,8 +63,22 @@ class OsdWin(Gtk.ApplicationWindow):
 
     def on_state(self, state):
         self._state = state
-        self._da.queue_draw()
+        # With the analog export on, the state is rewritten up to 90 times a
+        # second for stick and pad positions, none of which this draws, and
+        # each full-screen repaint cost ~4 ms. Repaint only when what
+        # _draw_inner reads has changed; the toast animates on its own timer.
+        drawn = _drawn_fields(state)
+        if drawn != self._drawn:
+            self._drawn = drawn
+            self._da.queue_draw()
+            # Pills a fresh toast covers come back after _SUPPRESS_S; that
+            # used to ride on whatever update came next.
+            GLib.timeout_add(int(_SUPPRESS_S * 1000) + 20, self._redraw_once)
         self._schedule_toast()
+
+    def _redraw_once(self):
+        self._da.queue_draw()
+        return GLib.SOURCE_REMOVE
 
     # ── Toast ─────────────────────────────────────────────────────────────
 
