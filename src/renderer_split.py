@@ -1305,21 +1305,39 @@ def _draw_kbd_icon(cr, x, y, ha, color, size=_PILL_ICON_SIZE):
     Breeze's input-keyboard-symbolic read busier and heavier than the mouse
     beside it, and the other themed keyboards (Breeze sizes, Adwaita) were
     just as dense or a solid filled block. This one shares the mouse's 1px
-    outline and is laid out on a 26px pixel grid (_PILL_ICON_SIZE), so the 2x2 keys and
-    the spacebar land on whole pixels and stay crisp; other sizes scale it.
+    outline: two rows of five 2x2 keys and a spacebar, built in whole
+    *device* pixels so it stays crisp under fractional scaling (the Deck
+    runs at 1.1, where a logical-pixel grid would land between pixels).
     Same placement convention as _draw_mouse_icon."""
+    ds = cr.get_target().get_device_scale()[0]
+    m = cr.get_matrix()
     cx = _icon_cx(x, ha, size)
     cr.save()
-    cr.translate(round(cx - size / 2), round(y - size / 2))
-    cr.scale(size / 26, size / 26)
+    if (m.xx, m.yx, m.xy, m.yy) == (1, 0, 0, 1):
+        # Translation-only CTM: switch to device pixels and snap to them.
+        cx, cy = (cx + m.x0) * ds, (y + m.y0) * ds
+        cr.identity_matrix()
+        cr.scale(1 / ds, 1 / ds)
+        u = size * ds / 26
+    else:
+        cy, u = y, size / 26
+    key, gap, lw = max(1, round(2 * u)), max(1, round(u)), max(1, round(u))
+    hpad, vpad = round(2 * u), max(1, round(u))
+    row_w = 5 * key + 4 * gap
+    space_w = round(8 * u)
+    space_w += (row_w - space_w) % 2  # keep it centred on whole pixels
+    bw = row_w + 2 * (hpad + lw)
+    bh = 3 * key + 2 * gap + 2 * (vpad + lw)
+    bx, by = round(cx - bw / 2), round(cy - bh / 2)
     cr.set_source_rgba(*color)
-    _rrect(cr, 3.5, 7.5, 19, 11, 2)  # body, 1px stroke on the half-pixel
-    cr.set_line_width(1)
+    _rrect(cr, bx + lw / 2, by + lw / 2, bw - lw, bh - lw, 2 * u)
+    cr.set_line_width(lw)
     cr.stroke()
-    for ky in (9, 12):  # two rows of five keys
+    kx, ky = bx + lw + hpad, by + lw + vpad
+    for row in range(2):
         for i in range(5):
-            cr.rectangle(6 + 3 * i, ky, 2, 2)
-    cr.rectangle(9, 15, 8, 2)  # spacebar
+            cr.rectangle(kx + i * (key + gap), ky + row * (key + gap), key, key)
+    cr.rectangle(kx + (row_w - space_w) // 2, ky + 2 * (key + gap), space_w, key)
     cr.fill()
     cr.restore()
 
