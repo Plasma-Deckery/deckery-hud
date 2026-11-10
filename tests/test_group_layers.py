@@ -103,3 +103,18 @@ def test_filtered_rows_keep_full_layout_position():
     ink = filtered[..., 3] > 0
     mismatch = (filtered[ink] != full[ink]).any(axis=1).sum()
     assert mismatch <= 0.02 * ink.sum()
+
+
+def test_shadow_sits_behind_its_group():
+    """Interim shadow (until B-14): centred on the cluster's own art, not
+    shifted toward the screen centre."""
+    from layout_split import compute_layout
+    clusters, _ax, _center = compute_layout(SW, SH)
+    groups = _layers(SAMPLES["base_only"], {g: FULL for g in GROUPS})
+    for name, layer in groups.items():
+        if name == "center":
+            continue
+        x, y, w, h, _s = clusters[name]
+        _f, sx, sy, sw_, sh_ = layer.shadow
+        assert abs((sx + sw_ / 2) - (x + w / 2)) < 1, name
+        assert abs((sy + sh_ / 2) - (y + h / 2)) < 1, name

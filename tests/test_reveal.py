@@ -282,3 +282,32 @@ def test_anim_delay_shifts_running_transition():
     assert a.tick(0.45)
     assert abs(a.value - v) < 1e-9
     assert not a.tick(0.66)
+
+
+# ── Live feedback: gesture escalation ─────────────────────────────────────
+
+def test_gesture_escalates_immediately_when_a_pad_is_shown():
+    r = Reveal(S)
+    r.update(_makima_pads(False, True, False), 0.0)
+    assert set(r.update(_makima_pads(False, True, False), 1.5)) == {"r_pad"}
+    assert set(r.update(_makima_pads(True, True, True), 2.0)) == {"l_pad", "r_pad"}
+
+
+def test_gesture_end_hides_the_other_pad_immediately():
+    r = Reveal(S)
+    r.update(_makima_pads(False, True, False), 0.0)
+    r.update(_makima_pads(False, True, False), 1.5)
+    r.update(_makima_pads(True, True, True), 2.0)
+    # left thumb lifts: back to the right pad alone, at once
+    assert set(r.update(_makima_pads(False, True, False), 2.3)) == {"r_pad"}
+
+
+def test_gesture_end_keeps_the_survivor_even_after_a_short_gesture():
+    r = Reveal(S)
+    r.update(_makima_pads(False, True, False), 0.0)
+    r.update(_makima_pads(False, True, False), 1.5)
+    r.update(_makima_pads(True, True, True), 2.0)
+    # right thumb lifts after 0.2 s of gesture: the left pad was shown and
+    # is still touched, so it stays; the right one goes at once
+    assert set(r.update(_makima_pads(True, False, False), 2.2)) == {"l_pad"}
+    assert set(r.update(_makima_pads(True, False, False), 2.5)) == {"l_pad"}

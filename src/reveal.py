@@ -103,6 +103,11 @@ class Hold:
     def reset(self):
         self._since = self._off_since = None
 
+    def force(self, now):
+        """Fired from now on, as if held all along."""
+        self._since = now - self.hold
+        self._off_since = None
+
 
 class Reveal:
     """Which groups are wanted right now, from the full-HUD flag and the
@@ -117,6 +122,8 @@ class Reveal:
         self._gesture = Hold(settings.gesture_hold_ms, settings.release_ms)
         self._modifier = Hold(settings.hold_ms, settings.release_ms)
         self._mod_contents = {}   # last non-empty modifier reveal, kept while bridged
+        self._gesture_raw = False  # gesture touching at the last update
+        self._gesture_shown = False  # the gesture is showing both pads
         self._now = 0.0
 
     def _holds(self):
@@ -137,18 +144,37 @@ class Reveal:
             for h in self._holds():
                 h.reset()
             self._mod_contents = {}
+            self._gesture_raw = self._gesture_shown = False
         else:
             pads = state.get("trackpads") or {}
-            gesture = bool((pads.get("gesture") or {}).get("touching"))
-            for name, side in (("l_pad", "left"), ("r_pad", "right")):
+            gesture = bool((pads.get("gesture") or {}).get("touching")) and s.gesture_enabled
+            own = {name: bool((pads.get(side) or {}).get("touching"))
+                   for name, side in (("l_pad", "left"), ("r_pad", "right"))}
+            if self._gesture_raw and not gesture:
+                # The gesture ends at once, no release delay: the pad whose
+                # finger lifted goes right away, and the one still touched
+                # stays if the gesture was showing it.
+                self._gesture.reset()
+                for name, touching in own.items():
+                    if not touching:
+                        self._pad[name].reset()
+                    elif self._gesture_shown:
+                        self._pad[name].force(now)
+            self._gesture_raw = gesture
+            fired = {}
+            for name, touching in own.items():
                 # makima reports a pad's own touching as False while a
                 # gesture is on. Counting the gesture as touching both keeps
-                # each pad's clock running, so the finger that stays when
-                # the other lifts keeps its pad instead of it blinking out.
-                touching = bool((pads.get(side) or {}).get("touching")) or gesture
-                if self._pad[name].update(touching and s.pad_enabled, now):
+                # each pad's clock running through it.
+                fired[name] = self._pad[name].update((touching or gesture) and s.pad_enabled, now)
+                if fired[name]:
                     want(name, PAD_ONLY)
-            if self._gesture.update(gesture and s.gesture_enabled, now):
+            # A gesture shows both pads once held long enough — or at once
+            # when a pad is already shown: waiting there would be nonsense.
+            self._gesture_shown = gesture and (self._gesture.update(True, now) or any(fired.values()))
+            if not gesture:
+                self._gesture.update(False, now)
+            if self._gesture_shown:
                 want("l_pad", PAD_ONLY)
                 want("r_pad", PAD_ONLY)
             for name, content in self._modifier_reveal(state, ctx, now).items():

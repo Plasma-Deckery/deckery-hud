@@ -216,72 +216,49 @@ _BTN_POS_OVERRIDE = {
 _ABXY_BTNS = {"BTN_NORTH", "BTN_WEST", "BTN_EAST", "BTN_SOUTH"}
 _ABXY_RADIUS = 15.07
 
-# Legibility backdrop: one metaball field (see metaball.py) with a soft
-# elliptical blob per cluster, centred on that cluster's *legend* — the text
-# column just inward of the button art — not on the art itself. Darkest
-# behind what's read, fading to nothing at the true screen edge, where the
-# art sits (on request: "ganz links und ganz rechts muss es gar nicht dunkel
-# sein"). Stacked blobs on one side overlap enough that their fields sum
-# into one continuous band instead of separate islands; a lighter blob
-# (weight < 1) sits behind the title/badge/breadcrumb and merges into both
-# bands. Replaces the old per-side off-screen ring + top ring, which on a
-# white background measured as a ~60-83% wash over the *whole* screen,
-# darkest in the top-centre where all three overlapped — the inverse of
-# the intent. A real blur-behind would need compositor support this stack
-# doesn't have (gtk4-layer-shell doesn't expose KDE's blur protocol).
+# Legibility shadow behind each group — interim, until B-14 replaces it with
+# shadows that follow each element's shape. One soft elliptical metaball
+# blob (see metaball.py) per cluster, centred on its button art and reaching
+# a margin past it; the centre column's sits behind title, badge and
+# breadcrumb. The old version centred one merged band on the legend column
+# instead; shown group by group, those blobs read as shifted toward the
+# centre (live), and so did ones centred on art plus legends, which reach
+# far inward.
+# A real blur-behind would need compositor support this stack doesn't have
+# (gtk4-layer-shell doesn't expose KDE's blur protocol).
 _BD_DOWNSCALE  = 4      # field is low-frequency; computed at 1/4 res, drawn bilinear-scaled
-_BD_SIDE_CX    = 0.085  # band centre, inward from the cluster column's inner edge, × sw
-_BD_SIDE_RX    = 0.22   # blob half-width, × sw
-_BD_SIDE_RY    = 0.20   # added to each cluster's half-height, × sh — enough overlap to merge
-_BD_CENTER_RX  = 0.20   # × sw
+_BD_MARGIN_X   = 0.06   # blob reach past the cluster's art, × sw
+_BD_MARGIN_Y   = 0.06   # × sh
+_BD_CENTER_RX  = 0.20   # centre column's blob, × sw
 _BD_CENTER_RY  = 0.16   # × sh
-_BD_CENTER_W   = 0.75   # weight — a lighter spot of its own, still merges with the bands
+_BD_CENTER_W   = 0.75   # centre column's weight — a lighter spot than the clusters'
 _BD_LOW        = 0.04
 _BD_HIGH       = 1.25
 _BD_ALPHA      = 0.62
 
 
-def _group_blobs(sw, sh):
-    """{group: blob} — one soft elliptical blob per cluster, centred on its
-    legend column, plus a lighter one behind the centre column."""
-    clusters, _anchor_x, center = compute_layout(sw, sh)
-    blobs = {}
-    for stack, cx in ((LEFT_STACK, center[0] + _BD_SIDE_CX * sw),
-                      (RIGHT_STACK, center[2] - _BD_SIDE_CX * sw)):
-        for name in stack:
-            _x, y, _w, h, _s = clusters[name]
-            blobs[name] = (cx, y + h / 2, _BD_SIDE_RX * sw, h / 2 + _BD_SIDE_RY * sh, 1.0)
-    _bx, by, _bw, bh = center_badge_rect(center)
-    blobs["center"] = (sw / 2, by + bh / 2 + 10, _BD_CENTER_RX * sw, _BD_CENTER_RY * sh, _BD_CENTER_W)
-    return blobs
-
-
-# Per-group shadow, the slot B-14's shape-following shadows will fill. Until
-# then each group carries just its own metaball blob, rendered on its own:
-# that gives up the merged band (overlaps now stack instead of fusing), but a
-# group's shadow can fade and slide with it, which one shared field can't.
-# Built once per screen size, cropped to the blob's own box.
+# Built once per screen size, only over the blob's own box.
 _shadow_cache = {}
 
 
 def _group_shadow(name, sw, sh):
+    """(surface, x, y, w, h) — the blob behind a group; surface is
+    downscaled, to be stretched over (x, y, w, h)."""
     key = (name, sw, sh)
     if key not in _shadow_cache:
-        cx, cy, rx, ry, _w = blob = _group_blobs(sw, sh)[name]
-        field = render_field(sw, sh, [blob], low=_BD_LOW, high=_BD_HIGH, max_alpha=_BD_ALPHA,
+        clusters, _anchor_x, center = compute_layout(sw, sh)
+        if name == "center":
+            _bx, by, _bw, bh = center_badge_rect(center)
+            cx, cy = sw / 2, by + bh / 2 + 10
+            rx, ry, weight = _BD_CENTER_RX * sw, _BD_CENTER_RY * sh, _BD_CENTER_W
+        else:
+            x, y, w, h, _scale = clusters[name]
+            cx, cy = x + w / 2, y + h / 2
+            rx, ry, weight = w / 2 + _BD_MARGIN_X * sw, h / 2 + _BD_MARGIN_Y * sh, 1.0
+        field = render_field(2 * rx, 2 * ry, [(rx, ry, rx, ry, weight)],
+                             low=_BD_LOW, high=_BD_HIGH, max_alpha=_BD_ALPHA,
                              downscale=_BD_DOWNSCALE)
-        fw, fh = field.get_width(), field.get_height()
-        fx0 = max(0, int((cx - rx) * fw / sw))
-        fx1 = min(fw, int(math.ceil((cx + rx) * fw / sw)))
-        fy0 = max(0, int((cy - ry) * fh / sh))
-        fy1 = min(fh, int(math.ceil((cy + ry) * fh / sh)))
-        crop = cairo.ImageSurface(cairo.FORMAT_ARGB32, fx1 - fx0, fy1 - fy0)
-        ccr = cairo.Context(crop)
-        ccr.set_operator(cairo.OPERATOR_SOURCE)
-        ccr.set_source_surface(field, -fx0, -fy0)
-        ccr.paint()
-        _shadow_cache[key] = (crop, fx0 * sw / fw, fy0 * sh / fh,
-                              (fx1 - fx0) * sw / fw, (fy1 - fy0) * sh / fh)
+        _shadow_cache[key] = (field, cx - rx, cy - ry, 2 * rx, 2 * ry)
     return _shadow_cache[key]
 
 
