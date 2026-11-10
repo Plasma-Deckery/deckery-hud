@@ -7,6 +7,7 @@ or 0.0…1.0 (triggers). No raw-value conversion needed.
 import math
 import cairo
 from layout import _FX, _FY, _FS
+from helpers import _txt_smooth
 
 # ── Trackpad bounds — front SVG viewBox 0 0 1024 414 ─────────────────────────
 # Derived from the rounded-rect paths in steamdeckFront.svg
@@ -233,7 +234,8 @@ _RING_INNER_FILL   = (0.0, 0.0, 0.0, 0.72)
 _RING_INNER_BORDER = (0.0, 0.0, 0.0, 0.95)
 
 
-def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_rings=False):
+def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_rings=False,
+                label=None):
     x        = stick.get("x", 0.0)
     y        = stick.get("y", 0.0)
     deadzone = stick.get("deadzone", 0.0)
@@ -321,3 +323,18 @@ def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_ri
         cr.set_line_width(lw)
         cr.arc(new_inner_cx, new_inner_cy, r_inner, 0, math.tau)
         cr.stroke()
+
+    # Identity label ("L3"/"R3") rides on the cap (the inner disk, not the
+    # middle ring — that one travels less, so the text would slide off-centre
+    # of the cap at full deflection), on request. Used to sit static in the
+    # cached side bitmap at the rest centre, underneath this cap's dark fill,
+    # which left it barely visible. Press-scaled about the cap's own centre
+    # together with the rings, hence _txt_smooth (see its docstring for the
+    # "dancing" text it avoids).
+    if label:
+        cr.save()
+        cr.translate(new_inner_cx, new_inner_cy)
+        cr.scale(press_s, press_s)
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.75)
+        _txt_smooth(cr, 0, 0, label, size=9, ha="center", va="mid")
+        cr.restore()

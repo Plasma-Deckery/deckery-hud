@@ -596,7 +596,8 @@ def draw_group_live(cr, name, state, layers, dx, press_t=None, draw_dpad=True):
         left = name == "L3"
         _draw_stick(cr, sticks.get("lstick" if left else "rstick", {}), _LSTICK if left else _RSTICK,
                     tx=(ox, oy + _STICK_Y_NUDGE, scale), erase_mode="none",
-                    press=pt.get(element.buttons[0], 0.0), fill_rings=True)
+                    press=pt.get(element.buttons[0], 0.0), fill_rings=True,
+                    label=_BTNS[element.buttons[0]][3])
     elif element.kind == "dpad" and draw_dpad:
         # draw_dpad=False when win.py drives a real 3D perspective
         # transform for the d-pad instead (win.py:_draw_dpad_3d) — that
@@ -941,7 +942,7 @@ def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(),
 
 
 def _draw_in_shape_labels(cr, name, ox, oy, scale, vms, stick=True, pad=True):
-    """LPad/RPad's own corner label, plus L3/R3's — the only in-shape labels
+    """LPad/RPad's own corner label, plus L3/R3's bound action — the only in-shape labels
     that aren't attached to a button in _SCALE_ANIM_PARTS (see that dict /
     _draw_scale_button_live, which draws every other in-shape label live,
     together with its button, so the two share one press transform instead
@@ -950,8 +951,9 @@ def _draw_in_shape_labels(cr, name, ox, oy, scale, vms, stick=True, pad=True):
     static outer bezel ring — wrong ring (it never moves on a real stick);
     the actual press feedback now lives in trackpads.py instead (the two
     *inner* rings, which are already drawn fresh every frame for analog
-    deflection), so this label goes back to being static here, same as
-    before that detour. Deliberately excluded here as everywhere before:
+    deflection), and since B-07 the "L3"/"R3" text is drawn there too, on
+    the moving cap — only the bound-action text beside it stays static here.
+    Deliberately excluded here as everywhere before:
     the d-pad (its arrow shape already reads as up/down/left/right, a label
     would be redundant) and View, which wasn't part of the original
     in-shape-label request and stays legend-only."""
@@ -961,15 +963,12 @@ def _draw_in_shape_labels(cr, name, ox, oy, scale, vms, stick=True, pad=True):
         # that's where the live analog-deflection dot moves, so text
         # sitting there would get run over by it.
         #
-        # Identity label ("L3"/"R3") sits in the middle of the stick itself —
-        # small, like LPad/RPad's own corner label — not beside the ring; the
-        # bound-action text stays on the *inward* side (toward the centre
-        # column), on request.
+        # The bound-action text stays on the *inward* side (toward the
+        # centre column), on request.
         stick_part, stick_key = (("stick_l_fixed", "BTN_THUMBL") if name == "l_face"
                                   else ("stick_r_fixed", "BTN_THUMBR"))
         rx0, ry0, rx1, ry1 = part_bbox(stick_part)
         sdx, sdy = _PART_OFFSET.get(stick_part, (0, 0))
-        cx = ox + sdx + (rx0 + rx1) / 2 * scale
         cy = oy + sdy + (ry0 + ry1) / 2 * scale
         gap = 14
         inward_is_right = name == "l_face"   # l_face's centre column is to its right
@@ -978,9 +977,9 @@ def _draw_in_shape_labels(cr, name, ox, oy, scale, vms, stick=True, pad=True):
         else:
             inward_x, inward_ha = ox + sdx + rx0 * scale - gap, "right"
 
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.75)
-        _txt(cr, cx, cy, _BTNS[stick_key][3], size=9, ha="center", va="mid")
-
+        # The identity label itself ("L3"/"R3") is drawn live on the moving
+        # cap now (draw_group_live → trackpads._draw_stick), so it follows
+        # deflection and press; only the bound action stays here, static.
         vm = vms[stick_key]
         if vm.bound:
             _place_action_text(cr, inward_x, cy, inward_ha, vm.action, _action_text_color(vm))
