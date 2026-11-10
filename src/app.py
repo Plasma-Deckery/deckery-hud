@@ -96,6 +96,7 @@ class App(Gtk.Application):
         atexit.register(makima_resume)
 
         self._state    = load_state()
+        self._state_stamp = None
         self._win      = Win(application=self, settings=self._settings)
         self._osd_win = OsdWin(application=self)
         self._osd_win.on_state(self._state)
@@ -125,6 +126,17 @@ class App(Gtk.Application):
     def _on_file_changed(self, _monitor, file, _other, _event_type):
         if file.get_basename() != os.path.basename(_STATE):
             return
+        # makima's atomic rename arrives as two events (created, then
+        # changes-done-hint). Parsing on both doubled the cost of every update,
+        # and with the analog export on there are up to 90 of them a second.
+        try:
+            st = os.stat(_STATE)
+            stamp = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = None
+        if stamp is not None and stamp == self._state_stamp:
+            return
+        self._state_stamp = stamp
         self._state = load_state()
         if self._win.is_visible():
             self._win.on_state(self._state)
