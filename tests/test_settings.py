@@ -198,6 +198,20 @@ class RememberTests(_TmpFile):
         self.assertFalse(self.path.exists())
         self.assertNotEqual(err, "")
 
+    def test_remember_keeps_file_mode(self):
+        self.write("[osd]\nenabled = true\n")
+        os.chmod(self.path, 0o640)
+        self.assertTrue(settings.remember("osd.enabled", False, self.path))
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o640)
+
+    def test_new_file_follows_umask(self):
+        old = os.umask(0o022)
+        try:
+            ensure_file(self.path)
+        finally:
+            os.umask(old)
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o644)
+
     def test_remember_without_tomlkit(self):
         with mock.patch.dict(sys.modules, {"tomlkit": None}):
             result, err = self.remember_capturing("layout.design", "split")
@@ -206,6 +220,13 @@ class RememberTests(_TmpFile):
 
 
 class DiffTests(unittest.TestCase):
+
+    def test_debug_flag(self):
+        self.assertIs(settings.debug_enabled(), False)
+        settings._set_debug(True)
+        self.assertIs(settings.debug_enabled(), True)
+        settings._set_debug(False)
+        self.assertIs(settings.debug_enabled(), False)
 
     def test_diff(self):
         self.assertEqual(diff(Settings(), Settings(osd=OsdSettings(enabled=False))),

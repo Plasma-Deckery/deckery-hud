@@ -118,6 +118,20 @@ def _warn(msg):
     print(f"deckery-hud settings: {msg}", file=sys.stderr)
 
 
+# debug.enabled, readable from anywhere without a handle on the App (diagnostic
+# output sits deep in the renderers). App keeps it in step with the file.
+_debug = False
+
+
+def debug_enabled():
+    return _debug
+
+
+def _set_debug(on):
+    global _debug
+    _debug = on
+
+
 # ── Validation ────────────────────────────────────────────────────────────────
 
 def _problem(f, value):
@@ -298,6 +312,15 @@ def _write_atomic(path, text):
     (the file monitor, an editor) never sees a half-written file."""
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".settings-", suffix=".tmp")
     try:
+        # mkstemp makes 0600; keep the existing file's mode, or give a new one
+        # what any other file the user creates would get.
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except FileNotFoundError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.fchmod(fd, mode)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
         os.replace(tmp, path)

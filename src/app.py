@@ -5,6 +5,7 @@ Persistent service (de.plasma_deckery.hud).  Window starts hidden;
 Toggle/Show/Hide D-Bus methods control visibility.
 """
 
+import dataclasses
 import signal
 import os
 import time
@@ -19,7 +20,9 @@ from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_of
 import win
 from win import Win
 from osd_win import OsdWin
-from reveal import Reveal, RevealSettings, deadline_delay_ms
+from reveal import Reveal, deadline_delay_ms
+import settings
+from settings import Settings
 
 def _split_mode():
     """Read at call time, not import: the layout can be switched while
@@ -61,8 +64,10 @@ class App(Gtk.Application):
         # The full HUD is open (paused, takes input). Split mode can also
         # show single groups with this False — see Reveal / _reveal_sync.
         self._full              = False
-        self._settings          = RevealSettings()
-        self._reveal            = Reveal(self._settings)
+        self._settings          = Settings()
+        self._settings_monitor  = None
+        self._settings_reload   = 0   # pending debounce source id
+        self._reveal            = Reveal(self._settings.reveal)
         self._deadline_src      = None
         self._analog_on         = False
 
@@ -95,12 +100,19 @@ class App(Gtk.Application):
         atexit.register(makima_analog_off)
         atexit.register(makima_resume)
 
+        settings.ensure_file()
+        self._settings    = settings.load()
+        self._osd_enabled = self._settings.osd.enabled
+        settings._set_debug(self._settings.debug.enabled)
+        self._reveal   = Reveal(self._settings.reveal)
+
         self._state    = load_state()
         self._state_stamp = None
-        self._win      = Win(application=self, settings=self._settings)
+        self._win      = Win(application=self, settings=self._settings.reveal)
         self._osd_win = OsdWin(application=self)
         self._osd_win.on_state(self._state)
-        self._osd_win.present()
+        if self._osd_enabled:
+            self._osd_win.present()
 
         # Shared FileMonitor — dispatches state to both windows.
         # The directory comes from _STATE rather than being named here: makima
@@ -109,6 +121,18 @@ class App(Gtk.Application):
         _dir = Gio.File.new_for_path(os.path.dirname(_STATE))
         self._monitor = _dir.monitor_directory(Gio.FileMonitorFlags.NONE, None)
         self._monitor.connect("changed", self._on_file_changed)
+
+        # The directory rather than the file: editors that save by writing a
+        # new file and renaming it over the old one (vim, Kate) would leave a
+        # file monitor watching an inode that no longer exists.
+        _settings_dir = settings.settings_path().parent
+        try:
+            _settings_dir.mkdir(parents=True, exist_ok=True)
+            self._settings_monitor = Gio.File.new_for_path(str(_settings_dir)).monitor_directory(
+                Gio.FileMonitorFlags.NONE, None)
+            self._settings_monitor.connect("changed", self._on_settings_changed)
+        except (OSError, GLib.Error) as e:
+            print(f"deckery-hud settings: {_settings_dir} not watched ({e})")
 
     def do_activate(self):
         """Called by `dbus-send … Activate` or when a second instance is launched."""
@@ -179,6 +203,42 @@ class App(Gtk.Application):
         if want != self._analog_on:
             self._analog_on = want
             (makima_analog_on if want else makima_analog_off)()
+
+    # ── Settings file ─────────────────────────────────────────────────────
+
+    def _on_settings_changed(self, _monitor, file, _other, _event_type):
+        if file.get_basename() != settings.settings_path().name:
+            return
+        # One save arrives as several events (Gio reports a rename twice, and
+        # editors write in steps): wait until they stop, then read once.
+        if self._settings_reload:
+            GLib.source_remove(self._settings_reload)
+        self._settings_reload = GLib.timeout_add(150, self._reload_settings)
+
+    def _reload_settings(self):
+        self._settings_reload = 0
+        if not settings.settings_path().exists():
+            # Deleted to start over: the defaults apply, and the template with
+            # every setting explained comes back.
+            settings.ensure_file()
+        new = settings.load(previous=self._settings)
+        old, self._settings = self._settings, new
+        self._apply_settings(old, new)
+        return False   # one shot
+
+    def _apply_settings(self, old, new):
+        """The one place where a changed setting takes effect. Only keys that
+        actually changed get here — the HUD's own writes come back through the
+        file monitor and find nothing to do."""
+        changed = settings.diff(old, new)
+        if "osd.enabled" in changed:
+            self._set_osd_enabled(new.osd.enabled)
+        if "debug.enabled" in changed:
+            settings._set_debug(new.debug.enabled)
+        if "layout.design" in changed and hasattr(self, "switch_layout"):
+            # B-05: switches in process; persist=False because the file already says so.
+            self.switch_layout(new.layout.design, persist=False)
+        # B-12: any "reveal.*" key → hand new.reveal to the reveal controller.
 
     # ── D-Bus method dispatch ─────────────────────────────────────────────
 
@@ -267,8 +327,18 @@ class App(Gtk.Application):
         self._win.queue_draw_title()
 
     def toggle_osd(self):
-        """Called from Win title bar toggle button."""
-        self._osd_enabled = not self._osd_enabled
+        """Called from Win title bar toggle button and the tray (D-Bus ToggleOsd).
+        The choice is saved, so it survives a restart."""
+        self._set_osd_enabled(not self._osd_enabled)
+        # Taken over before the write comes back through the file monitor, so
+        # that event finds nothing changed.
+        self._settings = dataclasses.replace(
+            self._settings,
+            osd=dataclasses.replace(self._settings.osd, enabled=self._osd_enabled))
+        settings.remember("osd.enabled", self._osd_enabled)
+
+    def _set_osd_enabled(self, enabled):
+        self._osd_enabled = enabled
         if not self._osd_enabled:
             self._osd_win.set_visible(False)
         elif not self._full:
