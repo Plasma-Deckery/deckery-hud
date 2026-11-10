@@ -312,3 +312,12 @@ def test_gesture_end_keeps_the_survivor_even_after_a_short_gesture():
     # is still touched, so it stays; the right one goes at once
     assert set(r.update(_makima_pads(True, False, False), 2.2)) == {"LPad"}
     assert set(r.update(_makima_pads(True, False, False), 2.5)) == {"LPad"}
+
+
+def test_deadline_delay_is_clamped():
+    """GLib.timeout_add takes a 32-bit interval; a huge hold_ms from the
+    settings file must not overflow it."""
+    from reveal import deadline_delay_ms
+    assert deadline_delay_ms(1.5, 0.0) == 1501
+    assert deadline_delay_ms(0.0, 1.0) == 1
+    assert deadline_delay_ms(10 ** 9, 0.0) == 3_600_000
