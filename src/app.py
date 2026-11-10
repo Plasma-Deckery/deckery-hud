@@ -7,6 +7,7 @@ Toggle/Show/Hide D-Bus methods control visibility.
 
 import signal
 import os
+import time
 import atexit
 import gi
 gi.require_version('Gtk', '4.0')
@@ -15,8 +16,9 @@ from gi.repository import Gtk, Gio, GLib
 from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_off,
                  load_state, _STATE, auth_daemon_present, start_auth_session,
                  start_pin_change)
-from win import Win
+from win import Win, _LAYOUT_MODE
 from osd_win import OsdWin
+from reveal import Reveal, RevealSettings
 
 # ── D-Bus ─────────────────────────────────────────────────────────────────────
 _DBUS_NAME = "de.plasma_deckery.hud"
@@ -49,6 +51,13 @@ class App(Gtk.Application):
         self._state             = {}
         self._monitor           = None
         self._reg_id            = 0
+        # The full HUD is open (paused, takes input). Split mode can also
+        # show single groups with this False — see Reveal / _reveal_sync.
+        self._full              = False
+        self._settings          = RevealSettings(enabled=_LAYOUT_MODE == "split")
+        self._reveal            = Reveal(self._settings)
+        self._deadline_src      = None
+        self._analog_on         = False
 
     # ── GApplication lifecycle ────────────────────────────────────────────
 
@@ -80,7 +89,7 @@ class App(Gtk.Application):
         atexit.register(makima_resume)
 
         self._state    = load_state()
-        self._win      = Win(application=self)
+        self._win      = Win(application=self, settings=self._settings)
         self._osd_win = OsdWin(application=self)
         self._osd_win.on_state(self._state)
         self._osd_win.present()
@@ -95,7 +104,7 @@ class App(Gtk.Application):
 
     def do_activate(self):
         """Called by `dbus-send … Activate` or when a second instance is launched."""
-        if self._win is not None and not self._win.is_visible():
+        if self._win is not None and not self._full:
             self.show_hud()
 
     def do_shutdown(self):
@@ -112,8 +121,45 @@ class App(Gtk.Application):
         self._state = load_state()
         if self._win.is_visible():
             self._win.on_state(self._state)
-        elif self._osd_enabled and self._osd_win.is_visible():
+        if not self._full and self._osd_enabled and self._osd_win.is_visible():
             self._osd_win.on_state(self._state)
+        if _LAYOUT_MODE == "split":
+            self._reveal_sync()
+
+    # ── Single groups (split mode, B-12) ──────────────────────────────────
+
+    def _reveal_sync(self):
+        """Hand the window what each group should show right now, and wake
+        up again when a detector's threshold comes due with no new state
+        (holding still writes nothing)."""
+        if self._deadline_src is not None:
+            GLib.source_remove(self._deadline_src)
+            self._deadline_src = None
+        wants = self._reveal.update(self._state, time.monotonic())
+        if wants and not self._win.is_visible():
+            self._win.on_state(self._state)
+        self._win.set_wants(wants)
+        deadline = self._reveal.next_deadline()
+        if deadline is not None:
+            ms = max(1, int((deadline - time.monotonic()) * 1000) + 1)
+            self._deadline_src = GLib.timeout_add(ms, self._on_reveal_deadline)
+
+    def _on_reveal_deadline(self):
+        self._deadline_src = None
+        self._reveal_sync()
+        return False   # one shot
+
+    def _on_groups_changed(self):
+        """Called by the window whenever the set of visible groups changes.
+        Live trackpad positions only while a pad is on screen: the export
+        costs makima and us a lot (B-13 measured 23-41 % of a core with the
+        HUD closed). Switched off only once the pads are fully gone, not at
+        the start of their exit — dropping the data mid-slide changed the
+        pad legend and forced a re-render right in the middle of it."""
+        want = self._full or bool({"l_pad", "r_pad"} & self._win.visible_groups())
+        if want != self._analog_on:
+            self._analog_on = want
+            (makima_analog_on if want else makima_analog_off)()
 
     # ── D-Bus method dispatch ─────────────────────────────────────────────
 
@@ -130,20 +176,28 @@ class App(Gtk.Application):
         if self._win is None:
             return
         self._auth_available = auth_daemon_present()
+        self._full = True
         self._osd_win.set_visible(False)
         makima_pause()
-        makima_analog_on()
         self._win.on_state(self._state)
-        self._win.set_open(True)
+        if _LAYOUT_MODE == "split":
+            self._reveal.full = True
+            self._reveal_sync()
+        else:
+            makima_analog_on()
+            self._win.set_open(True)
 
     def hide_hud(self):
         if self._win is None:
             return
-        # Analog export off only once the window is actually gone: switching
-        # it off at the start of the close animation made makima drop the
-        # trackpad data mid-slide, which changed the pad legend and forced a
-        # full re-render of both sides right in the middle of the animation.
-        self._win.set_open(False, on_closed=makima_analog_off)
+        self._full = False
+        if _LAYOUT_MODE == "split":
+            # Groups a detector still wants stay; the rest slides out. The
+            # analog export follows in _on_groups_changed.
+            self._reveal.full = False
+            self._reveal_sync()
+        else:
+            self._win.set_open(False, on_closed=makima_analog_off)
         if self._remapping_enabled:
             makima_resume()
         if self._osd_enabled and self._remapping_enabled:
@@ -175,7 +229,7 @@ class App(Gtk.Application):
     def toggle_hud(self):
         if self._win is None:
             return
-        if self._win.is_visible():
+        if self._full:
             self.hide_hud()
         else:
             self.show_hud()
@@ -198,7 +252,7 @@ class App(Gtk.Application):
         self._osd_enabled = not self._osd_enabled
         if not self._osd_enabled:
             self._osd_win.set_visible(False)
-        elif not self._win.is_visible():
+        elif not self._full:
             self._osd_win.on_state(self._state)
             self._osd_win.present()
         # Redraw Win title bar to reflect new toggle state
