@@ -100,6 +100,8 @@ class App(Gtk.Application):
         self._osd_win = OsdWin(application=self)
         self._osd_win.on_state(self._state)
         self._osd_win.present()
+        if _LAYOUT_MODE == "split":
+            GLib.idle_add(self._win.prewarm, self._state)
 
         # Shared FileMonitor — dispatches state to both windows.
         # The directory comes from _STATE rather than being named here: makima
