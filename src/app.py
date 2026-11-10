@@ -10,6 +10,7 @@ import signal
 import os
 import time
 import atexit
+import importlib
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gio, GLib
@@ -18,7 +19,7 @@ from ipc import (makima_pause, makima_resume, makima_analog_on, makima_analog_of
                  load_state, _STATE, auth_daemon_present, start_auth_session,
                  start_pin_change)
 import win
-from win import Win
+import layout_choice
 from osd_win import OsdWin
 from reveal import Reveal, deadline_delay_ms
 import settings
@@ -108,7 +109,7 @@ class App(Gtk.Application):
 
         self._state    = load_state()
         self._state_stamp = None
-        self._win      = Win(application=self, settings=self._settings.reveal)
+        self._win      = win.Win(application=self, settings=self._settings.reveal)
         self._osd_win = OsdWin(application=self)
         self._osd_win.on_state(self._state)
         if self._osd_enabled:
@@ -310,6 +311,29 @@ class App(Gtk.Application):
     def _start_pin_change_once(self):
         start_pin_change()
         return False   # one shot
+
+    def switch_layout(self, mode):
+        """Switch between the classic and split design (the in-HUD buttons).
+
+        win.py picks its design once at import and only sets up what that
+        design needs, so the window is rebuilt rather than switched: reload
+        win.py with the new choice, build a fresh Win, drop the old one.
+        Deferred to idle because it is called from the old window's own
+        click handler, which must not destroy its widget mid-dispatch.
+        Everything that lives here (OSD/remap toggles, makima pause) is
+        untouched; an open HUD stays open in the new design."""
+        def _switch():
+            layout_choice.remember(mode)
+            was_open = self._win.is_visible()
+            old = self._win
+            importlib.reload(win)
+            self._win = win.Win(application=self, settings=self._settings.reveal)
+            old.retire()
+            if was_open:
+                self._win.on_state(self._state)
+                self._win.set_open(True)
+            return False   # one shot
+        GLib.idle_add(_switch)
 
     def toggle_hud(self):
         if self._win is None:

@@ -9,7 +9,7 @@ from gi.repository import Rsvg
 import math
 
 from layout import (HUD_W, HUD_H, _TITLE_H, _PAD, _FX, _FY, _FDW, _SVG_H, _BX, _BY, _BDW,
-                    _AUTH_W, _AUTH_H, _AUTH_Y, _SHOW_X, _CHG_X,
+                    _AUTH_W, _AUTH_H, _AUTH_Y, _SHOW_X, _CHG_X, _SPLIT_BTN_X,
                     _PAUSE_W, _PAUSE_H, _PAUSE_X, _PAUSE_Y)
 from helpers import _rrect, _txt, _txt_size, _pill_row, C_MOD, C_LAYER
 from callouts import draw_callouts, _btn_short
@@ -136,7 +136,16 @@ def _draw_title(cr, state, hover_t=0.0, osd_enabled=False, remapping_enabled=Tru
         cr.arc(rmp_dot_x, rmp_dot_y, dot_r, 0, math.tau)
         cr.fill()
 
-    # Auth pair — centred between the Controls badge and the On pill. Geometry
+    # Switch to the split design — plain label, no state dot: it is an
+    # action, not a toggle. Geometry in layout (shared with win.py's hit
+    # test and input region).
+    _rrect(cr, _SPLIT_BTN_X, _RMP_Y, _RMP_W, _RMP_H, 4)
+    cr.set_source_rgba(1, 1, 1, 0.08)
+    cr.fill()
+    cr.set_source_rgba(1, 1, 1, 0.6)
+    _txt(cr, _SPLIT_BTN_X + _RMP_W / 2, _TITLE_H / 2, "Split", 8, ha="center", va="mid")
+
+    # Auth pair — centred between the Controls badge and the Split pill. Geometry
     # lives in layout so drawing, hit test and Wayland input region agree.
     #
     # Coloured and hover-animated with the same curve as the Controls badge

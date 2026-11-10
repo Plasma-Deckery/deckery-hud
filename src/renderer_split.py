@@ -25,7 +25,7 @@ from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
 from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
 from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
-from layout_split import compute_layout, center_badge_rect, center_close_rect
+from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, _DEFAULT_COLOR, _DEFAULT_LW
 from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
                     style_from_env)
@@ -1761,3 +1761,11 @@ def _draw_center(cr, state, center, open_t):
         cr.move_to(ccx + dx[0], ccy + dx[1])
         cr.line_to(ccx + dy[0], ccy + dy[1])
     cr.stroke()
+
+    # Switch to the classic design — mirrors the close button on the left.
+    kx, ky, kw, kh = center_classic_rect(center)
+    cr.set_source_rgba(1, 1, 1, 0.12 * alpha)
+    _rrect(cr, kx, ky, kw, kh, kh / 2)
+    cr.fill()
+    cr.set_source_rgba(1, 1, 1, 0.7 * alpha)
+    _txt(cr, kx + kw / 2, ky + kh / 2, "Classic", size=10, ha="center", va="mid")
