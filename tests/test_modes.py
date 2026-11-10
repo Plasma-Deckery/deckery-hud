@@ -5,9 +5,12 @@ import importlib
 
 
 def _reload_win(monkeypatch, mode):
-    monkeypatch.setenv("DECKERY_HUD_LAYOUT", mode)
+    # The way App.switch_layout does it — and independent of whatever the
+    # real settings.toml on this machine says.
+    import layout_choice
     import win
-    return importlib.reload(win)
+    with layout_choice.building(mode):
+        return importlib.reload(win)
 
 
 def test_win_has_reveal_in_classic(monkeypatch):
@@ -21,3 +24,15 @@ def test_app_reads_layout_at_call_time(monkeypatch):
     assert app._split_mode()
     _reload_win(monkeypatch, "classic")
     assert not app._split_mode()
+
+
+def test_layout_choice_reads_only_the_settings_file(monkeypatch, tmp_path):
+    import layout_choice
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("DECKERY_HUD_LAYOUT", "split")
+    assert layout_choice.current() == "classic"
+    assert layout_choice.remember("split")
+    assert layout_choice.current() == "split"
+    with layout_choice.building("classic"):
+        assert layout_choice.current() == "classic"
+    assert layout_choice.current() == "split"

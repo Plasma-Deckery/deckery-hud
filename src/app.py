@@ -326,22 +326,39 @@ class App(Gtk.Application):
         win.py with the new choice, build a fresh Win, drop the old one.
         Deferred to idle because it is called from the old window's own
         click handler, which must not destroy its widget mid-dispatch.
-        Everything that lives here (OSD/remap toggles, makima pause) is
-        untouched; an open HUD stays open in the new design."""
+        Everything that lives here (OSD/remap toggles, makima pause, the
+        Reveal) is untouched; an open HUD stays open in the new design."""
         def _switch():
             if win._LAYOUT_MODE == mode:
                 return False
             if persist:
                 layout_choice.remember(mode)
-            was_open = self._win.is_visible()
+            if self._deadline_src is not None:
+                GLib.source_remove(self._deadline_src)
+                self._deadline_src = None
             old = self._win
             with layout_choice.building(mode):
                 importlib.reload(win)
             self._win = win.Win(application=self, settings=self._settings.reveal)
             old.retire()
-            if was_open:
-                self._win.on_state(self._state)
-                self._win.set_open(True)
+            self._win.on_state(self._state)
+            if _split_mode():
+                # Build the layers first, as at startup: without it the
+                # first open does that inside its first frame and pops
+                # instead of sliding (B-02). Opening while prewarm holds
+                # the window is a case _need_surface already handles. The
+                # full HUD and any group a detector wants come back
+                # through the reveal path, which also drives analog.
+                self._win.prewarm(self._state)
+                self._reveal.full = self._full
+                self._reveal_sync()
+            else:
+                # Classic shows the full HUD or nothing, and keeps analog
+                # on exactly while it is open.
+                self._analog_on = self._full
+                (makima_analog_on if self._full else makima_analog_off)()
+                if self._full:
+                    self._win.set_open(True)
             return False   # one shot
         GLib.idle_add(_switch)
 
