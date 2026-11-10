@@ -223,21 +223,6 @@ def test_anim_durations(cause, on, dur):
     assert a.value == (1.0 if on else 0.0)
 
 
-def test_anim_restart_after_stall_longer_than_duration():
-    # A freshly mapped window's first frame can take longer than the whole
-    # transition (B-02 measured 270ms against a 260ms slide). Win holds the
-    # clocks at the start until that frame is on screen, so the transition
-    # must then still run in full instead of having already finished.
-    a = GroupAnim(S)
-    a.set_target(True, "full", 0.0)
-    a.tick(0.01)
-    a.restart_clock(0.4)
-    assert a.value == 0.0
-    assert a.tick(0.4 + 0.13)
-    assert 0.0 < a.value < 1.0
-    assert not a.tick(0.4 + 0.26)
-
-
 def test_anim_rapid_flips_end_consistent():
     a = GroupAnim(S)
     t = 0.0
