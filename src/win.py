@@ -23,6 +23,7 @@ from renderer import draw_hud
 from toast import draw_toast
 from anim import HoverAnim
 from reveal import GROUPS, GroupAnim, RevealSettings
+from settings import dbg, debug_enabled
 
 # Experimental split-screen layout (issue #21), opt-in only — the shipping
 # default stays the classic centred renderer. See docs/SPLIT_LAYOUT.md.
@@ -421,8 +422,8 @@ class Win(Gtk.ApplicationWindow):
         t0 = time.perf_counter()
         for name, surf in warm_all(self._warm_state, sw, sh, dev_scale=scale).items():
             self._texture(name, surf)
-        print(f"[deckery-hud] prewarm: {(time.perf_counter() - t0) * 1000:.1f}ms "
-              f"({sw}x{sh}@{scale:.3g})", flush=True)
+        dbg(f"prewarm: {(time.perf_counter() - t0) * 1000:.1f}ms "
+            f"({sw}x{sh}@{scale:.3g})")
         self._warm_state = None
         if not self.visible_groups():
             self._need_surface(False)
@@ -440,7 +441,7 @@ class Win(Gtk.ApplicationWindow):
         # schedule?) separately from draw cost (snapshot_split's own print).
         if self._last_tick is not None:
             gap = now - self._last_tick
-            print(f"[deckery-hud] group_anim tick +{gap * 1000:.1f}ms", flush=True)
+            dbg(f"group_anim tick +{gap * 1000:.1f}ms")
             # A frame that took far longer than a frame (a cold layer build
             # when the full HUD opens over an already visible group, measured
             # ~390ms) would otherwise eat the whole slide. Count it as one
@@ -655,7 +656,7 @@ class Win(Gtk.ApplicationWindow):
         stay cairo, in one narrow strip per group."""
         now = time.monotonic()
         mid_anim = any(a.running for a in self._anims.values())
-        t0 = time.perf_counter() if mid_anim else None
+        t0 = time.perf_counter() if mid_anim and debug_enabled() else None
         self._set_split_input_region()
 
         shown = [g for g in GROUPS if g in self._contents
@@ -758,8 +759,8 @@ class Win(Gtk.ApplicationWindow):
 
         if t0 is not None:
             vals = " ".join(f"{g}={opacity[g]:.2f}" for g in shown)
-            print(f"[deckery-hud] snapshot_split: {(time.perf_counter() - t0) * 1000:.1f}ms "
-                  f"({vals}, screen={sw}x{sh}@{scale:.3g})", flush=True)
+            dbg(f"snapshot_split: {(time.perf_counter() - t0) * 1000:.1f}ms "
+                f"({vals}, screen={sw}x{sh}@{scale:.3g})")
 
     def _draw_inner_split(self, cr, sw, sh):
         self._set_split_input_region()

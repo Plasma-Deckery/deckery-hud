@@ -32,6 +32,7 @@ from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_sca
 import icons
 from reveal import FULL
 from elements import ELEMENTS, ELEMENT_IDS, side_of
+from settings import dbg, debug_enabled
 
 _BG = (0.031, 0.031, 0.071)
 
@@ -422,10 +423,10 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
     _t1 = time.perf_counter()
     shadow, bleed = _element_shadows(element, tx, cap, surf, rect, dev_scale,
                                      pressing=bool(set(element.buttons) & active_press))
-    print(f"[deckery-hud] {name} element surface REBUILT: "
-          f"{(_t1 - _t0) * 1000:.1f}ms + shadow {(time.perf_counter() - _t1) * 1000:.1f}ms "
-          f"({sw}x{sh}@{dev_scale:.3g})", flush=True)
-    if c is not None:
+    dbg(f"{name} element surface REBUILT: "
+        f"{(_t1 - _t0) * 1000:.1f}ms + shadow {(time.perf_counter() - _t1) * 1000:.1f}ms "
+        f"({sw}x{sh}@{dev_scale:.3g})")
+    if c is not None and debug_enabled():
         _diff_vms(name, c["vms"], vms_key)
     layer = GroupLayer(name=name, side=side, surface=surf, rect=rect, tx=tx,
                        shadow=shadow, bleed=bleed, vms=gvms)
@@ -445,7 +446,7 @@ def _diff_vms(side, old, new):
                 continue
             fields = [f for f in n.__dataclass_fields__ if getattr(o, f) != getattr(n, f)]
             detail.append(f"{k}:" + ",".join(f"{f}={getattr(o, f)!r}->{getattr(n, f)!r}" for f in fields))
-        print(f"[deckery-hud] {side} vms changed: {changed} {' '.join(detail)}", flush=True)
+        dbg(f"{side} vms changed: {changed} {' '.join(detail)}")
 
 
 # Centre column (title, status badge, breadcrumb, active-output pills, close
@@ -739,8 +740,8 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
     t2 = time.perf_counter()
 
     if (t2 - t0) * 1000 > 5.0:
-        print(f"[deckery-hud] draw_hud_split: layers+{(t1 - t0) * 1000:.1f}ms "
-              f"paint+{(t2 - t1) * 1000:.1f}ms", flush=True)
+        dbg(f"draw_hud_split: layers+{(t1 - t0) * 1000:.1f}ms "
+            f"paint+{(t2 - t1) * 1000:.1f}ms")
 
 
 def _avail_mod_color(vm):
