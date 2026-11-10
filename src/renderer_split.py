@@ -1256,10 +1256,11 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
 
 
 
-# Mouse/keyboard glyphs — the real Breeze symbolic icons (see icons.py),
-# not hand-drawn: no reason to redraw a mouse by hand when the system
-# already ships one, including the left/right-highlighted variants a
-# hand-drawn glyph can't cheaply tell apart from a flat recolour.
+# Mouse glyphs — the real Breeze symbolic icons (see icons.py), not
+# hand-drawn: no reason to redraw a mouse by hand when the system already
+# ships one, including the left/right-highlighted variants a hand-drawn
+# glyph can't cheaply tell apart from a flat recolour. The keyboard glyph
+# is the exception, see _draw_kbd_icon.
 _MOUSE_SIZE = 16     # idle (MT-Trackpad's legend glyph), doubled at its call site
 _CLICK_SIZE = 30     # LClick/RClick beside L1/L2/R1/R2 etc. (_place_action_text) — picked
                      # from a side-by-side render, the largest of the candidates shown
@@ -1271,7 +1272,6 @@ _PILL_ICON_SIZE = 26   # LClick/RClick and the keyboard prefix glyph, both insid
 _MOUSE_ICON_NAME = "input-mouse-symbolic"
 _CLICK_ICON_NAME = {"BTN_LEFT": "input-mouse-click-left-symbolic",
                      "BTN_RIGHT": "input-mouse-click-right-symbolic"}
-_KBD_ICON_NAME = "input-keyboard-symbolic"
 
 
 def _icon_cx(x, ha, size):
@@ -1301,7 +1301,27 @@ def _draw_click_icon(cr, which, x, y, ha, color, size=_CLICK_SIZE):
 
 
 def _draw_kbd_icon(cr, x, y, ha, color, size=_PILL_ICON_SIZE):
-    icons.draw_icon(cr, _KBD_ICON_NAME, _icon_cx(x, ha, size), y, size, color)
+    """Keyboard glyph, hand-drawn rather than themed — on request (B-06):
+    Breeze's input-keyboard-symbolic read busier and heavier than the mouse
+    beside it, and the other themed keyboards (Breeze sizes, Adwaita) were
+    just as dense or a solid filled block. This one shares the mouse's 1px
+    outline and is laid out on a 26px pixel grid (_PILL_ICON_SIZE), so the 2x2 keys and
+    the spacebar land on whole pixels and stay crisp; other sizes scale it.
+    Same placement convention as _draw_mouse_icon."""
+    cx = _icon_cx(x, ha, size)
+    cr.save()
+    cr.translate(round(cx - size / 2), round(y - size / 2))
+    cr.scale(size / 26, size / 26)
+    cr.set_source_rgba(*color)
+    _rrect(cr, 3.5, 7.5, 19, 11, 2)  # body, 1px stroke on the half-pixel
+    cr.set_line_width(1)
+    cr.stroke()
+    for ky in (9, 12):  # two rows of five keys
+        for i in range(5):
+            cr.rectangle(6 + 3 * i, ky, 2, 2)
+    cr.rectangle(9, 15, 8, 2)  # spacebar
+    cr.fill()
+    cr.restore()
 
 
 # Pad legend labels with nothing useful to say as text — the shape itself
