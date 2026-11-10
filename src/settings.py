@@ -72,10 +72,12 @@ class RevealSettings:
         "Wie lange die Geste gehalten wird, bis beide Pads erscheinen (ms).",
         minimum=1))
     release_ms: int = field(default=500, metadata=_meta(
-        "Kurzes Abheben, das überbrückt wird, und Wartezeit vor dem Ausblenden (ms).",
+        "Wie lange eine Gruppe nach dem Loslassen stehen bleibt; kürzeres Abheben "
+        "wird überbrückt (ms).",
         minimum=1))
     slide_ms: int = field(default=260, metadata=_meta(
-        "Dauer des Hereinfahrens (ms).", minimum=1))
+        "Dauer des Hereinfahrens, wenn das volle HUD auf- oder zugeht (ms).",
+        minimum=1))
     fade_in_ms: int = field(default=200, metadata=_meta(
         "Dauer des Einblendens (ms).", minimum=1))
     fade_out_ms: int = field(default=300, metadata=_meta(

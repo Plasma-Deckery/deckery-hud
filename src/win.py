@@ -185,6 +185,14 @@ class Win(Gtk.ApplicationWindow):
 
     # ── Hit-rect helpers ──────────────────────────────────────────────────
 
+
+    def set_settings(self, settings):
+        """New reveal durations from the settings file. Running animations
+        read them on their next tick; nothing restarts."""
+        self._settings = settings
+        for a in self._anims.values():
+            a.settings = settings
+
     def _badge_screen_rect(self):
         sw, sh = self._da.get_width(), self._da.get_height()
         hx = (sw - HUD_W) / 2

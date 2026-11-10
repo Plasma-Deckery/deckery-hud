@@ -7,6 +7,7 @@ An element is one button with its shape, legend and shadow (elements.py).
 from dataclasses import dataclass
 
 from elements import ELEMENTS, ELEMENT_IDS
+import settings
 
 
 @dataclass(frozen=True)
@@ -30,22 +31,10 @@ FULL = Content(None)
 GROUPS = ELEMENT_IDS
 
 
-@dataclass(frozen=True)
-class RevealSettings:
-    """When single groups appear on their own, and how they animate. Every
-    field maps 1:1 onto the [reveal] section of the HUD's settings file
-    (B-15); the comment on each is its help text."""
-    enabled: bool = True          # Show single groups without opening the HUD
-    pad_enabled: bool = True      # Show a trackpad while it is used for a while
-    gesture_enabled: bool = True  # Show both trackpads during a two-finger gesture
-    modifier_enabled: bool = True  # Show what a held modifier unlocks
-    hold_ms: int = 1500           # How long a pad or modifier is held before it shows
-    gesture_hold_ms: int = 1500   # How long a gesture is held before the pads show
-    release_ms: int = 500         # How long a group stays after letting go
-    slide_ms: int = 260           # Duration of the slide when the full HUD opens or closes
-    fade_in_ms: int = 200         # Duration of a single group fading in
-    fade_out_ms: int = 300        # Duration of a single group fading out
-    crossfade_ms: int = 120       # Duration of a shown group switching what it shows
+# The thresholds and durations live with the HUD's other settings (B-15):
+# one description there gives the [reveal] section of settings.toml, its
+# help text and its validation. Re-exported here for the window and tests.
+RevealSettings = settings.RevealSettings
 
 
 @dataclass(frozen=True)
@@ -122,6 +111,16 @@ class Reveal:
 
     def _holds(self):
         return (*self._pad.values(), self._gesture, self._modifier)
+
+    def set_settings(self, settings):
+        """New thresholds from the settings file, taking effect on running
+        holds: a touch already under way keeps its start time."""
+        self.settings = settings
+        for h in (*self._pad.values(), self._modifier):
+            h.hold = settings.hold_ms / 1000
+        self._gesture.hold = settings.gesture_hold_ms / 1000
+        for h in self._holds():
+            h.release = settings.release_ms / 1000
 
     def update(self, state, now):
         self._now = now

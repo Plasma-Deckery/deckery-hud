@@ -238,7 +238,11 @@ class App(Gtk.Application):
         if "layout.design" in changed and hasattr(self, "switch_layout"):
             # B-05: switches in process; persist=False because the file already says so.
             self.switch_layout(new.layout.design, persist=False)
-        # B-12: any "reveal.*" key → hand new.reveal to the reveal controller.
+        if any(k.startswith("reveal.") for k in changed):
+            self._reveal.set_settings(new.reveal)
+            self._win.set_settings(new.reveal)
+            if _split_mode():
+                self._reveal_sync()   # re-evaluate now, e.g. a detector switched off
 
     # ── D-Bus method dispatch ─────────────────────────────────────────────
 
