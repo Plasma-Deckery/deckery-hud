@@ -144,8 +144,9 @@ class Win(Gtk.ApplicationWindow):
         self.set_child(da)
         self._da = da
 
-        # Split mode: every group (eight clusters + centre column) has its
-        # own visibility (reveal.GroupAnim), so single groups can show on
+        # Split mode: every element (one button with its shape, legend and
+        # shadow — see elements.py — plus the centre column) has its own
+        # visibility (reveal.GroupAnim), so single elements can show on
         # their own while the full HUD is closed (B-12). All of them tick
         # off one callback on the drawing area's own frame clock, not a
         # generic timer — see anim.py's note on why that matters here.
@@ -158,6 +159,7 @@ class Win(Gtk.ApplicationWindow):
         self._xfade     = {}      # group -> (texture, rect, start) fading out under new content
         self._tick_id   = None
         self._visible   = frozenset()
+        self._gesture   = False   # last seen two-pad gesture, see on_state
 
         # Per-button press animations (see _PRESS_ANIM_KEYS) — one HoverAnim
         # each, all ticking off the same drawing area's frame clock. Built
@@ -422,6 +424,18 @@ class Win(Gtk.ApplicationWindow):
 
     def on_state(self, state):
         self._state = state
+        # A gesture swaps each visible pad's own mode label for the shared
+        # connector (which fades with the pads) and back; crossfade that
+        # swap instead of letting the label pop.
+        gesture = bool(((state.get("trackpads") or {}).get("gesture") or {}).get("touching"))
+        if gesture != self._gesture and self._anims:
+            now = time.monotonic()
+            for g in ("LPad", "RPad"):
+                if self._anims[g].value > 0 and g in self._drawn:
+                    tex, rect = self._drawn[g]
+                    self._xfade[g] = (tex, rect, now)
+            self._start_ticking()
+        self._gesture = gesture
         if self._press_anims:
             active = set((state.get("context") or {}).get("active_buttons", []))
             for key, anim in self._press_anims.items():
@@ -643,15 +657,15 @@ class Win(Gtk.ApplicationWindow):
         # well short of centre (see draw_gesture_connector_live). It is as
         # visible as the fainter of the two pads.
         pv = layers.get("pv")
-        if pv is not None and pv.gesture and "l_pad" in groups and "r_pad" in groups:
-            snapshot.push_opacity(min(opacity["l_pad"], opacity["r_pad"]))
+        if pv is not None and pv.gesture and "LPad" in groups and "RPad" in groups:
+            snapshot.push_opacity(min(opacity["LPad"], opacity["RPad"]))
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
-            draw_gesture_connector_live(cr, layers, sw, dx["l_pad"], dx["r_pad"])
+            draw_gesture_connector_live(cr, layers, sw, dx["LPad"], dx["RPad"])
             snapshot.pop()
 
-        if "l_face" in groups:
-            snapshot.push_opacity(opacity["l_face"])
-            self._draw_dpad_3d(snapshot, sw, sh, dx["l_face"], groups["l_face"].vms)
+        if "DPad" in groups:
+            snapshot.push_opacity(opacity["DPad"])
+            self._draw_dpad_3d(snapshot, sw, sh, dx["DPad"], groups["DPad"].vms)
             snapshot.pop()
 
         if self._full and self._active_toasts:

@@ -1,5 +1,5 @@
-"""Per-group layers of the split renderer (B-12). Needs cairo/numpy — run in
-the `deckery` distrobox."""
+"""Per-element layers of the split renderer (B-12). Needs cairo/numpy — run
+in the `deckery` distrobox."""
 
 import copy
 import math
@@ -7,78 +7,28 @@ import math
 import pytest
 
 from render_sample import SAMPLES
-from reveal import Content, FULL, PAD_ONLY
+from reveal import Content, FULL
 from renderer_split import group_layers
-from clusters import LEFT_STACK, RIGHT_STACK
+from elements import ELEMENTS, ELEMENT_IDS, BUTTON_ELEMENT, side_of
+from clusters import CLUSTER_BUTTONS
 
-GROUPS = LEFT_STACK + RIGHT_STACK + ("center",)
 SW, SH = 1280, 800
 
 
-def _layers(state, contents, dev_scale=1.0):
-    return group_layers(state, SW, SH, contents, dev_scale=dev_scale)["groups"]
+def _layers(state, contents, dev_scale=1.0, press_t=None):
+    return group_layers(state, SW, SH, contents, press_t=press_t, dev_scale=dev_scale)["groups"]
 
 
-def test_full_layers_cover_all_groups():
-    groups = _layers(SAMPLES["base_only"], {g: FULL for g in GROUPS})
-    assert set(groups) == set(GROUPS)
-
-
-def test_only_requested_groups_are_built():
-    groups = _layers(SAMPLES["base_only"], {"l_pad": PAD_ONLY})
-    assert set(groups) == {"l_pad"}
-
-
-def test_group_rect_inside_screen():
-    groups = _layers(SAMPLES["base_only"], {g: FULL for g in GROUPS})
-    for name, layer in groups.items():
-        x, y, w, h = layer.rect
-        assert w > 0 and h > 0, name
-        assert 0 <= x and x + w <= SW and 0 <= y and y + h <= SH, name
-        if name in LEFT_STACK:
-            assert x + w <= SW / 2, name
-        elif name in RIGHT_STACK:
-            assert x >= SW / 2, name
-
-
-@pytest.mark.parametrize("dev_scale", [1.0, 1.5])
-def test_surface_matches_rect(dev_scale):
-    groups = _layers(SAMPLES["base_only"], {g: FULL for g in GROUPS}, dev_scale)
-    for name, layer in groups.items():
-        _x, _y, w, h = layer.rect
-        assert layer.surface.get_width() == math.ceil(w * dev_scale), name
-        assert layer.surface.get_height() == math.ceil(h * dev_scale), name
-
-
-def test_pad_only_hides_base_legend():
-    state = copy.deepcopy(SAMPLES["base_only"])
-    state["bindings"]["BTN_BASE"] = {"action": ["KEY_F1"], "kind": "remap", "label": None,
-                                     "origin": "Steam Deck", "silent": False}
-    full = _layers(state, {"r_pad": FULL})["r_pad"]
-    pad = _layers(state, {"r_pad": PAD_ONLY})["r_pad"]
-    assert pad.rect[2] < full.rect[2]
-
-
-def test_modifier_filter_drops_rows():
-    state = copy.deepcopy(SAMPLES["held_modifier"])
-    state["bindings"]["BTN_DPAD_DOWN"] = {"action": ["KEY_DOWN"], "kind": "remap", "label": None,
-                                          "origin": "Steam Deck", "silent": False}
-    only_up = Content(frozenset({"BTN_DPAD_UP"}), False, "all")
-    full = _layers(state, {"l_face": FULL})["l_face"]
-    filtered = _layers(state, {"l_face": only_up})["l_face"]
-    assert filtered.rect != full.rect
-    again = _layers(state, {"l_face": only_up})["l_face"]
-    assert again.surface is filtered.surface
-
-
-def test_content_union():
-    a = Content(frozenset({"BTN_TL"}), False, "all")
-    assert a.union(PAD_ONLY) == Content(frozenset({"BTN_TL"}), True, "all")
-    assert a.union(FULL) == FULL
+def _bound(state, *keys):
+    state = copy.deepcopy(state)
+    for k in keys:
+        state["bindings"][k] = {"action": ["KEY_F1"], "kind": "remap", "label": None,
+                                "origin": "Steam Deck", "silent": False}
+    return state
 
 
 def _on_screen(layer):
-    """The group's surface pasted at its rect on a screen-sized buffer."""
+    """The element's surface pasted at its rect on a screen-sized buffer."""
     import cairo
     import numpy as np
     surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, SW, SH)
@@ -89,35 +39,106 @@ def _on_screen(layer):
     return np.ndarray((SH, surf.get_stride() // 4, 4), np.uint8, surf.get_data())[:, :SW].copy()
 
 
-def test_filtered_rows_keep_full_layout_position():
-    """A filtered group is a subset of the full one, pixel for pixel — its
+def test_every_cluster_button_has_one_element():
+    for cluster, buttons in CLUSTER_BUTTONS.items():
+        for b in buttons:
+            assert ELEMENTS[BUTTON_ELEMENT[b]].cluster == cluster, b
+
+
+def test_full_layers_cover_all_elements():
+    groups = _layers(SAMPLES["base_only"], {e: FULL for e in ELEMENT_IDS})
+    assert set(groups) == set(ELEMENT_IDS)
+
+
+def test_only_requested_elements_are_built():
+    assert set(_layers(SAMPLES["base_only"], {"LPad": FULL})) == {"LPad"}
+
+
+def test_element_rect_inside_its_half():
+    groups = _layers(SAMPLES["base_only"], {e: FULL for e in ELEMENT_IDS})
+    for name, layer in groups.items():
+        x, y, w, h = layer.rect
+        assert w > 0 and h > 0, name
+        assert 0 <= x and x + w <= SW and 0 <= y and y + h <= SH, name
+        if side_of(name) == "left":
+            assert x + w <= SW / 2, name
+        elif side_of(name) == "right":
+            assert x >= SW / 2, name
+
+
+@pytest.mark.parametrize("dev_scale", [1.0, 1.5])
+def test_surface_matches_rect(dev_scale):
+    groups = _layers(SAMPLES["base_only"], {e: FULL for e in ELEMENT_IDS}, dev_scale)
+    for name, layer in groups.items():
+        _x, _y, w, h = layer.rect
+        assert layer.surface.get_width() == math.ceil(w * dev_scale), name
+        assert layer.surface.get_height() == math.ceil(h * dev_scale), name
+
+
+def test_pad_and_its_pill_are_separate():
+    state = _bound(SAMPLES["base_only"], "BTN_BASE")
+    groups = _layers(state, {"RPad": FULL, "QAM": FULL})
+    pad, qam = _on_screen(groups["RPad"]), _on_screen(groups["QAM"])
+    overlap = ((pad[..., 3] > 0) & (qam[..., 3] > 0)).sum()
+    assert overlap == 0
+    assert (qam[..., 3] > 0).sum() > 0
+
+
+def test_shoulder_halves_are_separate():
+    """L1 and L2 each draw only their half of the shared wedge; the only
+    pixels both touch are the antialiased seam along the divider."""
+    import numpy as np
+    from parts import part_subpaths
+    groups = _layers(SAMPLES["base_only"], {"L1": FULL, "L2": FULL})
+    a, b = _on_screen(groups["L1"]), _on_screen(groups["L2"])
+    ya, yb = (np.nonzero(img[..., 3] > 0)[0].mean() for img in (a, b))
+    assert ya < yb   # L1 sits above L2
+    ys, xs = np.nonzero((a[..., 3] > 0) & (b[..., 3] > 0))
+    ox, oy, s = groups["L1"].tx
+    (_, ax, ay), (_, bx, by) = part_subpaths("shoulder_l_split")[0][:2]
+    ax, ay, bx, by = ox + ax * s, oy + ay * s, ox + bx * s, oy + by * s
+    dist = np.abs((bx - ax) * (ay - ys) - (ax - xs) * (by - ay)) / np.hypot(bx - ax, by - ay)
+    assert (dist > 2).sum() == 0
+
+
+def test_stick_is_not_part_of_the_dpad():
+    groups = _layers(SAMPLES["base_only"], {"DPad": FULL, "L3": FULL})
+    a, b = _on_screen(groups["DPad"]), _on_screen(groups["L3"])
+    assert ((a[..., 3] > 0) & (b[..., 3] > 0)).sum() == 0
+
+
+def test_dpad_filter_keeps_full_layout_position():
+    """A filtered d-pad is a subset of the full one, pixel for pixel — its
     rows sit exactly where they do in the full HUD."""
-    state = copy.deepcopy(SAMPLES["held_modifier"])
-    for k, a in (("BTN_DPAD_DOWN", "KEY_DOWN"), ("BTN_DPAD_LEFT", "KEY_LEFT"),
-                 ("BTN_DPAD_RIGHT", "KEY_RIGHT")):
-        state["bindings"][k] = {"action": [a], "kind": "remap", "label": None,
-                                "origin": "Steam Deck", "silent": False}
-    only_up = Content(frozenset({"BTN_DPAD_UP"}), False, "all")
-    full = _on_screen(_layers(state, {"l_face": FULL})["l_face"])
-    filtered = _on_screen(_layers(state, {"l_face": only_up})["l_face"])
+    state = _bound(SAMPLES["held_modifier"], "BTN_DPAD_DOWN", "BTN_DPAD_LEFT", "BTN_DPAD_RIGHT")
+    only_up = Content(frozenset({"BTN_DPAD_UP"}))
+    full = _on_screen(_layers(state, {"DPad": FULL})["DPad"])
+    filtered = _on_screen(_layers(state, {"DPad": only_up})["DPad"])
     ink = filtered[..., 3] > 0
-    mismatch = (filtered[ink] != full[ink]).any(axis=1).sum()
-    assert mismatch <= 0.02 * ink.sum()
+    assert (filtered[ink] != full[ink]).any(axis=1).sum() <= 0.02 * ink.sum()
+    assert ink.sum() < 0.9 * (full[..., 3] > 0).sum()
+    again = _layers(state, {"DPad": only_up})["DPad"]
+    assert _layers(state, {"DPad": only_up})["DPad"].surface is again.surface
 
 
-def test_shadow_sits_behind_its_group():
-    """Interim shadow (until B-14): centred on the cluster's own art, not
-    shifted toward the screen centre."""
-    from layout_split import compute_layout
-    clusters, _ax, _center = compute_layout(SW, SH)
-    groups = _layers(SAMPLES["base_only"], {g: FULL for g in GROUPS})
+def test_content_union():
+    a = Content(frozenset({"BTN_DPAD_UP"}))
+    assert a.union(Content(frozenset({"BTN_DPAD_LEFT"}))) == Content(
+        frozenset({"BTN_DPAD_UP", "BTN_DPAD_LEFT"}))
+    assert a.union(FULL) == FULL
+
+
+def test_shadow_sits_behind_its_element():
+    """Interim shadow (until B-14): centred on the element's own shape."""
+    from renderer_split import element_box
+    groups = _layers(SAMPLES["base_only"], {e: FULL for e in ELEMENT_IDS})
     for name, layer in groups.items():
         if name == "center":
             continue
-        x, y, w, h, _s = clusters[name]
+        bx, by, bw, bh = element_box(ELEMENTS[name], layer.tx)
         _f, sx, sy, sw_, sh_ = layer.shadow
-        assert abs((sx + sw_ / 2) - (x + w / 2)) < 1, name
-        assert abs((sy + sh_ / 2) - (y + h / 2)) < 1, name
+        assert abs((sx + sw_ / 2) - (bx + bw / 2)) < 1, name
+        assert abs((sy + sh_ / 2) - (by + bh / 2)) < 1, name
 
 
 @pytest.mark.parametrize("btn", ["BTN_GRIPL", "BTN_GRIPL2", "BTN_GRIPR", "BTN_GRIPR2",
@@ -125,14 +146,24 @@ def test_shadow_sits_behind_its_group():
                                  "BTN_MODE", "BTN_BASE"])
 def test_live_strip_covers_a_pressed_button(btn):
     """A pressed scale-animated button leaves the cached bitmap (it's drawn
-    live), so the group's ink shrinks — the live strip must still cover the
-    whole button, or the press is drawn cut off (seen live on the paddles)."""
-    from renderer_split import live_rect, _SCALE_ANIM_PARTS
+    live), so its element's ink can vanish — the live strip must still
+    cover the whole button, or the press is drawn cut off (seen live on
+    the paddles)."""
+    from renderer_split import live_rect, _SCALE_ANIM_PARTS, _PART_OFFSET
     from parts import part_bbox
-    part, group = _SCALE_ANIM_PARTS[btn]
-    layers = group_layers(SAMPLES["base_only"], SW, SH, {group: FULL}, press_t={btn: 1.0})
-    ox, oy, scale = layers["groups"][group].tx
+    part, _cluster = _SCALE_ANIM_PARTS[btn]
+    el = BUTTON_ELEMENT[btn]
+    layers = group_layers(SAMPLES["base_only"], SW, SH, {el: FULL}, press_t={btn: 1.0})
+    ox, oy, scale = layers["groups"][el].tx
+    pdx, pdy = _PART_OFFSET.get(part, (0, 0))
+    ox, oy = ox + pdx, oy + pdy
     x0, y0, x1, y1 = part_bbox(part)
-    lx, ly, lw, lh = live_rect(group, layers, SW, SH)
+    lx, ly, lw, lh = live_rect(el, layers, SW, SH)
     assert lx <= ox + x0 * scale and ox + x1 * scale <= lx + lw, btn
     assert ly <= oy + y0 * scale and oy + y1 * scale <= ly + lh, btn
+
+
+def test_warm_all_names_match_textures():
+    from renderer_split import warm_all
+    surfaces = warm_all(SAMPLES["base_only"], SW, SH, 1.0)
+    assert set(surfaces) == set(ELEMENT_IDS) | {"shadow_" + e for e in ELEMENT_IDS}

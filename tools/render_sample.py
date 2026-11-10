@@ -196,23 +196,22 @@ SAMPLES = {
 
 
 def _group_cases(sw):
-    """B-12 partial-HUD cases for the split renderer: (state, groups) with
-    groups as draw_hud_split takes them, {name: (opacity, dx, Content)}."""
-    from reveal import Content, FULL, PAD_ONLY
+    """B-12 partial-HUD cases for the split renderer: (state, elements) with
+    elements as draw_hud_split takes them, {id: (opacity, dx, Content)}."""
+    from reveal import Content, FULL
     from renderer_split import _side_slide_offset
-    from clusters import LEFT_STACK, RIGHT_STACK
-    opening = {n: (0.5, _side_slide_offset("left" if n in LEFT_STACK else "right", sw, 0.5), FULL)
-               for n in LEFT_STACK + RIGHT_STACK}
-    opening["center"] = (0.5, 0.0, FULL)
-    opening["r_pad"] = (1.0, 0.0, FULL)
+    from elements import ELEMENT_IDS, side_of
+    opening = {e: (0.5, _side_slide_offset(side_of(e), sw, 0.5) if side_of(e) else 0.0, FULL)
+               for e in ELEMENT_IDS}
+    opening["RPad"] = (1.0, 0.0, FULL)
     return {
         "mod_filter": (SAMPLES["held_modifier"], {
-            "l_face": (1.0, 0.0, Content(frozenset({"BTN_DPAD_UP"}), False, "all")),
-            "l_shoulder": (1.0, 0.0, Content(frozenset({"BTN_TL"}), False, "all")),
+            "DPad": (1.0, 0.0, Content(frozenset({"BTN_DPAD_UP"}))),
+            "L1": (1.0, 0.0, FULL),
         }),
-        "pad_only_right": (SAMPLES["pad_modes"], {"r_pad": (1.0, 0.0, PAD_ONLY)}),
-        "gesture_both": (SAMPLES["gesture_active"], {"l_pad": (1.0, 0.0, PAD_ONLY),
-                                                      "r_pad": (1.0, 0.0, PAD_ONLY)}),
+        "pad_only_right": (SAMPLES["pad_modes"], {"RPad": (1.0, 0.0, FULL)}),
+        "gesture_both": (SAMPLES["gesture_active"], {"LPad": (1.0, 0.0, FULL),
+                                                      "RPad": (1.0, 0.0, FULL)}),
         "full_opening_with_pad": (SAMPLES["pad_modes"], opening),
     }
 

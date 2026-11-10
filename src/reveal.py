@@ -1,39 +1,33 @@
 """
-reveal.py — Which split-HUD groups are shown, with what content, and why
+reveal.py — Which split-HUD elements are shown, with what content, and why
 (B-12). Pure logic: no GTK, no Cairo, so it can be tested with a fake clock.
+An element is one button with its shape, legend and shadow (elements.py).
 """
 
 from dataclasses import dataclass
 
-from clusters import CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
+from elements import ELEMENTS, ELEMENT_IDS
 
 
 @dataclass(frozen=True)
 class Content:
-    """What a visible group shows.
-
-    legends:   button keys whose legends are drawn; None = all of them.
-    pad_label: draw the pad's mode-label row (pad groups only).
-    art:       "all" = the group's whole artwork, "pad" = only the trackpad.
-    """
+    """What a visible element shows. legends: the button keys whose legend
+    rows are drawn, None = all of the element's. Only the d-pad ever has
+    more than one (it shows the whole cross, with just the arrows that do
+    something on a modifier layer labelled)."""
     legends: frozenset | None
-    pad_label: bool
-    art: str
 
     def union(self, other):
         if self.legends is None or other.legends is None:
-            legends = None
-        else:
-            legends = self.legends | other.legends
-        art = "all" if "all" in (self.art, other.art) else self.art
-        return Content(legends, self.pad_label or other.pad_label, art)
+            return FULL
+        return Content(self.legends | other.legends)
 
 
-FULL = Content(None, True, "all")
-PAD_ONLY = Content(frozenset(), True, "pad")
+FULL = Content(None)
 
-
-GROUPS = LEFT_STACK + RIGHT_STACK + ("center",)
+# Every element, in draw order. Named GROUPS for the window, which treats
+# them all alike.
+GROUPS = ELEMENT_IDS
 
 
 @dataclass(frozen=True)
@@ -117,8 +111,8 @@ class Reveal:
     def __init__(self, settings):
         self.settings = settings
         self.full = False
-        self._pad = {"l_pad": Hold(settings.hold_ms, settings.release_ms),
-                     "r_pad": Hold(settings.hold_ms, settings.release_ms)}
+        self._pad = {"LPad": Hold(settings.hold_ms, settings.release_ms),
+                     "RPad": Hold(settings.hold_ms, settings.release_ms)}
         self._gesture = Hold(settings.gesture_hold_ms, settings.release_ms)
         self._modifier = Hold(settings.hold_ms, settings.release_ms)
         self._mod_contents = {}   # last non-empty modifier reveal, kept while bridged
@@ -149,7 +143,7 @@ class Reveal:
             pads = state.get("trackpads") or {}
             gesture = bool((pads.get("gesture") or {}).get("touching")) and s.gesture_enabled
             own = {name: bool((pads.get(side) or {}).get("touching"))
-                   for name, side in (("l_pad", "left"), ("r_pad", "right"))}
+                   for name, side in (("LPad", "left"), ("RPad", "right"))}
             if self._gesture_raw and not gesture:
                 # The gesture ends at once, no release delay: the pad whose
                 # finger lifted goes right away, and the one still touched
@@ -168,15 +162,15 @@ class Reveal:
                 # each pad's clock running through it.
                 fired[name] = self._pad[name].update((touching or gesture) and s.pad_enabled, now)
                 if fired[name]:
-                    want(name, PAD_ONLY)
+                    want(name, FULL)
             # A gesture shows both pads once held long enough — or at once
             # when a pad is already shown: waiting there would be nonsense.
             self._gesture_shown = gesture and (self._gesture.update(True, now) or any(fired.values()))
             if not gesture:
                 self._gesture.update(False, now)
             if self._gesture_shown:
-                want("l_pad", PAD_ONLY)
-                want("r_pad", PAD_ONLY)
+                want("LPad", FULL)
+                want("RPad", FULL)
             for name, content in self._modifier_reveal(state, ctx, now).items():
                 want(name, content)
 
@@ -186,9 +180,9 @@ class Reveal:
         return wants
 
     def _modifier_reveal(self, state, ctx, now):
-        """Groups for the held modifier layer, each narrowed to exactly what
-        that layer is about: its combos, the held modifier itself, and the
-        modifiers that could be added next. Triggered by held_modifiers or
+        """Elements for the held modifier layer — exactly the buttons that
+        layer is about: its combos, the held modifier itself, and the
+        modifiers that could be added next (they keep their amber outline). Triggered by held_modifiers or
         by combos alone (virtual hint modifiers never appear in
         held_modifiers). The clock runs from the first modifier held, so a
         layer change once shown takes effect at once."""
@@ -201,10 +195,10 @@ class Reveal:
         if raw:
             buttons = set(held) | set(combos) | set((ctx.get("available_modifiers") or {}).keys())
             contents = {}
-            for name in LEFT_STACK + RIGHT_STACK:
-                own = buttons & set(CLUSTER_BUTTONS.get(name, ()))
+            for el in ELEMENTS.values():
+                own = buttons & set(el.buttons)
                 if own:
-                    contents[name] = Content(frozenset(own), False, "all")
+                    contents[el.id] = Content(frozenset(own)) if el.kind == "dpad" else FULL
             self._mod_contents = contents
         return self._mod_contents
 

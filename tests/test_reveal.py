@@ -3,8 +3,7 @@ fake clock, no GTK."""
 
 import pytest
 
-from reveal import (Content, FULL, PAD_ONLY, GROUPS, Hold, Reveal, RevealSettings, Want,
-                    GroupAnim)
+from reveal import (Content, FULL, GROUPS, Hold, Reveal, RevealSettings, Want, GroupAnim)
 
 S = RevealSettings()
 
@@ -71,14 +70,14 @@ def test_full_wants_all_groups_full():
 def test_pad_detector_wants_pad_only():
     r = Reveal(S)
     assert r.update(_state(lpad=True), 0.0) == {}
-    assert r.update(_state(lpad=True), 1.5) == {"l_pad": Want(PAD_ONLY, "detector")}
+    assert r.update(_state(lpad=True), 1.5) == {"LPad": Want(FULL, "detector")}
 
 
 def test_gesture_wants_both_pads():
     r = Reveal(RevealSettings(gesture_hold_ms=800))
     r.update(_state(gesture=True), 0.0)
-    assert r.update(_state(gesture=True), 0.8) == {"l_pad": Want(PAD_ONLY, "detector"),
-                                                   "r_pad": Want(PAD_ONLY, "detector")}
+    assert r.update(_state(gesture=True), 0.8) == {"LPad": Want(FULL, "detector"),
+                                                   "RPad": Want(FULL, "detector")}
 
 
 def test_modifier_reveal_filters():
@@ -86,11 +85,13 @@ def test_modifier_reveal_filters():
     st = _state(held=["BTN_TL"], combos=["BTN_DPAD_UP", "BTN_SOUTH"], avail=["BTN_TR"])
     r.update(st, 0.0)
     wants = r.update(st, 1.5)
+    # only the buttons that do something on this layer — not L2, not the
+    # sticks, not the rest of the d-pad's cluster
     assert wants == {
-        "l_face": Want(Content(frozenset({"BTN_DPAD_UP"}), False, "all"), "detector"),
-        "r_face": Want(Content(frozenset({"BTN_SOUTH"}), False, "all"), "detector"),
-        "l_shoulder": Want(Content(frozenset({"BTN_TL"}), False, "all"), "detector"),
-        "r_shoulder": Want(Content(frozenset({"BTN_TR"}), False, "all"), "detector"),
+        "DPad": Want(Content(frozenset({"BTN_DPAD_UP"})), "detector"),
+        "A": Want(FULL, "detector"),
+        "L1": Want(FULL, "detector"),
+        "R1": Want(FULL, "detector"),
     }
 
 
@@ -99,8 +100,7 @@ def test_modifier_layer_switch_is_immediate():
     r.update(_state(held=["BTN_TL"], combos=["BTN_DPAD_UP"]), 0.0)
     r.update(_state(held=["BTN_TL"], combos=["BTN_DPAD_UP"]), 1.5)
     wants = r.update(_state(held=["BTN_TL", "BTN_TR"], combos=["BTN_NORTH"]), 1.6)
-    assert set(wants) == {"l_shoulder", "r_shoulder", "r_face"}
-    assert wants["r_face"].content.legends == frozenset({"BTN_NORTH"})
+    assert set(wants) == {"L1", "R1", "Y"}
 
 
 def test_modifier_release_keeps_last_groups():
@@ -116,7 +116,7 @@ def test_virtual_modifier_triggers():
     r = Reveal(S)
     st = _state(combos=["BTN_SOUTH"])
     r.update(st, 0.0)
-    assert set(r.update(st, 1.5)) == {"r_face"}
+    assert set(r.update(st, 1.5)) == {"A"}
 
 
 def test_full_overrides_filter():
@@ -124,15 +124,16 @@ def test_full_overrides_filter():
     st = _state(held=["BTN_TL"], combos=["BTN_DPAD_UP"])
     r.update(st, 0.0)
     r.full = True
-    assert r.update(st, 1.5)["l_face"] == Want(FULL, "full")
+    assert r.update(st, 1.5)["DPad"] == Want(FULL, "full")
 
 
-def test_union_of_filters():
+def test_pad_and_pill_are_separate_elements():
     r = Reveal(S)
     st = _state(held=["BTN_TL"], combos=["BTN_BASE"], rpad=True)
     r.update(st, 0.0)
-    want = r.update(st, 1.5)["r_pad"]
-    assert want == Want(Content(frozenset({"BTN_BASE"}), True, "all"), "detector")
+    wants = r.update(st, 1.5)
+    assert wants["RPad"] == Want(FULL, "detector")
+    assert wants["QAM"] == Want(FULL, "detector")
 
 
 def test_gaming_mode_resets_detectors():
@@ -142,7 +143,7 @@ def test_gaming_mode_resets_detectors():
     assert r.update(_state(lpad=True, gaming=True), 2.0) == {}
     r.update(_state(lpad=True), 5.0)
     assert r.update(_state(lpad=True), 6.49) == {}
-    assert set(r.update(_state(lpad=True), 6.5)) == {"l_pad"}
+    assert set(r.update(_state(lpad=True), 6.5)) == {"LPad"}
 
 
 @pytest.mark.parametrize("state", [{}, {"trackpads": None}, {"unreadable": "x"},
@@ -248,11 +249,11 @@ def test_gesture_survivor_pad_stays():
     r = Reveal(S)
     r.update(_makima_pads(True, False, False), 0.0)
     r.update(_makima_pads(True, True, True), 0.1)
-    assert set(r.update(_makima_pads(True, True, True), 2.0)) == {"l_pad", "r_pad"}
+    assert set(r.update(_makima_pads(True, True, True), 2.0)) == {"LPad", "RPad"}
     # right finger lifts: gesture ends, left pad survives
     for t in (3.0, 3.2, 3.49, 3.5, 4.0, 4.6):
-        assert "l_pad" in r.update(_makima_pads(True, False, False), t), t
-    assert set(r.update(_makima_pads(True, False, False), 3.6)) == {"l_pad"}
+        assert "LPad" in r.update(_makima_pads(True, False, False), t), t
+    assert set(r.update(_makima_pads(True, False, False), 3.6)) == {"LPad"}
 
 
 def test_hold_does_not_fire_after_release():
@@ -289,8 +290,8 @@ def test_anim_delay_shifts_running_transition():
 def test_gesture_escalates_immediately_when_a_pad_is_shown():
     r = Reveal(S)
     r.update(_makima_pads(False, True, False), 0.0)
-    assert set(r.update(_makima_pads(False, True, False), 1.5)) == {"r_pad"}
-    assert set(r.update(_makima_pads(True, True, True), 2.0)) == {"l_pad", "r_pad"}
+    assert set(r.update(_makima_pads(False, True, False), 1.5)) == {"RPad"}
+    assert set(r.update(_makima_pads(True, True, True), 2.0)) == {"LPad", "RPad"}
 
 
 def test_gesture_end_hides_the_other_pad_immediately():
@@ -299,7 +300,7 @@ def test_gesture_end_hides_the_other_pad_immediately():
     r.update(_makima_pads(False, True, False), 1.5)
     r.update(_makima_pads(True, True, True), 2.0)
     # left thumb lifts: back to the right pad alone, at once
-    assert set(r.update(_makima_pads(False, True, False), 2.3)) == {"r_pad"}
+    assert set(r.update(_makima_pads(False, True, False), 2.3)) == {"RPad"}
 
 
 def test_gesture_end_keeps_the_survivor_even_after_a_short_gesture():
@@ -309,5 +310,5 @@ def test_gesture_end_keeps_the_survivor_even_after_a_short_gesture():
     r.update(_makima_pads(True, True, True), 2.0)
     # right thumb lifts after 0.2 s of gesture: the left pad was shown and
     # is still touched, so it stays; the right one goes at once
-    assert set(r.update(_makima_pads(True, False, False), 2.2)) == {"l_pad"}
-    assert set(r.update(_makima_pads(True, False, False), 2.5)) == {"l_pad"}
+    assert set(r.update(_makima_pads(True, False, False), 2.2)) == {"LPad"}
+    assert set(r.update(_makima_pads(True, False, False), 2.5)) == {"LPad"}
