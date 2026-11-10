@@ -497,13 +497,20 @@ def live_rect(name, layers, sw, sh):
     group's own rows, from its screen edge to just past the cluster
     column, plus room for a pressed button's adjacent action text."""
     x, y, w, h = layers["groups"][name].rect
+    # Union with the cluster's own art box: a pressed button is left out of
+    # the cached bitmap (it's drawn live), so the ink alone can shrink right
+    # past it — the press was drawn cut off (live, on the paddles).
+    clusters, _anchor_x, _center = compute_layout(sw, sh)
+    cx, cy, cw, ch, _scale = clusters[name]
+    x1, y1 = max(x + w, cx + cw), max(y + h, cy + ch)
+    x, y = min(x, cx), min(y, cy)
     col_left, _y0, col_right, _y1 = layers["center"]
     pressed = any(_SCALE_ANIM_PARTS[k][1] == name for k in layers["active_press"])
     extra = sw * 0.3 if pressed else 16
     y0 = max(0, y - 24)
-    y1 = min(sh, y + h + 24)
+    y1 = min(sh, y1 + 24)
     if _group_side(name) == "left":
-        return 0, y0, max(x + w, col_left + extra), y1 - y0
+        return 0, y0, max(x1, col_left + extra), y1 - y0
     x0 = min(x, col_right - extra)
     return x0, y0, sw - x0, y1 - y0
 

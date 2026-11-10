@@ -118,3 +118,21 @@ def test_shadow_sits_behind_its_group():
         _f, sx, sy, sw_, sh_ = layer.shadow
         assert abs((sx + sw_ / 2) - (x + w / 2)) < 1, name
         assert abs((sy + sh_ / 2) - (y + h / 2)) < 1, name
+
+
+@pytest.mark.parametrize("btn", ["BTN_GRIPL", "BTN_GRIPL2", "BTN_GRIPR", "BTN_GRIPR2",
+                                 "BTN_SOUTH", "BTN_NORTH", "BTN_SELECT", "BTN_START",
+                                 "BTN_MODE", "BTN_BASE"])
+def test_live_strip_covers_a_pressed_button(btn):
+    """A pressed scale-animated button leaves the cached bitmap (it's drawn
+    live), so the group's ink shrinks — the live strip must still cover the
+    whole button, or the press is drawn cut off (seen live on the paddles)."""
+    from renderer_split import live_rect, _SCALE_ANIM_PARTS
+    from parts import part_bbox
+    part, group = _SCALE_ANIM_PARTS[btn]
+    layers = group_layers(SAMPLES["base_only"], SW, SH, {group: FULL}, press_t={btn: 1.0})
+    ox, oy, scale = layers["groups"][group].tx
+    x0, y0, x1, y1 = part_bbox(part)
+    lx, ly, lw, lh = live_rect(group, layers, SW, SH)
+    assert lx <= ox + x0 * scale and ox + x1 * scale <= lx + lw, btn
+    assert ly <= oy + y0 * scale and oy + y1 * scale <= ly + lh, btn
