@@ -50,24 +50,37 @@ class Hold:
     held for hold_ms, and only while raw is on: letting go hides at once.
     Drops shorter than release_ms bridge the clock, so coming back within
     them fires again at once instead of needing a new hold (an accidental
-    lift, or L1 -> R1). A threshold that passes during a drop doesn't fire
-    on its own: otherwise an unrelated state write landing in that drop
-    would flash the group up just after the finger lifted."""
+    lift, or L1 -> R1). Once it has fired, the bridge is a grace window
+    instead: the fade-out plus the hold itself, so touching again just
+    after the group disappeared still brings it back at once. A threshold
+    that passes during a drop doesn't fire on its own: otherwise an
+    unrelated state write landing in that drop would flash the group up
+    just after the finger lifted."""
 
-    def __init__(self, hold_ms, release_ms):
+    def __init__(self, hold_ms, release_ms, fade_out_ms=0):
         self.hold = hold_ms / 1000
         self.release = release_ms / 1000
+        self.fade_out = fade_out_ms / 1000
         self._since = None      # when the bridged hold began
         self._off_since = None  # when raw last went off, while still bridged
+        self._fired = False     # fired since the hold began
+
+    def _bridge(self):
+        if self._fired:
+            return max(self.release, self.fade_out + self.hold)
+        return self.release
 
     def update(self, raw, now):
         if raw:
-            if self._off_since is not None and now - self._off_since >= self.release:
+            if self._off_since is not None and now - self._off_since >= self._bridge():
                 self._since = None
+                self._fired = False
             self._off_since = None
             if self._since is None:
                 self._since = now
-            return now - self._since >= self.hold
+            if now - self._since >= self.hold:
+                self._fired = True
+            return self._fired
         if self._since is not None and self._off_since is None:
             self._off_since = now
         return False
@@ -81,17 +94,20 @@ class Hold:
 
     def reset(self):
         self._since = self._off_since = None
+        self._fired = False
 
     def restart(self, now):
-        """Start the hold over from now, if one is running."""
+        """Start the hold over from now, if one is running — a grace
+        window too."""
         if self._since is not None:
             self._since = now
-            self._off_since = None
+            self._fired = False
 
     def force(self, now):
         """Fired from now on, as if held all along."""
         self._since = now - self.hold
         self._off_since = None
+        self._fired = True
 
 
 _UNSEEN = object()
@@ -105,10 +121,11 @@ class Reveal:
     def __init__(self, settings):
         self.settings = settings
         self.full = False
-        self._pad = {"LPad": Hold(settings.hold_ms, settings.release_ms),
-                     "RPad": Hold(settings.hold_ms, settings.release_ms)}
-        self._gesture = Hold(settings.gesture_hold_ms, settings.release_ms)
-        self._modifier = Hold(settings.hold_ms, settings.release_ms)
+        times = (settings.release_ms, settings.fade_out_ms)
+        self._pad = {"LPad": Hold(settings.hold_ms, *times),
+                     "RPad": Hold(settings.hold_ms, *times)}
+        self._gesture = Hold(settings.gesture_hold_ms, *times)
+        self._modifier = Hold(settings.hold_ms, *times)
         self._gesture_raw = False  # gesture touching at the last update
         self._gesture_shown = False  # the gesture is showing both pads
         self._mod_shown = False      # the modifier reveal is on screen
@@ -128,6 +145,7 @@ class Reveal:
         self._gesture.hold = settings.gesture_hold_ms / 1000
         for h in self._holds():
             h.release = settings.release_ms / 1000
+            h.fade_out = settings.fade_out_ms / 1000
 
     def update(self, state, now):
         self._now = now
@@ -150,14 +168,12 @@ class Reveal:
             own = {name: bool((pads.get(side) or {}).get("touching"))
                    for name, side in (("LPad", "left"), ("RPad", "right"))}
             if self._gesture_raw and not gesture:
-                # The gesture ends at once, no release delay: the pad whose
-                # finger lifted goes right away, and the one still touched
-                # stays if the gesture was showing it.
-                self._gesture.reset()
+                # The gesture ends at once: the pad whose finger lifted
+                # goes right away (its hold just goes off, keeping its
+                # grace), and the one still touched stays if the gesture
+                # was showing it.
                 for name, touching in own.items():
-                    if not touching:
-                        self._pad[name].reset()
-                    elif self._gesture_shown:
+                    if touching and self._gesture_shown:
                         self._pad[name].force(now)
             self._gesture_raw = gesture
             fired = {}
