@@ -53,7 +53,22 @@ def _draw_one(cr, sw, sh, la, start_y=None):
     cy = base_y - 73 - _RISE_PX * progress
     cx = sw / 2
 
-    # ── Label ─────────────────────────────────────────────────────────────────
+    label, col = toast_label(la)
+
+    # ── Draw outlined pill (screen coords — no HUD translate active) ──────────
+    _pill_row(
+        cr, cx, cy, [label],
+        size=10,
+        bg=(*col, alpha * 0.15),
+        fg=(*col, alpha),
+        border=(*col, alpha * 0.85),
+        sep_rgba=(0, 0, 0, 0),
+        ha="center",
+    )
+
+
+def toast_label(la):
+    """(text, colour) a toast shows for last_action `la`."""
     t     = la.get("type", "keys")
     value = la.get("value", [])
 
@@ -75,14 +90,4 @@ def _draw_one(cr, sw, sh, la, start_y=None):
     else:
         label = explicit_label or (str(value) if value else "—")
         col   = _C_KEYS
-
-    # ── Draw outlined pill (screen coords — no HUD translate active) ──────────
-    _pill_row(
-        cr, cx, cy, [label],
-        size=10,
-        bg=(*col, alpha * 0.15),
-        fg=(*col, alpha),
-        border=(*col, alpha * 0.85),
-        sep_rgba=(0, 0, 0, 0),
-        ha="center",
-    )
+    return label, col

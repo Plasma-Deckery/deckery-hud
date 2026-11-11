@@ -112,6 +112,7 @@ class App(Gtk.Application):
         self._state_stamp = None
         self._win      = win.Win(application=self, settings=self._settings.reveal)
         self._osd_win = OsdWin(application=self)
+        self._osd_win.configure(self._settings.osd.animation, _split_mode())
         self._osd_win.on_state(self._state)
         if self._osd_enabled:
             self._osd_win.present()
@@ -237,6 +238,8 @@ class App(Gtk.Application):
         changed = settings.diff(old, new)
         if "osd.enabled" in changed:
             self._set_osd_enabled(new.osd.enabled)
+        if "osd.animation" in changed:
+            self._osd_win.configure(new.osd.animation, _split_mode())
         if "debug.enabled" in changed:
             settings._set_debug(new.debug.enabled)
         if "layout.design" in changed and hasattr(self, "switch_layout"):
@@ -343,6 +346,7 @@ class App(Gtk.Application):
             self._win = win.Win(application=self, settings=self._settings.reveal)
             old.retire()
             self._win.on_state(self._state)
+            self._osd_win.configure(self._settings.osd.animation, _split_mode())
             if _split_mode():
                 # Build the layers first, as at startup: without it the
                 # first open does that inside its first frame and pops
