@@ -123,8 +123,18 @@ PRESETS = {
                               legend="line", legend_padx=28, legend_pady=16,
                               edge_radius=1.5, edge_alpha=0.55,
                               tint=True, rim_alpha=0.5),
+    # hauch-dicht's halo with a short falloff: the dark plate stays close to
+    # the items, the cloud around it ends within ~80 px instead of
+    # spreading a grey haze across the page — neighbours still join by a
+    # soft neck where they sit close.
+    "hauch-kurz": ShadowStyle(core_grow=16, core_blur=14, core_alpha=0.78,
+                              bleed_grow=20, bleed_blur=26, bleed_alpha=0.30,
+                              merge_lo=0.0, merge_hi=0.50,
+                              legend="line", legend_padx=24, legend_pady=14,
+                              edge_radius=1.5, edge_alpha=0.55,
+                              tint=True, rim_alpha=0.5),
 }
-DEFAULT_PRESET = "hauch-dicht"
+DEFAULT_PRESET = "hauch-kurz"
 
 
 def style_from_env():
