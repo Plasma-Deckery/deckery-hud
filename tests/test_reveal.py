@@ -1,11 +1,19 @@
 """reveal.py — detectors, content, per-group animation (B-12). Pure logic,
 fake clock, no GTK."""
 
+import dataclasses
+
 import pytest
 
 from reveal import (Content, FULL, GROUPS, Hold, Reveal, RevealSettings, Want, GroupAnim)
 
-S = RevealSettings()
+# The logic tests below are written against these numbers, not whatever
+# the defaults are at the moment.
+S = RevealSettings(hold_ms=1500, gesture_hold_ms=1500, release_ms=500)
+
+
+def _s(**changes):
+    return dataclasses.replace(S, **changes)
 
 
 def _state(held=(), combos=(), avail=(), lpad=False, rpad=False, gesture=False, gaming=False):
@@ -74,7 +82,7 @@ def test_pad_detector_wants_pad_only():
 
 
 def test_gesture_wants_both_pads():
-    r = Reveal(RevealSettings(gesture_hold_ms=800))
+    r = Reveal(_s(gesture_hold_ms=800))
     r.update(_state(gesture=True), 0.0)
     assert r.update(_state(gesture=True), 0.8) == {"LPad": Want(FULL, "detector"),
                                                    "RPad": Want(FULL, "detector")}
@@ -155,12 +163,12 @@ def test_reveal_tolerates_missing_fields(state):
 
 
 def test_disabled_settings():
-    off = Reveal(RevealSettings(enabled=False))
+    off = Reveal(_s(enabled=False))
     off.update(_state(lpad=True), 0.0)
     assert off.update(_state(lpad=True), 1.5) == {}
     off.full = True
     assert set(off.update(_state(), 2.0)) == set(GROUPS)
-    no_pad = Reveal(RevealSettings(pad_enabled=False))
+    no_pad = Reveal(_s(pad_enabled=False))
     no_pad.update(_state(lpad=True), 0.0)
     assert no_pad.update(_state(lpad=True), 1.5) == {}
 

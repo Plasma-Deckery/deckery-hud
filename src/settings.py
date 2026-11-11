@@ -65,13 +65,13 @@ class RevealSettings:
         "Beide Pads gleichzeitig berührt (Geste) blendet beide ein."))
     modifier_enabled: bool = field(default=True, metadata=_meta(
         "Ein länger gehaltener Modifier zeigt die Belegungen seiner Ebene."))
-    hold_ms: int = field(default=1500, metadata=_meta(
+    hold_ms: int = field(default=750, metadata=_meta(
         "Wie lange Pad oder Modifier benutzt werden, bis sie erscheinen (ms).",
         minimum=1))
-    gesture_hold_ms: int = field(default=1500, metadata=_meta(
+    gesture_hold_ms: int = field(default=750, metadata=_meta(
         "Wie lange die Geste gehalten wird, bis beide Pads erscheinen (ms).",
         minimum=1))
-    release_ms: int = field(default=500, metadata=_meta(
+    release_ms: int = field(default=250, metadata=_meta(
         "Wie lange eine Gruppe nach dem Loslassen stehen bleibt; kürzeres Abheben "
         "wird überbrückt (ms).",
         minimum=1))

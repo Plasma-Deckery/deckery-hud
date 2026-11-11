@@ -61,7 +61,7 @@ class LoadTests(_TmpFile):
         self.assertEqual(err, "")
         text = template()
         self.assertIn('# design = "classic"', text)
-        self.assertIn("# hold_ms = 1500", text)
+        self.assertIn("# hold_ms = 750", text)
         for header in ("[layout]", "[osd]", "[reveal]", "[debug]"):
             self.assertIn(header, text)
 
@@ -71,7 +71,7 @@ class LoadTests(_TmpFile):
         self.assertEqual(result.layout.design, "split")
         self.assertEqual(result.reveal.hold_ms, 900)
         self.assertEqual(result.osd, Settings().osd)
-        self.assertEqual(result.reveal.release_ms, 500)
+        self.assertEqual(result.reveal.release_ms, 250)
 
     def test_wrong_type_falls_back_per_key(self):
         self.write('[osd]\nenabled = "yes"\n[reveal]\nhold_ms = 900\n')
@@ -83,7 +83,7 @@ class LoadTests(_TmpFile):
     def test_bool_is_not_int(self):
         self.write("[reveal]\nhold_ms = true\n")
         result, err = self.load_capturing()
-        self.assertEqual(result.reveal.hold_ms, 1500)
+        self.assertEqual(result.reveal.hold_ms, 750)
         self.assertIn("reveal.hold_ms", err)
 
     def test_unknown_choice(self):
@@ -95,7 +95,7 @@ class LoadTests(_TmpFile):
     def test_below_minimum(self):
         self.write("[reveal]\nhold_ms = -5\nfade_in_ms = 0\n")
         result, err = self.load_capturing()
-        self.assertEqual(result.reveal.hold_ms, 1500)
+        self.assertEqual(result.reveal.hold_ms, 750)
         self.assertEqual(result.reveal.fade_in_ms, 200)
         self.assertIn("reveal.hold_ms", err)
         self.assertIn("reveal.fade_in_ms", err)
