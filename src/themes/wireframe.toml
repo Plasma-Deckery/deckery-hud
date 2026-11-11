@@ -1,0 +1,69 @@
+# Wireframe: Cyberpunk-HUD — feine Cyan-Doppellinien, Legenden in
+# gesperrten Versalien auf dunklen Plättchen mit abgeschrägten Ecken und
+# leuchtendem Rahmen; Gelb und Pink als Signalfarben.
+label = "Wireframe"
+order = 30
+
+[colors]
+ink = "#d8fbff"
+text = "#bff6ff"
+unbound = "#4f7a85"
+modifier = "#ffe14d"
+layer = "#00e5ff"
+game = "#ff2e88"
+stick = "#00e5ff"
+
+[shape]
+width = 1.2
+style = "double"
+outline = "#00e5ffcc"
+fill = "#00e5ff0f"
+active_fill = "#00e5ff80"
+
+[stick]
+ring = "#00e5ff66"
+cap = "#04121600"
+cap_border = "#00e5ffcc"
+
+[callout]
+width = 1.0
+dot = 2.5
+
+[text]
+dim = 0                         # alle Legenden in voller Stärke
+font = "Noto Sans Condensed"
+weight = "Medium"
+transform = "upper"
+spacing = 1.2
+scale = 0.95
+
+[pill]
+top = "#00e5ff26"
+bottom = "#00e5ff14"
+sheen = 0
+fg = "#d8fbff"
+border = "#00e5ffcc"
+shadow = 0
+
+[shadow]
+preset = "aura"
+shadow_rgb = "#02080c"
+core_alpha = 0.72
+core_grow = 6
+core_soft = 1.5
+plate_shape = "chamfer"
+plate_radius = 5
+legend_padx = 12
+legend_pady = 4
+plate_border = "#00e5ff99"
+bleed_alpha = 0.2
+bleed_reach = 16
+bleed_curve = 6
+glow_alpha = 0.75
+glow_radius = 4
+
+[connector]
+color = "#00e5ff"
+width = 1.5
+glow = 0.8
+glow_radius = 5

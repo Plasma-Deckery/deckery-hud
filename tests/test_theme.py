@@ -21,25 +21,29 @@ def user_themes(tmp_path, monkeypatch):
 
 
 def test_default_is_the_old_constants():
+    # Neon keeps every token the drawing code had as a constant; only its
+    # shadow is its own (the design pass: "aura").
     t = theme.load(theme.DEFAULT)
-    assert t == dataclasses.replace(theme.Theme(), label="Neon")
+    assert t == dataclasses.replace(theme.Theme(), label="Neon", shadow="aura",
+                                    text=(1.0, 1.0, 1.0), text_dim=0.0)
     assert t.modifier == helpers.C_MOD
     assert t.layer == helpers.C_LAYER
     assert t.game == helpers.C_GAME
     assert t.glass == helpers.GLASS_PILL
     assert t.pill_fg == helpers.GLASS_PILL_FG
-    assert t.shadow_style() == shadow.style_from_env()
+    assert t.shadow_style() == shadow.PRESETS["aura"]
+    assert theme.Theme().shadow_style() == shadow.style_from_env()
 
 
 def test_builtins_in_order():
     names = theme.names()
-    assert names[:6] == ["neon", "neon-kraeftig", "ruhig", "modifier", "flach", "kontur"]
+    assert names[:7] == ["neon", "glas", "papier", "wireframe", "arcade", "terminal", "kontrast"]
     for n in names:
         assert theme.load(n) is not None
 
 
 def test_builtin_presets_parse_cleanly(capsys):
-    for n in ("neon-kraeftig", "ruhig", "modifier", "flach", "kontur"):
+    for n in theme.names():
         theme.load(n)
     assert capsys.readouterr().err == ""
 
@@ -61,11 +65,11 @@ def test_colours_and_modifiers(user_themes):
 
 
 def test_extends_and_user_override(user_themes):
-    (user_themes / "ruhig.toml").write_text('label = "Mein Ruhig"\n')
-    (user_themes / "kind.toml").write_text('extends = "neon-kraeftig"\n[pill]\nsheen = 0\n')
-    assert theme.load("ruhig").label == "Mein Ruhig"
+    (user_themes / "glas.toml").write_text('label = "Mein Glas"\n')
+    (user_themes / "kind.toml").write_text('extends = "arcade"\n[pill]\nsheen = 0\n')
+    assert theme.load("glas").label == "Mein Glas"
     kind = theme.load("kind")
-    base = theme.load("neon-kraeftig")
+    base = theme.load("arcade")
     assert kind.pill_sheen == 0.0
     assert kind.layer == base.layer
     assert kind.shadow_style() == base.shadow_style()
@@ -87,7 +91,7 @@ def test_bad_values_cost_only_their_key(user_themes, capsys):
     assert t.modifier == theme.Theme().modifier
     assert t.layer == pytest.approx((0x10 / 255, 0x20 / 255, 0x30 / 255))
     assert t.modifiers == ()
-    assert t.shadow_style() == theme.Theme().shadow_style()
+    assert t.shadow_style() == theme.load(theme.DEFAULT).shadow_style()
     err = capsys.readouterr().err
     assert "modifier" in err and "nope" in err and "ZZ" in err and "gibtsnicht" in err
 
@@ -102,11 +106,25 @@ def test_broken_file_and_cycle(user_themes):
 
 
 def test_activate(user_themes):
-    assert theme.activate("ruhig")
-    assert theme.current().name == "ruhig"
-    assert not theme.activate("ruhig")
+    assert theme.activate("glas")
+    assert theme.current().name == "glas"
+    assert not theme.activate("glas")
     theme.activate("gibtsnicht")
     assert theme.current().name == theme.DEFAULT
+
+
+def test_classic_draws_with_the_builtin_tokens():
+    theme.activate("glas")
+    assert theme.activate(None)
+    assert theme.current() == theme.Theme()
+    theme.activate(theme.DEFAULT)
+
+
+def test_emphasis():
+    t = theme.Theme()
+    assert t.emph(0.75) == 0.75                     # as the drawing code says
+    full = dataclasses.replace(t, text_dim=0.0)
+    assert full.emph(0.4) == 1.0 and full.emph(0.9) == 1.0
 
 
 def test_setting():
@@ -122,7 +140,7 @@ def test_osd_tokens(user_themes, capsys):
     assert t.osd_animation == "slide"
     assert t.toast_command == (0.0, 1.0, 0.0)
     assert "wackel" in capsys.readouterr().err
-    assert theme.load("ruhig").osd_animation == "bubble-soft"
+    assert theme.load("glas").osd_animation == "bubble-soft"
     theme.activate("o")
     assert toast.toast_label({"type": "command", "value": ["x"]})[1] == (0.0, 1.0, 0.0)
 
@@ -131,7 +149,7 @@ def test_osd_sprites_key_on_theme(user_themes):
     import osd_look
     style = theme.current().shadow_style()
     a = osd_look.pills_sprite(("Ctrl",), style)
-    theme.activate("neon-kraeftig")
+    theme.activate("arcade")
     b = osd_look.pills_sprite(("Ctrl",), style)
     assert a is not b
 
@@ -195,6 +213,21 @@ def test_shadow_offset_moves_the_layers():
     b, bb = shadow.group_shadow_layers(spec, off, None, None)
     assert (b[1] - a[1], b[2] - a[2]) == (3.0, 4.0)
     assert (bb[1] - ab[1], bb[2] - ab[2]) == (3.0, 4.0)
+
+
+def test_text_spacing_case_and_dim(user_themes):
+    import cairo
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 10, 10)
+    cr = cairo.Context(surf)
+    w0, _ = helpers._txt_size(cr, "abc", 12)
+    (user_themes / "t.toml").write_text(
+        '[text]\ntransform = "lower"\nspacing = 3\ndim = 0.2\nbold = "Heavy"\n')
+    theme.activate("t")
+    t = theme.current()
+    assert (t.text_dim, t.text_bold) == (0.2, "Heavy")
+    assert helpers._case("ABC") == "abc"
+    assert helpers._txt_size(cr, "abc", 12)[0] >= w0 + 6
+    assert "Heavy" in helpers._font(12, True).to_string()
 
 
 def test_text_tokens():

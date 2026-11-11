@@ -1,0 +1,69 @@
+# Glas: ruhig und weich wie eine Konsolen-Oberfläche — durchscheinende
+# Schiefer-Kacheln mit feiner heller Glaskante und weichem Schatten darunter,
+# ein Akzent (Himmelblau), helle Lato-Schrift. Keine Leuchteffekte.
+label = "Glas"
+order = 10
+
+[colors]
+modifier = "#ffd27a"
+layer = "#8fd0ff"
+game = "#ff8fc7"
+text = "#f2f4f8"
+stick = "#7cc4ff"
+unbound = "#8b93a3"
+
+[modifiers]
+R1 = "#ffa98a"
+"···" = "#c9a8ff"
+
+[shape]
+width = 1.4
+outline = "#ffffff59"
+fill = "#ffffff14"
+active_fill = "#ffffffa0"
+
+[stick]
+ring = "#ffffff40"
+cap = "#1a1f2ab3"
+cap_border = "#ffffff40"
+
+[callout]
+width = 1.2
+dot = 2.5
+alpha = 0.8
+
+[text]
+dim = 0                         # alle Legenden in voller Stärke
+font = "Lato"
+weight = "Medium"
+
+[pill]
+top = "#ffffffd9"
+bottom = "#eef2f8c7"
+sheen = 0.18
+
+[shadow]
+preset = "aura"
+shadow_rgb = "#273041"
+core_alpha = 0.70
+core_grow = 9
+core_soft = 3
+legend_padx = 12
+legend_pady = 6
+plate_radius = 12
+plate_border = "#ffffff40"
+bleed_rgb = "#000000"
+bleed_alpha = 0.20
+bleed_reach = 24
+bleed_curve = 12
+bleed_dy = 5
+glow_alpha = 0
+edge_alpha = 0.35
+
+[osd]
+animation = "bubble-soft"
+
+[connector]
+color = "#ffd27a"
+glow = 0
+width = 2

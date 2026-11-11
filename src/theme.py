@@ -38,7 +38,7 @@ became an amber power line with glow and shadow (B-12).
     color = "#ffca33"               # color, alpha, width, style, glow, glow_radius,
     glow = 0.9                      # shadow = true/false, label_color, label_size,
                                     # label_glow = true/false
-    [text]                          # font, weight, scale, transform = "upper"
+    [text]                          # font, weight, bold, scale, spacing, dim, transform = "upper"|"lower"
 
     [pill]
     top = "#ffffffb8"
@@ -137,7 +137,10 @@ class Theme:
     # ── Text ──
     text_weight: str = ""                 # Pango weight for non-bold text: Light, Medium, …
     text_scale: float = 1.0
-    text_transform: str = ""              # "" | "upper"
+    text_transform: str = ""              # "" | "upper" | "lower"
+    text_bold: str = "Bold"               # Pango weight for bold text: Semi-Bold, Heavy, …
+    text_spacing: float = 0.0             # extra px between letters
+    text_dim: float = 1.0                 # how far resting legends are dimmed; 0 = all full
 
     # ── Glass pill (active outputs, OSD) ──
     pill_top: tuple = (1, 1, 1, 0.72)
@@ -165,6 +168,11 @@ class Theme:
     def glass(self):
         """The pill material as helpers._glass_pill takes it."""
         return dict(top=self.pill_top, bottom=self.pill_bottom, sheen=self.pill_sheen)
+
+    def emph(self, alpha):
+        """A legend's alpha after the theme's text_dim: the drawing code's
+        own emphasis levels at 1, every legend at full strength at 0."""
+        return 1.0 - (1.0 - alpha) * self.text_dim
 
     def mod_rgb(self, keys=()):
         """Colour for something a modifier did: `keys` are the modifier(s)
@@ -217,9 +225,10 @@ def current():
 
 def activate(name):
     """Make the theme `name` current (falling back to the default when it
-    can't be loaded). Returns True if that changed what is drawn."""
+    can't be loaded); None: the built-in tokens alone — the classic design,
+    which predates themes. Returns True if that changed what is drawn."""
     global _active
-    t = load(name)
+    t = load(name) if name is not None else Theme()
     if t is None:
         if name != DEFAULT:
             _warn(f"Theme '{name}' nicht gefunden; '{DEFAULT}' gilt")
@@ -314,7 +323,9 @@ _SECTIONS = {
                   "label_size": ("connector_label_size", "num"),
                   "label_glow": ("connector_label_glow", "bool")},
     "text": {"font": ("font", "str"), "weight": ("text_weight", "str"),
-             "scale": ("text_scale", "num"), "transform": ("text_transform", ("", "upper"))},
+             "scale": ("text_scale", "num"), "bold": ("text_bold", "str"),
+             "spacing": ("text_spacing", "num"), "dim": ("text_dim", "num"),
+             "transform": ("text_transform", ("", "upper", "lower"))},
 }
 
 
@@ -367,6 +378,9 @@ def _apply(data, vals, where, base):
             _warn(f"{where}: unbekannter Schlüssel '{key}', ignoriert")
 
 
+_SHADOW_RGBA = {"plate_border"}
+
+
 def _shadow(value, vals, where, base):
     from shadow import PRESETS, ShadowStyle
     fields = {f.name: f for f in dataclasses.fields(ShadowStyle)}
@@ -392,7 +406,7 @@ def _shadow(value, vals, where, base):
             if isinstance(v, str):
                 tweaks[k] = v
         elif f.type in (tuple, "tuple"):
-            c = _color(v, False)
+            c = _color(v, k in _SHADOW_RGBA)
             if c is None:
                 _warn(f"{where}: shadow.{k} braucht eine Farbe")
             else:

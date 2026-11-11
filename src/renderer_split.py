@@ -895,13 +895,14 @@ def _action_text_color(vm):
     active" isn't "nothing to draw" here the way it is for the fill."""
     t = theme.current()
     if not vm:
-        return (*t.ink, 0.9)
+        return (*t.text, t.emph(0.9))
     amber = vm.active_mod or (vm.is_combo and not vm.is_hint)
     if vm.layer_override:
         return (*t.layer, 1.0)
     if amber:
         return (*t.mod_rgb(vm.mod_keys), 1.0)
-    return (*t.ink, 0.9)
+    # the bound-legend colour, as the callouts' (B-20: one brightness)
+    return (*t.text, t.emph(0.9))
 
 
 # Text that _K (viewmodel.py) produces for a plain BTN_LEFT/BTN_RIGHT
@@ -1099,7 +1100,7 @@ def _draw_in_shape_labels(cr, name, ox, oy, scale, vms, stick=True, pad=True):
         else:
             cx, ha = ox + px1 * scale - margin, "right"
         cy = oy + py0 * scale + margin
-        cr.set_source_rgba(*theme.current().ink, 0.75)
+        cr.set_source_rgba(*theme.current().ink, theme.current().emph(0.75))
         _txt(cr, cx, cy, pad_label, size=9, ha=ha, va="top")
 
 
@@ -1282,7 +1283,7 @@ def _draw_shoulder_fills(cr, name, ox, oy, scale, vms, only=None):
         px, py = _BTN_POS_OVERRIDE[btn_key]
         label_cx = ox + px * scale
         label_cy = oy + py * scale
-        cr.set_source_rgba(*theme.current().ink, 0.9)
+        cr.set_source_rgba(*theme.current().ink, theme.current().emph(0.9))
         _txt(cr, label_cx, label_cy, _BTNS[btn_key][3], size=_LABEL_SIZE, ha="center", va="mid")
 
 
@@ -1458,7 +1459,7 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
                   fill_color=fill_color)
 
     if part_name in ("btn_y", "btn_x", "btn_b", "btn_a"):
-        cr.set_source_rgba(*theme.current().ink, 0.9)
+        cr.set_source_rgba(*theme.current().ink, theme.current().emph(0.9))
         _txt_smooth(cr, cx, cy, _BTNS[btn_key][3], size=_LABEL_SIZE)
     elif part_name in ("stick_l_fixed", "stick_r_fixed"):
         # Centred *under* the stick's own fixed outer ring, not on it — the
@@ -1476,7 +1477,7 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
             else:
                 _place_action_text(cr, pox + x0 * scale - gap, cy, "right", vm.action, _action_text_color(vm), vm.note)
     elif part_name == "pill_mode":
-        cr.set_source_rgba(*theme.current().ink, 0.9)
+        cr.set_source_rgba(*theme.current().ink, theme.current().emph(0.9))
         _txt_smooth(cr, cx, cy, "STEAM", size=8.0)
     elif part_name == "pill_base":
         cr.set_source_rgba(*theme.current().ink, 0.9)

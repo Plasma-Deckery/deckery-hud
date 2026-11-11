@@ -334,6 +334,6 @@ def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_ri
         cr.save()
         cr.translate(new_inner_cx, new_inner_cy)
         cr.scale(press_s, press_s)
-        cr.set_source_rgba(*theme.current().ink, 0.75)
+        cr.set_source_rgba(*theme.current().ink, theme.current().emph(0.75))
         _txt_smooth(cr, 0, 0, label, size=9, ha="center", va="mid")
         cr.restore()

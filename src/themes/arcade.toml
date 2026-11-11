@@ -1,0 +1,72 @@
+# Arcade: Spielhalle der Achtziger — kantige Versalien, Pink, Gelb und
+# Cyan auf tief indigofarbenen, eckigen Plättchen mit Scanlines und
+# Leuchtrahmen; die Schrift glimmt wie Phosphor.
+label = "Arcade"
+order = 40
+
+[colors]
+modifier = "#ffe600"
+layer = "#00f0ff"
+game = "#ff3df2"
+ink = "#ffffff"
+text = "#ffffff"
+stick = "#ff3df2"
+unbound = "#8a7fb0"
+
+[shape]
+width = 2.6
+outline = "#ff3df2e6"
+fill = "#2a0a4a80"
+active_fill = "#ff3df2b3"
+
+[stick]
+ring = "#00f0ff99"
+cap = "#1a0533e6"
+cap_border = "#00f0ff"
+width = 1.6
+
+[callout]
+width = 2.0
+dot = 4
+
+[text]
+dim = 0                         # alle Legenden in voller Stärke
+font = "URW Gothic"
+weight = "Semi-Bold"
+bold = "Semi-Bold"
+transform = "upper"
+spacing = 1.5
+
+[pill]
+top = "#ffe600f2"
+bottom = "#ffb800f2"
+sheen = 0.25
+fg = "#1a0533"
+shadow = 0.6
+
+[shadow]
+preset = "aura"
+shadow_rgb = "#12052a"
+core_alpha = 0.86
+core_grow = 8
+core_soft = 1
+plate_radius = 0
+legend_padx = 10
+legend_pady = 5
+plate_lines = 0.35
+plate_border = "#ff3df2b3"
+plate_border_width = 2
+bleed_rgb = "#3a0a6a"
+bleed_alpha = 0.25
+bleed_reach = 20
+bleed_curve = 8
+glow_alpha = 0.7
+glow_radius = 5
+glow_text = true
+
+[connector]
+color = "#ffe600"
+width = 3
+glow = 1.0
+glow_radius = 8
+label_glow = true

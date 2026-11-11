@@ -1,3 +1,14 @@
+# Neon: leuchtende Linien und Farbcodes auf Rauchglas-Plättchen, die jeder
+# Form und Legendenzeile eng folgen; ein kurzer Schleier verbindet nahe
+# Nachbarn. Die Standardwerte aller übrigen Tokens.
 label = "Neon"
 order = 0
-# Das HUD, wie es vor den Themes aussah — alle Werte sind die Standardwerte.
+
+[colors]
+text = "#ffffff"                # gebundene Legenden so hell wie die Beschriftungen
+
+[text]
+dim = 0                         # alle Legenden in voller Stärke
+
+[shadow]
+preset = "aura"

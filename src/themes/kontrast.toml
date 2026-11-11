@@ -1,0 +1,65 @@
+# Kontrast: maximale Lesbarkeit — schwarze, deckende Felder mit weißem
+# Rahmen, große, kräftige weiße Schrift, Gelb und Cyan als Signalfarben,
+# breite Linien. Keine Transparenz, keine Effekte.
+label = "Kontrast"
+order = 60
+
+[colors]
+ink = "#ffffff"
+text = "#ffffff"
+unbound = "#bdbdbd"
+modifier = "#ffd600"
+layer = "#4dedff"
+game = "#ff6ad5"
+stick = "#ffd600"
+
+[shape]
+width = 2.6
+outline = "#ffffff"
+fill = "#000000b3"
+active_fill = "#ffd600"
+
+[stick]
+ring = "#ffffffcc"
+cap = "#000000"
+cap_border = "#ffffff"
+width = 1.6
+
+[callout]
+width = 2.2
+dot = 4
+
+[text]
+weight = "Semi-Bold"
+bold = "Heavy"
+scale = 1.12
+dim = 0                         # alle Legenden in voller Stärke
+
+[pill]
+top = "#ffd600"
+bottom = "#ffd600"
+sheen = 0
+fg = "#000000"
+border = "#000000"
+shadow = 0.8
+
+[shadow]
+preset = "aura"
+shadow_rgb = "#000000"
+core_alpha = 1.0
+core_grow = 6
+core_soft = 0.8
+plate_radius = 6
+legend_padx = 8
+legend_pady = 3
+plate_border = "#ffffff"
+plate_border_width = 1.5
+bleed_alpha = 0
+glow_alpha = 0
+edge_alpha = 1.0
+edge_radius = 2
+
+[connector]
+color = "#ffd600"
+width = 3
+glow = 0
