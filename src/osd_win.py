@@ -15,6 +15,7 @@ import cairo
 
 from helpers import _pill_row, _K, GLASS_PILL, GLASS_PILL_FG, capture_text_boxes
 import pill_shadow
+from shadow import neutral_rgb, style_from_env
 from toast import draw_toast
 
 _TOAST_TTL_MS   = 1500
@@ -165,7 +166,7 @@ class OsdWin(Gtk.ApplicationWindow):
                 pills = cr.pop_group()
             cr.save()
             cr.identity_matrix()   # boxes are in device space
-            pill_shadow.paint(cr, cap.glass_boxes)
+            pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(style_from_env()))
             cr.restore()
             cr.set_source(pills)
             cr.paint()
