@@ -415,3 +415,23 @@ def test_pad_reveal_ignores_keystrokes():
     r.update(_state(lpad=True), 0.0)
     r.update(_state(lpad=True, pressed=["BTN_SOUTH"], action_ts=3.0), 1.0)
     assert "LPad" in r.update(_state(lpad=True), 1.5)
+
+
+# ── Live regression: a layer change popped instead of crossfading ─────────
+
+def test_crossfade_starts_after_the_frame_that_starts_it():
+    """The frame that starts a layer crossfade rebuilds every changed
+    element (~110 ms in the full HUD, measured): the crossfade must not
+    spend its 200 ms on that one frame, or the new legend just pops. Its
+    clock starts at the first tick after it, and a later stall is taken out
+    like for GroupAnim."""
+    from reveal import Crossfade
+    x = Crossfade("old")
+    assert x.progress(5.0, S) == 0.0 and x.running(5.0, S)
+    x.begin(0.12)
+    x.begin(0.13)   # only the first tick starts it
+    assert x.progress(0.12, S) == 0.0
+    assert abs(x.progress(0.22, S) - 0.5) < 1e-9
+    x.delay(0.3)
+    assert x.running(0.5, S)
+    assert not x.running(0.62, S)
