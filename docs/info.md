@@ -11,6 +11,7 @@ Required inside the container (installed by `install.sh`):
 - `librsvg` (SVG rendering)
 - `pango` / `pangocairo` (text layout)
 - `python-numpy` (split layout's shape shadows, `src/shadow.py`)
+- `ttf-lato`, `ttf-fira-code`, `gsfonts` (fonts of the Glas, Terminal and Arcade themes, `src/themes/`)
 
 ## File watch
 
