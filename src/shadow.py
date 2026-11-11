@@ -191,14 +191,23 @@ def _box_blur(a, r, axis):
     return (hi - lo) / (2 * r + 1)
 
 
+def _box_radius(sigma):
+    return max(1, int(round((math.sqrt(4 * sigma * sigma + 1) - 1) / 2)))
+
+
 def _blur(a, sigma):
     """Gaussian approximated by three box passes per axis."""
     if sigma < 0.5:
         return a
-    r = max(1, int(round((math.sqrt(4 * sigma * sigma + 1) - 1) / 2)))
+    r = _box_radius(sigma)
     for _ in range(3):
         a = _box_blur(_box_blur(a, r, 0), r, 1)
     return a
+
+
+def _blur_support(sigma):
+    """How far (in array px) _blur spreads anything: exactly zero beyond."""
+    return 0 if sigma < 0.5 else 3 * _box_radius(sigma)
 
 
 def _smoothstep(lo, hi, x):
@@ -363,6 +372,29 @@ def _grid(b, reach, down):
             math.ceil((b[3] + reach - y0) / down) * down)
 
 
+def _field_reach(style):
+    """Screen px the bleed field can spread past an element's bounds: its
+    grown shapes or padded legend plates (see group_shadow), plus the
+    blur's full support."""
+    grown = max(style.bleed_grow, style.legend_padx + 4, style.legend_pady + 3)
+    return grown + _blur_support(style.bleed_blur / _FIELD_DOWN) * _FIELD_DOWN + _FIELD_DOWN
+
+
+def _core_reach(style):
+    """Screen px the shadow slot (core plate, edge, glow, rim) can spread
+    past an element's bounds. The glow and rim are drawn shifted back by the
+    drop offset, so it adds to theirs."""
+    plate = (max(style.core_grow, style.legend_padx, style.legend_pady)
+             + _blur_support(style.core_blur / _CORE_DOWN) * _CORE_DOWN)
+    edge = 2.2 * style.edge_radius + 2 + (10 if style.legend == "glyph" else 0)
+    off = max(abs(style.offset_x), abs(style.offset_y))
+    glow = (_blur_support(style.glow_radius / _GLOW_DOWN) + 2) * _GLOW_DOWN + off \
+        if style.glow_alpha > 0 else 0
+    # +24: headroom, from when the centre painted its glass pills' shadow
+    # into this slot; kept so every slot stays the size it was.
+    return max(plate, edge, glow, 6 + off) + 24
+
+
 def group_shadow(spec, style):
     """The cached, per-element part of the shadow (core plate, bleed field,
     tint, rim). None for an element with nothing to cast a shadow."""
@@ -374,14 +406,11 @@ def group_shadow(spec, style):
     if b is None:
         _group_cache[key] = None
         return None
-    # The field reaches far (a long fade); snapped to the field grid so
-    # elements combine on one shared grid. The core only needs its own blur.
-    x0, y0, w, h = _grid(b, style.bleed_grow + 3 * style.bleed_blur + style.legend_padx,
-                         _FIELD_DOWN)
-    # +24: headroom, from when the centre painted its glass pills' shadow
-    # into this slot; kept so every slot stays the size it was.
-    core_rect = _grid(b, max(style.core_grow, style.legend_padx) + 3 * style.core_blur + 24,
-                      _CORE_DOWN)
+    # Each grid covers everything its layer can spread to, so the layer
+    # fades out inside it (see _field_reach / _core_reach). The field is
+    # snapped to the field grid so elements combine on one shared grid.
+    x0, y0, w, h = _grid(b, _field_reach(style), _FIELD_DOWN)
+    core_rect = _grid(b, _core_reach(style), _CORE_DOWN)
 
     # In "glyph" mode the legend's core comes from the letters themselves
     # (see edge_shadow); the plate is shapes only.
@@ -577,12 +606,37 @@ def _ring(radius, n):
 
 
 def _stamp(cr, content, x, y, offsets, rgb=(0.0, 0.0, 0.0)):
-    """Union of `content`'s alpha (placed at x, y) shifted by every offset —
-    a cheap dilation done by cairo/pixman instead of numpy."""
+    """Union (max) of `content`'s alpha (placed at x, y) shifted by every
+    offset — a dilation. Each shift is resampled by cairo/pixman; the union
+    is taken in numpy, since painting the shifts over each other would
+    stack a translucent fill (a 14 % badge) into a dark slab."""
+    sx = content.get_device_scale()[0]
+    m = int(math.ceil(max(max(abs(dx), abs(dy)) for dx, dy in offsets) * sx)) + 1
+    w, h = content.get_width() + 2 * m, content.get_height() + 2 * m
+    alpha = cairo.ImageSurface(cairo.FORMAT_A8, content.get_width(), content.get_height())
+    alpha.set_device_scale(sx, sx)
+    acr = cairo.Context(alpha)
+    acr.set_operator(cairo.OPERATOR_SOURCE)
+    acr.set_source_surface(content, 0, 0)
+    acr.paint()
+    shifted = cairo.ImageSurface(cairo.FORMAT_A8, w, h)
+    shifted.set_device_scale(sx, sx)
+    scr = cairo.Context(shifted)
+    scr.set_operator(cairo.OPERATOR_SOURCE)
+    union = None
+    for dx, dy in offsets:
+        # SOURCE over the whole surface: the shifted copy, zero around it.
+        scr.set_source_surface(alpha, m / sx + dx, m / sx + dy)
+        scr.paint()
+        shifted.flush()
+        a = np.ndarray((h, shifted.get_stride()), np.uint8, shifted.get_data())[:, :w]
+        union = a.copy() if union is None else np.maximum(union, a, out=union)
+    out = np.ndarray((h, shifted.get_stride()), np.uint8, shifted.get_data())
+    out[:, :w] = union
+    shifted.mark_dirty()
     cr.push_group()
     cr.set_source_rgba(*rgb, 1)
-    for dx, dy in offsets:
-        cr.mask_surface(content, x + dx, y + dy)
+    cr.mask_surface(shifted, x - m / sx, y - m / sx)
     cr.pop_group_to_source()
 
 
@@ -638,6 +692,12 @@ def draw_glow(cr, content, x, y, style, text_boxes=()):
     if not k.any():
         return
     sigma = style.glow_radius * sx / _GLOW_DOWN
+    # The halo spreads past the bitmap (whose ink runs to within 2 px of its
+    # edge): computed on a canvas grown by the blur's full reach, so it
+    # fades out instead of being cut where the bitmap ends.
+    p = _blur_support(sigma) + 1
+    k = np.pad(k, p)
+    rgb = np.pad(rgb, ((p, p), (p, p), (0, 0)))
     kb = _blur(k, sigma)
     col = np.stack([_blur(rgb[..., i] * k, sigma) for i in range(3)], axis=2)
     col /= np.maximum(kb, 1e-6)[..., None]
@@ -645,7 +705,7 @@ def draw_glow(cr, content, x, y, style, text_boxes=()):
     col /= np.maximum(col.max(axis=2), 1e-6)[..., None]
     halo = _alpha_surface(np.clip(kb * 4.0, 0.0, 1.0) * style.glow_alpha, col)
     cr.save()
-    cr.translate(x, y)
+    cr.translate(x - p * _GLOW_DOWN / sx, y - p * _GLOW_DOWN / sx)
     cr.scale(_GLOW_DOWN / sx, _GLOW_DOWN / sx)
     pat = cairo.SurfacePattern(halo)
     pat.set_filter(cairo.FILTER_BILINEAR)
