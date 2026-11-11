@@ -398,7 +398,10 @@ def _shown_buttons(element, content):
 # Per-element bitmap cache. Keyed on what its cluster lays out — every
 # button of the cluster, since rows an element hides still take part in
 # the legend layout — plus its own presses, its pad and its content.
+# Per element, its last few builds, most recent first: L1 on/off/on in the
+# full HUD otherwise rebuilt every changed element each time (~110 ms).
 _group_cache = {}
+_LOOKS_KEPT = 4
 
 
 def _look(content, vms_key, pv_key):
@@ -419,9 +422,14 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
               (pv.rpad_label, pv.rpad_active, pv.gesture) if cluster == "r_pad" else None)
     key = (content, frozenset(k for k in active_press if k in element.buttons), pv_key,
            sw, sh, dev_scale, theme.current())
-    c = _group_cache.get(name)
-    if c is not None and c["key"] == key and c["vms"] == vms_key:
-        return c["layer"]
+    entries = _group_cache.setdefault(name, [])
+    for i, c in enumerate(entries):
+        if c["key"] == key and c["vms"] == vms_key:
+            entries.insert(0, entries.pop(i))
+            # A press builds from the at-rest shadow of the look on screen.
+            _shadow_layer_cache[name] = c["shadow"]
+            return c["layer"]
+    c = entries[0] if entries else None
 
     tx = _cluster_tx(cluster, sw, sh)
 
@@ -444,7 +452,9 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
         _diff_vms(name, c["vms"], vms_key)
     layer = GroupLayer(name=name, side=side, surface=surf, rect=rect, tx=tx,
                        shadow=shadow, bleed=bleed, vms=gvms, look=_look(content, vms_key, pv_key))
-    _group_cache[name] = {"key": key, "vms": vms_key, "layer": layer}
+    entries.insert(0, {"key": key, "vms": vms_key, "layer": layer,
+                       "shadow": _shadow_layer_cache.get(name)})
+    del entries[_LOOKS_KEPT:]
     return layer
 
 
@@ -467,7 +477,7 @@ def _diff_vms(side, old, new):
 # affordance) — the ninth group. Cached like the clusters, drawn at full
 # opacity; its visibility fades it as a whole at blit time. Keyed only on
 # the state it actually reads.
-_center_cache = {"key": None, "layer": None}
+_center_cache = []   # [(key, layer)], most recent first, like _group_cache
 
 
 def _without_glass(surf, rect, boxes):
@@ -512,18 +522,22 @@ def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
                  for e in ctx.get("active_outputs") or ())
     key = (sw, sh, dev_scale, theme.current(), tuple(ctx.get("config_stack") or ()),
            tuple(ctx.get("held_modifiers") or ()), bool(ctx.get("paused", False)), outs)
-    if _center_cache["key"] != key:
-        with capture_text_boxes() as cap:
-            surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
-                                         sw, sh, dev_scale)
-        shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap,
-                                         _without_glass(surf, rect, cap.glass_boxes),
-                                         rect, dev_scale)
-        shadow = _with_glass_shadow(shadow, cap.glass_boxes)
-        layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
-                           shadow=shadow, bleed=bleed, vms={}, look=key)
-        _center_cache.update(key=key, layer=layer)
-    return _center_cache["layer"]
+    for i, (k, layer) in enumerate(_center_cache):
+        if k == key:
+            _center_cache.insert(0, _center_cache.pop(i))
+            return layer
+    with capture_text_boxes() as cap:
+        surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
+                                     sw, sh, dev_scale)
+    shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap,
+                                     _without_glass(surf, rect, cap.glass_boxes),
+                                     rect, dev_scale)
+    shadow = _with_glass_shadow(shadow, cap.glass_boxes)
+    layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
+                       shadow=shadow, bleed=bleed, vms={}, look=key)
+    _center_cache.insert(0, (key, layer))
+    del _center_cache[_LOOKS_KEPT:]
+    return layer
 
 
 # The pad *mode* labels only exist while makima's analog export is on, which

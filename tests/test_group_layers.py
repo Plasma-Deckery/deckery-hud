@@ -225,3 +225,28 @@ def test_look_ignores_a_press_but_not_a_binding():
                                       "origin": "Steam Deck", "silent": False}
     rebound = _layers(state, {"A": FULL})["A"]
     assert rebound.look != base.look
+
+
+def test_switching_back_to_a_layer_is_cached():
+    """L1 on, off, on: each element keeps its last few looks, so going back
+    costs no rebuild (a full-HUD layer change rebuilt everything: ~110 ms)."""
+    base, held = SAMPLES["base_only"], SAMPLES["held_modifier"]
+    shown = {"L1": FULL, "A": FULL, "center": FULL}
+    a = _layers(base, shown)
+    _layers(held, shown)
+    b = _layers(base, shown)
+    for name in shown:
+        assert b[name].surface is a[name].surface, name
+
+
+def test_a_press_after_a_cached_switch_keeps_its_own_shadow():
+    """A mid-press build reuses the element's at-rest shadow — that must be
+    the shadow of the look on screen, not of the one built last."""
+    base = SAMPLES["base_only"]
+    other = _bound(base, "BTN_SOUTH")
+    rest = _layers(base, {"A": FULL})["A"]
+    assert _layers(other, {"A": FULL})["A"].shadow != rest.shadow
+    _layers(base, {"A": FULL})
+    pressed = _layers(base, {"A": FULL}, press_t={"BTN_SOUTH": 1.0})["A"]
+    assert pressed.surface is not rest.surface
+    assert pressed.shadow == rest.shadow
