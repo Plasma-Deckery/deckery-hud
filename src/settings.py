@@ -32,6 +32,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import osd_anim
+
 
 def _meta(help, choices=None, minimum=None):
     return {"help": help, "choices": choices, "minimum": minimum}
@@ -52,6 +54,11 @@ class OsdSettings:
     """Anzeige am Bildschirmrand."""
     enabled: bool = field(default=True, metadata=_meta(
         "Kleine Anzeige am Bildschirmrand, solange das HUD zu ist."))
+    animation: str = field(default="auto", metadata=_meta(
+        'Wie Meldungen und Ausgabe-Pillen kommen und gehen: "pop" (ploppt unten '
+        'in der Mitte auf), "bubble-soft" (weicher, ohne Überschwingen), "slide" '
+        '(gleitet nach oben) oder "auto" (pop im Split-Design, slide in Classic).',
+        choices=osd_anim.CHOICES))
 
 
 @dataclass(frozen=True)
