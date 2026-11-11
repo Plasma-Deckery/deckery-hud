@@ -1,0 +1,6 @@
+#!/bin/bash
+# Start (or cancel) the HUD's theme mode via D-Bus — for a controller binding.
+gdbus call --session \
+  --dest de.plasma_deckery.hud \
+  --object-path /de/plasma_deckery/hud \
+  --method de.plasma_deckery.hud.ThemeMode

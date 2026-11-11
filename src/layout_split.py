@@ -156,3 +156,19 @@ def center_classic_rect(center):
     x0, y0, x1, y1 = center
     w, h = 56, 22
     return x0 + 15, y0 + 26 - h / 2, w, h
+
+
+def center_theme_rect(center):
+    """"Theme" pill (B-20, starts the theme mode) — left of the close
+    button, the same size as the "Classic" pill."""
+    x0, y0, x1, y1 = center
+    w, h = 56, 22
+    cx, _cy, _cw, _ch = center_close_rect(center)
+    return cx - 10 - w, y0 + 26 - h / 2, w, h
+
+
+def theme_panel_rect(sw, sh, w):
+    """Where the theme mode's panel sits: bottom centre, between the
+    paddles' legends — the one stretch of the HUD nothing else uses."""
+    h = 112
+    return sw / 2 - w / 2, sh - h - 38, w, h

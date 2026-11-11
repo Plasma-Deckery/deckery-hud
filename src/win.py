@@ -39,7 +39,9 @@ if _LAYOUT_MODE == "split":
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
                                 draw_gesture_connector_live, shadow_style, warm_all)
     from shadow import bleed_transfer
-    from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
+    from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
+                              center_theme_rect)
+    from renderer_split import theme_panel
 
 
 @dataclass
@@ -160,6 +162,7 @@ class Win(Gtk.ApplicationWindow):
         self._toast_source   = None
         self._last_action_ts = 0.0
         self._active_toasts  = []
+        self._theme_panel    = None   # (label, index, count) while the theme mode runs
         self._pause_anim     = HoverAnim(lambda: self._da.queue_draw())
         self._show_anim      = HoverAnim(lambda: self._da.queue_draw())
         self._change_anim    = HoverAnim(lambda: self._da.queue_draw())
@@ -332,10 +335,12 @@ class Win(Gtk.ApplicationWindow):
     def _split_rects(self):
         sw, sh = self._da.get_width(), self._da.get_height()
         _clusters, _anchor_x, center = compute_layout(sw, sh)
-        return center_badge_rect(center), center_close_rect(center), center_classic_rect(center)
+        return (center_badge_rect(center), center_close_rect(center), center_classic_rect(center),
+                center_theme_rect(center))
 
     def _on_click_split(self, x, y):
-        badge, close, classic = self._split_rects()
+        badge, close, classic, theme_btn = self._split_rects()
+        tx, ty, tw, th = theme_btn
         bx, by, bw, bh = badge
         cx, cy, cw, ch = close
         kx, ky, kw, kh = classic
@@ -352,6 +357,8 @@ class Win(Gtk.ApplicationWindow):
             self.get_application().hide_hud()
         elif kx <= x <= kx + kw and ky <= y <= ky + kh:
             self.get_application().switch_layout("classic")
+        elif tx <= x <= tx + tw and ty <= y <= ty + th:
+            self.get_application().toggle_theme_mode()
 
     def _on_motion_leave(self, _ctrl):
         self._pause_anim.set(False)
@@ -614,6 +621,11 @@ class Win(Gtk.ApplicationWindow):
     def queue_draw_title(self):
         self._da.queue_draw()
 
+    def set_theme_panel(self, panel):
+        """(label, index, count) of the theme mode's panel, or None (B-20)."""
+        self._theme_panel = panel
+        self._da.queue_draw()
+
     # ── Toast animation ───────────────────────────────────────────────────
 
     def _schedule_toast_animation(self):
@@ -722,13 +734,9 @@ class Win(Gtk.ApplicationWindow):
             # underneath, and makima keeps running.
             self.get_surface().set_input_region(cairo.Region())
             return
-        badge, close, classic = self._split_rects()
-        bx, by, bw, bh = badge
-        cx, cy, cw, ch = close
-        kx, ky, kw, kh = classic
-        region = cairo.Region(cairo.RectangleInt(int(bx), int(by), int(bw), int(bh)))
-        region.union(cairo.Region(cairo.RectangleInt(int(cx), int(cy), int(cw), int(ch))))
-        region.union(cairo.Region(cairo.RectangleInt(int(kx), int(ky), int(kw), int(kh))))
+        region = cairo.Region()
+        for x, y, w, h in self._split_rects():
+            region.union(cairo.Region(cairo.RectangleInt(int(x), int(y), int(w), int(h))))
         self.get_surface().set_input_region(region)
 
     def _texture(self, name, surf):
@@ -913,6 +921,10 @@ class Win(Gtk.ApplicationWindow):
         if self._full and self._active_toasts:
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
             draw_toast(cr, sw, sh, self._active_toasts, start_y=sh - 40)
+
+        if self._full and self._theme_panel is not None:
+            cr = snapshot.append_cairo(rect(0, sh - 200, sw, 200))
+            theme_panel(cr, sw, sh, *self._theme_panel)
 
         # What this frame showed, for freezing it (_freeze) and for telling
         # a changed look next frame. Only elements actually drawn: one that

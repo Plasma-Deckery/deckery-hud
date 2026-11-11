@@ -62,6 +62,7 @@ install -pm644 assets/*.svg %{buildroot}%{_prefix}/lib/%{name}/assets/
 
 # Toggle script (called by tray and makima bindings to show/hide HUD)
 install -Dm755 deckery-hud-toggle %{buildroot}%{_bindir}/deckery-hud-toggle
+install -Dm755 deckery-hud-theme %{buildroot}%{_bindir}/deckery-hud-theme
 
 # Systemd user service
 install -Dm644 packaging/deckery-hud.service \
@@ -79,6 +80,7 @@ install -Dm644 packaging/deckery-hud.service \
 %{_prefix}/lib/%{name}/src/
 %{_prefix}/lib/%{name}/assets/
 %{_bindir}/deckery-hud-toggle
+%{_bindir}/deckery-hud-theme
 %{_userunitdir}/deckery-hud.service
 
 %changelog
