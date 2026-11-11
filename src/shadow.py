@@ -378,8 +378,8 @@ def group_shadow(spec, style):
     # elements combine on one shared grid. The core only needs its own blur.
     x0, y0, w, h = _grid(b, style.bleed_grow + 3 * style.bleed_blur + style.legend_padx,
                          _FIELD_DOWN)
-    # +24: room for the glass pills' own shadow (pill_shadow.py), which the
-    # centre paints into this same slot.
+    # +24: headroom, from when the centre painted its glass pills' shadow
+    # into this slot; kept so every slot stays the size it was.
     core_rect = _grid(b, max(style.core_grow, style.legend_padx) + 3 * style.core_blur + 24,
                       _CORE_DOWN)
 

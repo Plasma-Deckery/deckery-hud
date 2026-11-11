@@ -182,7 +182,7 @@ class App(Gtk.Application):
             self._theme_close_when_released()
         if self._win.is_visible():
             self._win.on_state(self._state)
-        if not self._full and self._osd_enabled and self._osd_win.is_visible():
+        if self._osd_win.is_visible():
             self._osd_win.on_state(self._state)
         if _split_mode():
             self._reveal_sync()
@@ -292,6 +292,7 @@ class App(Gtk.Application):
             self.show_hud()
         makima_pause()   # even if the badge had resumed it
         self._theme_mode = ThemeMode(theme.names(), theme.current().name, self._state)
+        self._sync_osd()
         self._theme_show()
 
     def _theme_show(self):
@@ -314,6 +315,7 @@ class App(Gtk.Application):
     def _theme_leave(self, apply, close=True):
         m, self._theme_mode = self._theme_mode, None
         self._win.set_theme_panel(None)
+        self._sync_osd()
         if apply:
             # Taken over before the write comes back through the file
             # monitor, so that event finds nothing changed.
@@ -353,7 +355,7 @@ class App(Gtk.Application):
             return
         self._auth_available = auth_daemon_present()
         self._full = True
-        self._osd_win.set_visible(False)
+        self._sync_osd()
         makima_pause()
         self._win.on_state(self._state)
         if _split_mode():
@@ -379,8 +381,23 @@ class App(Gtk.Application):
             self._win.set_open(False, on_closed=makima_analog_off)
         if self._remapping_enabled:
             makima_resume()
-        if self._osd_enabled and self._remapping_enabled:
+        self._sync_osd()
+
+    def _sync_osd(self):
+        """Show or hide the OSD window. With the HUD closed it is up while
+        the OSD and remapping are on. Over the open split HUD it is always
+        up: the HUD draws no toasts or output pills of its own there, so they
+        look exactly as with it closed. The classic HUD keeps its own. The
+        theme mode's panel sits where the toasts pop, and its presses are
+        its own, so it has none."""
+        over_hud = self._full and _split_mode() and self._theme_mode is None
+        self._osd_win.set_over_hud(over_hud)
+        if over_hud or (not self._full and self._osd_enabled and self._remapping_enabled):
+            if not self._osd_win.is_visible():
+                self._osd_win.on_state(self._state)
             self._osd_win.present()
+        else:
+            self._osd_win.set_visible(False)
 
     def show_auth(self):
         """Close the HUD, then bring up the PIN overlay.
@@ -437,6 +454,7 @@ class App(Gtk.Application):
             old.retire()
             self._win.on_state(self._state)
             self._osd_win.configure(self._settings.osd.animation, _split_mode())
+            self._sync_osd()
             if _split_mode():
                 # Build the layers first, as at startup: without it the
                 # first open does that inside its first frame and pops
@@ -475,7 +493,7 @@ class App(Gtk.Application):
             if not paused:
                 makima_pause()
                 self._state.setdefault("context", {})["paused"] = True
-            self._osd_win.set_visible(False)
+            self._sync_osd()
         self._win.queue_draw_title()
 
     def toggle_osd(self):
@@ -491,10 +509,6 @@ class App(Gtk.Application):
 
     def _set_osd_enabled(self, enabled):
         self._osd_enabled = enabled
-        if not self._osd_enabled:
-            self._osd_win.set_visible(False)
-        elif not self._full:
-            self._osd_win.on_state(self._state)
-            self._osd_win.present()
+        self._sync_osd()
         # Redraw Win title bar to reflect new toggle state
         self._win.queue_draw_title()
