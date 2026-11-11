@@ -865,15 +865,29 @@ def _action_text_color(vm):
 _CLICK_ACTION_TEXT = {"LClick": "BTN_LEFT", "RClick": "BTN_RIGHT"}
 
 
-def _place_action_text(cr, cx, cy, ha, text, color):
+def _place_action_text(cr, cx, cy, ha, text, color, note=None):
     """Draw one button's adjacent action text — or, for a plain LClick/
-    RClick binding, the matching mouse-click glyph instead."""
+    RClick binding, the matching mouse-click glyph instead. A binding's
+    note (B-18) goes underneath as a dimmed, smaller second line; the pair
+    stays centred on cy so it still reads as beside the button."""
+    if note:
+        cy -= _NOTE_SHIFT
     which = _CLICK_ACTION_TEXT.get(text)
     if which:
         _draw_click_icon(cr, which, cx, cy, ha, color)
     else:
         cr.set_source_rgba(*color)
         _txt(cr, cx, cy, text, size=_LABEL_SIZE, ha=ha, va="mid")
+    if note:
+        cr.set_source_rgba(*_NOTE_COLOR)
+        _txt(cr, cx, cy + 2 * _NOTE_SHIFT, note, size=_NOTE_SIZE, ha=ha, va="mid")
+
+
+# B-18 note line: smaller and dimmer than the action, so it reads as a
+# remark on how to use it rather than a second action.
+_NOTE_SHIFT = 9
+_NOTE_SIZE = _LABEL_SIZE - 3
+_NOTE_COLOR = (1.0, 1.0, 1.0, 0.5)
 
 
 _PAD_DISABLED_COLOR = (1.0, 1.0, 1.0, 0.26)   # dimmer than _DEFAULT_COLOR's 0.5 alpha —
@@ -1025,7 +1039,7 @@ def _draw_in_shape_labels(cr, name, ox, oy, scale, vms, stick=True, pad=True):
         # deflection and press; only the bound action stays here, static.
         vm = vms[stick_key]
         if vm.bound:
-            _place_action_text(cr, inward_x, cy, inward_ha, vm.action, _action_text_color(vm))
+            _place_action_text(cr, inward_x, cy, inward_ha, vm.action, _action_text_color(vm), vm.note)
 
     if name in ("l_pad", "r_pad") and pad:
         pad_part = "trackpad_l" if name == "l_pad" else "trackpad_r"
@@ -1052,7 +1066,7 @@ def _draw_adjacent_bindings(cr, name, ox, oy, scale, vms):
     sitting fixed in place while the shape under it moves."""
 
     def place(cx, cy, ha, text, vm):
-        _place_action_text(cr, cx, cy, ha, text, _action_text_color(vm))
+        _place_action_text(cr, cx, cy, ha, text, _action_text_color(vm), vm.note)
 
     if name in ("l_shoulder", "r_shoulder"):
         inward = name == "l_shoulder"
@@ -1411,9 +1425,9 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
             inward = part_name.startswith("paddle_l")
             gap = 20
             if inward:
-                _place_action_text(cr, pox + x1 * scale + gap, cy, "left", vm.action, _action_text_color(vm))
+                _place_action_text(cr, pox + x1 * scale + gap, cy, "left", vm.action, _action_text_color(vm), vm.note)
             else:
-                _place_action_text(cr, pox + x0 * scale - gap, cy, "right", vm.action, _action_text_color(vm))
+                _place_action_text(cr, pox + x0 * scale - gap, cy, "right", vm.action, _action_text_color(vm), vm.note)
     elif part_name == "pill_mode":
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.9)
         _txt_smooth(cr, cx, cy, "STEAM", size=8.0)
@@ -1450,9 +1464,9 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
         inward = part_name in ("pill_view", "pill_mode")
         gap = 18
         if inward:
-            _place_action_text(cr, pox + x1 * scale + gap, cy, "left", vm.action, _action_text_color(vm))
+            _place_action_text(cr, pox + x1 * scale + gap, cy, "left", vm.action, _action_text_color(vm), vm.note)
         else:
-            _place_action_text(cr, pox + x0 * scale - gap, cy, "right", vm.action, _action_text_color(vm))
+            _place_action_text(cr, pox + x0 * scale - gap, cy, "right", vm.action, _action_text_color(vm), vm.note)
 
     cr.restore()
 
@@ -1606,7 +1620,7 @@ def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, shown=None, pad_row=
             is_avail_mod=False if has_inshape else vm.is_avail_mod,
             is_avail_app_mod=False if has_inshape else vm.is_avail_app_mod,
             is_avail_virt_mod=False if has_inshape else vm.is_avail_virt_mod,
-            sub_label=vm.sub_label, sub_active=vm.sub_active,
+            sub_label=vm.sub_label, sub_active=vm.sub_active, note=vm.note,
             is_hint=vm.is_hint,
             # QAM's own in-shape label is three small dots — about the
             # same size as this marker dot, so at BTN_BASE's position

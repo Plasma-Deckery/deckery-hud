@@ -35,6 +35,7 @@ class _Callout:
     is_avail_virt_mod: bool = False
     show_name: bool = True
     grow_on_active: bool = True
+    note: str = None       # B-18: dimmed second line, how the action is used ("halten")
     hidden: bool = False   # laid out like any row, but not drawn — keeps the
                            # rows that are drawn exactly where they'd be with it
 
@@ -198,7 +199,7 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
     # Row heights vary: an entry with a sub_label (Gaming Mode's second line
     # under BTN_BASE) reserves an extra ROW so the following entries don't
     # overlap it. Precompute cumulative offsets instead of a uniform i * ROW.
-    heights = [ROW + (SUB_EXTRA if e.sub_label else 0) for e in entries]
+    heights = [ROW + (SUB_EXTRA if e.sub_label or e.note else 0) for e in entries]
     total   = sum(heights)
     offsets = []
     acc     = 0
@@ -209,7 +210,7 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
     ys  = [e.sort_y for e in entries]
     mid = (ys[0] + ys[-1]) / 2
     if anchor_row is not None:
-        anchor_heights = [anchor_row + (anchor_row if e.sub_label else 0) for e in entries]
+        anchor_heights = [anchor_row + (anchor_row if e.sub_label or e.note else 0) for e in entries]
         anchor_total = sum(anchor_heights)
         t0 = mid - anchor_total / 2 + y_nudge
     else:
@@ -327,6 +328,17 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
                 _txt(cr, ax - 6, sy2, sub_label, size, ha="right", va="mid")
             else:
                 _txt(cr, ax + 6, sy2, sub_label, size, ha="left",  va="mid")
+
+        # ── Binding note (B-18) — smaller, dimmed line under the action:
+        # a remark on how to use it, not a second action. Only the split
+        # renderer sets it; classic never does.
+        elif e.note and show_main:
+            ny = ly + _txt_size(cr, label, size)[1] + 1
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.5)
+            if side == "left":
+                _txt(cr, ax - 6, ny, e.note, size - 3, ha="right", va="mid")
+            else:
+                _txt(cr, ax + 6, ny, e.note, size - 3, ha="left",  va="mid")
 
         # ── Conflict accent: yellow underline beneath a teal label that is also
         # modifier-activated (app-specific override unlocked by a held modifier) ──
