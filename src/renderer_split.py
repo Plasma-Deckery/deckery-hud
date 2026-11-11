@@ -480,16 +480,19 @@ def _diff_vms(side, old, new):
 _center_cache = []   # [(key, layer)], most recent first, like _group_cache
 
 
-def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
+def _get_center_layer(state, center, sw, sh, dev_scale=1.0, content=FULL):
+    """content: FULL, or reveal.CRUMBS for the breadcrumb row alone."""
     ctx = state.get("context") or {}
+    crumbs_only = content != FULL
     key = (sw, sh, dev_scale, theme.current(), tuple(ctx.get("config_stack") or ()),
-           tuple(ctx.get("held_modifiers") or ()), bool(ctx.get("paused", False)))
+           tuple(ctx.get("held_modifiers") or ()),
+           None if crumbs_only else bool(ctx.get("paused", False)), crumbs_only)
     for i, (k, layer) in enumerate(_center_cache):
         if k == key:
             _center_cache.insert(0, _center_cache.pop(i))
             return layer
     with capture_text_boxes() as cap:
-        surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
+        surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0, crumbs_only),
                                      sw, sh, dev_scale)
     shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap, surf, rect, dev_scale)
     layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
@@ -544,7 +547,7 @@ def group_layers(state, sw, sh, contents, press_t=None, dev_scale=1.0):
     for name, content in contents.items():
         element = ELEMENTS[name]
         if element.kind == "center":
-            groups[name] = _get_center_layer(state, center, sw, sh, dev_scale)
+            groups[name] = _get_center_layer(state, center, sw, sh, dev_scale, content)
         else:
             groups[name] = _get_group_layer(element, content, vms, pv, anchor_x[side_of(name)],
                                             sw, sh, active_press, dev_scale)
@@ -1734,19 +1737,20 @@ def _cluster_of(btn_key, cluster_name):
     return cluster_name if btn_key in CLUSTER_BUTTONS.get(cluster_name, ()) else None
 
 
-def _draw_center(cr, state, center, open_t):
+def _draw_center(cr, state, center, open_t, crumbs_only=False):
     x0, y0, x1, y1 = center
     cw = x1 - x0
     alpha = open_t
 
     ctx = state.get("context") or {}
-    stack = ctx.get("config_stack") or ["—"]
-    held = ctx.get("held_modifiers", [])
-    mods = [_btn_short(m) for m in held]
     paused = ctx.get("paused", False)
     t = theme.current()
 
     cx = (x0 + x1) / 2
+    bx, by, badge_w, badge_h = center_badge_rect(center)
+    if crumbs_only:
+        _draw_crumbs(cr, state, cx, by + badge_h + 26, alpha)
+        return
 
     # Title
     cr.set_source_rgba(*t.ink, 1.0 * alpha)
@@ -1759,24 +1763,13 @@ def _draw_center(cr, state, center, open_t):
     else:
         r, g, b = t.status_active
         label = "⏵  Controls Active"
-    bx, by, badge_w, badge_h = center_badge_rect(center)
     cr.set_source_rgba(r, g, b, 0.14 * alpha)
     _rrect(cr, bx, by, badge_w, badge_h, 7)
     cr.fill()
     cr.set_source_rgba(r, g, b, 0.9 * alpha)
     _txt(cr, cx, by + badge_h / 2, label, size=11, ha="center", va="mid")
 
-    # Breadcrumb
-    labels = stack + mods
-    styles = (
-        [((*t.ink, 0.06 * alpha), (*t.ink, 0.80 * alpha))]
-        + [((*t.layer, alpha), (0, 0, 0, alpha))] * max(0, len(stack) - 1)
-        + [((*t.mod_rgb((m,)), alpha), (0, 0, 0, alpha)) for m in held]
-    )
-    n_gaps = max(0, len(labels) - 1)
-    seps = ["›" if i < len(stack) else "" for i in range(n_gaps)]
-    _pill_row(cr, cx, by + badge_h + 26, labels, sep=seps, size=10,
-              sep_rgba=(*t.ink, 0.55 * alpha), ha="center", styles=styles)
+    _draw_crumbs(cr, state, cx, by + badge_h + 26, alpha)
 
     # Close affordance
     crx, cry, crw, crh = center_close_rect(center)
@@ -1806,6 +1799,26 @@ def _draw_center(cr, state, center, open_t):
     cr.fill()
     cr.set_source_rgba(*t.ink, 0.7 * alpha)
     _txt(cr, kx + kw / 2, ky + kh / 2, "Theme", size=10, ha="center", va="mid")
+
+
+def _draw_crumbs(cr, state, cx, y, alpha):
+    """The breadcrumb row: the config stack (base, then app layers in their
+    colour) and the held modifiers' pills in theirs."""
+    ctx = state.get("context") or {}
+    stack = ctx.get("config_stack") or ["—"]
+    held = ctx.get("held_modifiers", [])
+    mods = [_btn_short(m) for m in held]
+    t = theme.current()
+    labels = stack + mods
+    styles = (
+        [((*t.ink, 0.06 * alpha), (*t.ink, 0.80 * alpha))]
+        + [((*t.layer, alpha), (0, 0, 0, alpha))] * max(0, len(stack) - 1)
+        + [((*t.mod_rgb((m,)), alpha), (0, 0, 0, alpha)) for m in held]
+    )
+    n_gaps = max(0, len(labels) - 1)
+    seps = ["›" if i < len(stack) else "" for i in range(n_gaps)]
+    _pill_row(cr, cx, y, labels, sep=seps, size=10,
+              sep_rgba=(*t.ink, 0.55 * alpha), ha="center", styles=styles)
 
 
 def theme_panel(cr, sw, sh, label, index, count):
