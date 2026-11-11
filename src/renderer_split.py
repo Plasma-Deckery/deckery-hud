@@ -548,8 +548,11 @@ def group_layers(state, sw, sh, contents, press_t=None, dev_scale=1.0):
         else:
             groups[name] = _get_group_layer(element, content, vms, pv, anchor_x[side_of(name)],
                                             sw, sh, active_press, dev_scale)
+    connector = (_get_connector_layer(groups, pv, sw, sh, dev_scale)
+                 if pv.gesture and "LPad" in groups and "RPad" in groups else None)
     return {
         "groups": groups,
+        "connector": connector,
         "contents": dict(contents),
         "center": center,
         "vms": vms,
@@ -679,29 +682,75 @@ def _draw_gesture_connector(cr, l_tx, r_tx, pv, sw):
     cy = (ly + ry) / 2   # the two should already coincide; average absorbs any drift
     cx = sw / 2
 
-    # Amber (theme.modifier), matching the old per-pad row's own colour while a
-    # gesture is active (active_mod=pv.gesture there — see _callouts()'s
-    # amber tier) — this connector only ever draws while pv.gesture is
-    # True, so it's always that tier, not the plain white a bound-but-
-    # ungestured pad legend row would use.
-    line_col = (*theme.current().modifier, 0.85)
-    text_col = (*theme.current().modifier, 1.0)
+    # The theme's connector tokens (B-12): an amber power line in neon —
+    # theme.modifier, the colour the old per-pad row had while a gesture
+    # was active. Its glow and shadow come with the cached layer
+    # (_get_connector_layer), not from here.
+    t = theme.current()
+    line_col = (*t.connector_line_rgb(), t.connector_alpha)
+    text_col = (*t.connector_label_rgb(), 1.0)
+    lw = t.connector_width or t.callout_width
+    size = t.connector_label_size
     label = pv.lpad_label     # == pv.rpad_label ("Gestures") while gesturing
 
-    tw, _th = _txt_size(cr, label, 13)
+    tw, _th = _txt_size(cr, label, size)
     gap = tw / 2 + 6   # stop the lines short of the text, same convention _callouts() uses
 
-    cr.set_source_rgba(*line_col)
-    cr.set_line_width(theme.current().callout_width)
     cr.move_to(lx, ly)
     cr.line_to(cx - gap, cy)
-    cr.stroke()
+    stroke_outline(cr, line_col, lw, t.connector_style)
     cr.move_to(rx, ry)
     cr.line_to(cx + gap, cy)
-    cr.stroke()
+    stroke_outline(cr, line_col, lw, t.connector_style)
 
     cr.set_source_rgba(*text_col)
-    _txt(cr, cx, cy, label, size=13, ha="center", va="mid")
+    _txt(cr, cx, cy, label, size=size, ha="center", va="mid")
+    # The two lines as (x, y, w, h, r) bands, for the shadow to lay a
+    # plate under them as under any shape.
+    return ((lx, cy - lw / 2, cx - gap - lx, lw, lw / 2),
+            (cx + gap, cy - lw / 2, rx - cx - gap, lw, lw / 2))
+
+
+# The connector at rest, as a layer of its own like an element's: built
+# once per geometry, label and theme, with the theme's shadow under it and
+# its own neon glow — both far too slow to make per frame.
+_connector_cache = []
+
+
+def _get_connector_layer(groups, pv, sw, sh, dev_scale):
+    l_tx, r_tx = groups["LPad"].tx, groups["RPad"].tx
+    t = theme.current()
+    key = (l_tx, r_tx, pv.lpad_label, sw, sh, dev_scale, t)
+    for i, (k, layer) in enumerate(_connector_cache):
+        if k == key:
+            _connector_cache.insert(0, _connector_cache.pop(i))
+            return layer
+    runs = []
+    with capture_text_boxes() as cap:
+        surf, rect = _render_cropped(
+            lambda cr: runs.extend(_draw_gesture_connector(cr, l_tx, r_tx, pv, sw)),
+            sw, sh, dev_scale)
+    style = replace(shadow_style(), glow_alpha=t.connector_glow,
+                    glow_radius=t.connector_glow_radius, glow_text=t.connector_label_glow)
+    if not t.connector_shadow:
+        # The halo alone: no plate, edge or rim, and no cloud in the merge.
+        style = replace(style, core_alpha=0.0, edge_alpha=0.0, rim_alpha=0.0,
+                        legend="line")
+    shadow = bleed = None
+    if t.connector_shadow or t.connector_glow > 0:
+        spec = GroupShadowSpec(rrects=tuple(tuple(round(v, 1) for v in r) for r in runs),
+                               text_boxes=tuple(tuple(round(v) for v in b) for b in cap.boxes),
+                               ink=tuple(round(v) for v in rect),
+                               text_colours=tuple(c and tuple(round(v, 2) for v in c)
+                                                  for c in cap.colours))
+        shadow, bleed = group_shadow_layers(spec, style, surf, rect, dev_scale)
+        if not t.connector_shadow:
+            bleed = None
+    layer = GroupLayer(name="connector", side=None, surface=surf, rect=rect, tx=None,
+                       shadow=shadow, bleed=bleed, vms={}, look=key)
+    _connector_cache.insert(0, (key, layer))
+    del _connector_cache[_LOOKS_KEPT:]
+    return layer
 
 
 def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=None,
@@ -735,13 +784,23 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
     # never one group's shadow and text interleaved, or the next group's
     # shadow spillover lands on the first group's finished text and dims it.
     # The bleed goes first and as one merged pass (see shadow.paint_bleed).
-    paint_bleed(cr, [(layers["groups"][n].bleed, dx, opacity)
-                     for n, (opacity, dx, _c) in groups.items() if layers["groups"][n].bleed],
+    # The gesture connector is a layer like these at rest (see
+    # _get_connector_layer); mid-slide it is drawn live, bare.
+    conn = layers["connector"]
+    if conn is not None:
+        conn_op = min(groups["LPad"][0], groups["RPad"][0])
+        if groups["LPad"][1] or groups["RPad"][1]:
+            conn = None
+    shown = [(layers["groups"][n], dx, opacity) for n, (opacity, dx, _c) in groups.items()]
+    if conn is not None:
+        # First, so the pads' own plates lie over the line running into them.
+        shown.insert(0, (conn, 0.0, conn_op))
+    paint_bleed(cr, [(layer.bleed, dx, opacity) for layer, dx, opacity in shown if layer.bleed],
                 sw, sh, shadow_style())
-    for name, (opacity, dx, _c) in groups.items():
-        if layers["groups"][name].shadow is None:
+    for layer, dx, opacity in shown:
+        if layer.shadow is None:
             continue
-        surf, x, y, w, h = layers["groups"][name].shadow
+        surf, x, y, w, h = layer.shadow
         cr.save()
         cr.translate(x + dx, y)
         paint_scaled(cr, surf, w, h, opacity)
@@ -758,7 +817,10 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
         draw_group_live(cr, name, state, layers, dx, press_t, draw_dpad)
         cr.pop_group_to_source()
         cr.paint_with_alpha(opacity)
-    if "LPad" in groups and "RPad" in groups:
+    if conn is not None:
+        cr.set_source_surface(conn.surface, conn.rect[0], conn.rect[1])
+        cr.paint_with_alpha(conn_op)
+    elif layers["connector"] is not None:
         cr.push_group()
         draw_gesture_connector_live(cr, layers, sw, groups["LPad"][1], groups["RPad"][1])
         cr.pop_group_to_source()

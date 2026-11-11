@@ -57,6 +57,8 @@ class _Ghost:
     live: tuple         # (texture, rect): its live strip, drawn once
     connector: tuple    # (texture, rect): the gesture connector, for a pad
     vms: dict           # the d-pad's, for its 3D cross; None otherwise
+    conn_shadow: tuple = None   # (texture, rect): the connector's shadow and glow
+    conn_bleed: tuple = None    # (texture, rect): its cloud
 
 
 class _HudArea(Gtk.Widget):
@@ -189,7 +191,8 @@ class Win(Gtk.ApplicationWindow):
         self._causes    = {}      # group -> cause of its last Want, decides slide vs fade out
         self._full      = False   # the full HUD is open (input, centre)
         self._frame     = {}      # group -> what the last frame drew of it (_snapshot_split)
-        self._frame_ctx = None    # (state, layers, press_t, sw, sh, scale, connector) of that frame
+        self._frame_ctx = None    # (state, layers, press_t, sw, sh, scale, connector) of that frame;
+                                  # connector: None, or its {"tex", "shadow", "bleed"} slots
         self._xfade     = {}      # group -> reveal.Crossfade, old = (texture, rect) under new content
         self._ghosts    = {}      # group -> [_Ghost]: frozen copies fading out, see _freeze
         self._tick_id   = None
@@ -453,9 +456,12 @@ class Win(Gtk.ApplicationWindow):
             rect = live_rect(g, layers, sw, sh)
             live = (self._render_frozen(rect, scale, lambda cr: draw_group_live(
                 cr, g, state, layers, 0.0, press_t, draw_dpad=False)), rect)
-        conn = None
-        if connector and drew_connector and g in ("LPad", "RPad"):
-            # Drawn full-screen live; frozen only where it has ink — a
+        conn = conn_shadow = conn_bleed = None
+        if connector and drew_connector and g in ("LPad", "RPad") and drew_connector["tex"]:
+            # At rest it is a cached layer like an element's: its textures go along.
+            conn, conn_shadow, conn_bleed = (drew_connector[k] for k in ("tex", "shadow", "bleed"))
+        elif connector and drew_connector and g in ("LPad", "RPad"):
+            # Drawn live mid-slide; frozen only where it has ink — a
             # full-screen bitmap took ~8ms to make and upload.
             rec = cairo.RecordingSurface(cairo.Content.COLOR_ALPHA, None)
             draw_gesture_connector_live(cairo.Context(rec), layers, sw, 0.0, 0.0)
@@ -465,7 +471,8 @@ class Win(Gtk.ApplicationWindow):
                 conn = (self._render_frozen(rect, scale, lambda cr: (
                     cr.set_source_surface(rec, 0, 0), cr.paint())), rect)
         ghost = _Ghost(GroupAnim(self._settings), f["look"], f["tex"], f["rect"],
-                       f["shadow"], f["bleed"], live, conn, f["vms"] if g == "DPad" else None)
+                       f["shadow"], f["bleed"], live, conn, f["vms"] if g == "DPad" else None,
+                       conn_shadow, conn_bleed)
         ghost.anim.jump(anim.value, True)
         ghost.anim.set_target(False, "detector", now)
         anim.jump(0.0, False)
@@ -834,19 +841,45 @@ class Win(Gtk.ApplicationWindow):
         frame = {g: {"look": groups[g].look, "vms": groups[g].vms, "shadow": None, "bleed": None}
                  for g in shown}
 
+        # Two pads touching at once connect across screen centre (see
+        # draw_gesture_connector_live), as visible as the fainter pad. At
+        # rest it is a cached layer with its own shadow, glow and cloud;
+        # mid-slide its two ends move apart, so it is drawn live, bare.
+        conn = layers["connector"]
+        conn_frame = None
+        if conn is not None:
+            conn_op = min(opacity["LPad"], opacity["RPad"])
+            conn_frame = {"tex": None, "shadow": None, "bleed": None}
+            if dx["LPad"] or dx["RPad"]:
+                conn = None
+
+        def placed_conn(slot, tex_name, surf, x, y, w, h, scaled=True):
+            tex = self._texture(tex_name, surf)
+            conn_frame[slot] = (tex, (x, y, w, h))
+            snapshot.push_opacity(conn_op)
+            if scaled:
+                snapshot.append_scaled_texture(tex, Gsk.ScalingFilter.LINEAR, rect(x, y, w, h))
+            else:
+                snapshot.append_texture(tex, rect(x, y, w, h))
+            snapshot.pop()
+
         # Every shadow before any content, so no element's shadow darkens a
         # neighbour's text. First the bleed: each element's soft field with
         # its own slide/fade, all in one pass that is only then mapped to
         # alpha — so neighbouring clouds fuse into one shape instead of
         # stacking (see shadow.py). Then each element's own core/edge shadow.
         bleeds = [g for g in shown if groups[g].bleed is not None]
-        if bleeds or any(gh.bleed for _g, gh in ghosts):
+        conn_bleed = conn is not None and conn.bleed is not None
+        if bleeds or conn_bleed or any(gh.bleed or gh.conn_bleed for _g, gh in ghosts):
             ident = Gsk.ComponentTransfer.new_identity()
             ramp, curve = self._bleed_transfer()
             snapshot.push_component_transfer(ident, ident, ident, curve)
             snapshot.push_component_transfer(ident, ident, ident, ramp)
             for _g, gh in ghosts:
                 faded(gh, gh.bleed)
+                faded(gh, gh.conn_bleed)
+            if conn_bleed:
+                placed_conn("bleed", "bleed_connector", *conn.bleed)
             for g in bleeds:
                 surf, x, y, w, h = groups[g].bleed
                 tex = self._texture("bleed_" + g, surf)
@@ -855,8 +888,13 @@ class Win(Gtk.ApplicationWindow):
                     tex, Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
             snapshot.pop()
             snapshot.pop()
+        # The connector's under the pads': it runs into them, under their plate.
+        for _g, gh in ghosts:
+            faded(gh, gh.conn_shadow)
         for _g, gh in ghosts:
             faded(gh, gh.shadow)
+        if conn is not None and conn.shadow is not None:
+            placed_conn("shadow", "shadow_connector", *conn.shadow)
         for g in shown:
             if groups[g].shadow is None:
                 continue
@@ -907,14 +945,12 @@ class Win(Gtk.ApplicationWindow):
                 draw_group_live(cr, g, self._state, layers, 0.0, press_t, draw_dpad=False)
             placed(g, live)
 
-        # Two pads touching at once connects across screen centre — needs
-        # its own full-width, unclipped pass; the per-group strips each stop
-        # well short of centre (see draw_gesture_connector_live). It is as
-        # visible as the fainter of the two pads.
-        pv = layers.get("pv")
-        connector = pv is not None and pv.gesture and "LPad" in groups and "RPad" in groups
-        if connector:
-            snapshot.push_opacity(min(opacity["LPad"], opacity["RPad"]))
+        # The connector over both pads. Live, it needs its own full-width,
+        # unclipped pass: the per-group strips each stop well short of centre.
+        if conn is not None:
+            placed_conn("tex", "connector", conn.surface, *conn.rect, scaled=False)
+        elif conn_frame is not None:
+            snapshot.push_opacity(conn_op)
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
             draw_gesture_connector_live(cr, layers, sw, dx["LPad"], dx["RPad"])
             snapshot.pop()
@@ -932,7 +968,7 @@ class Win(Gtk.ApplicationWindow):
         # a changed look next frame. Only elements actually drawn: one that
         # comes back later starts fresh, without a crossfade from long ago.
         self._frame = frame
-        self._frame_ctx = (self._state, layers, press_t, sw, sh, scale, connector)
+        self._frame_ctx = (self._state, layers, press_t, sw, sh, scale, conn_frame)
         if self._xfade:
             self._start_ticking()
 
