@@ -82,10 +82,19 @@ class Hold:
     def reset(self):
         self._since = self._off_since = None
 
+    def restart(self, now):
+        """Start the hold over from now, if one is running."""
+        if self._since is not None:
+            self._since = now
+            self._off_since = None
+
     def force(self, now):
         """Fired from now on, as if held all along."""
         self._since = now - self.hold
         self._off_since = None
+
+
+_UNSEEN = object()
 
 
 class Reveal:
@@ -102,6 +111,9 @@ class Reveal:
         self._modifier = Hold(settings.hold_ms, settings.release_ms)
         self._gesture_raw = False  # gesture touching at the last update
         self._gesture_shown = False  # the gesture is showing both pads
+        self._mod_shown = False      # the modifier reveal is on screen
+        self._pressed = None         # buttons down at the last update
+        self._action_ts = _UNSEEN    # last_action.ts at the last update
         self._now = 0.0
 
     def _holds(self):
@@ -131,7 +143,7 @@ class Reveal:
             # aren't active there, so the legends would be wrong.
             for h in self._holds():
                 h.reset()
-            self._gesture_raw = self._gesture_shown = False
+            self._gesture_raw = self._gesture_shown = self._mod_shown = False
         else:
             pads = state.get("trackpads") or {}
             gesture = bool((pads.get("gesture") or {}).get("touching")) and s.gesture_enabled
@@ -182,7 +194,13 @@ class Reveal:
         held = list(ctx.get("held_modifiers") or ())
         combos = list((state.get("modifier_active") or {}).keys())
         raw = bool(held or combos) and self.settings.modifier_enabled
-        if not self._modifier.update(raw, now):
+        if self._activity(state, ctx, held) and not self._mod_shown:
+            # The reveal is for a hold left idle — someone unsure what to
+            # press. A keystroke or a fired action (L1+A Copy) means they
+            # know: the hold starts over. Once shown, it stays.
+            self._modifier.restart(now)
+        self._mod_shown = self._modifier.update(raw, now)
+        if not self._mod_shown:
             return {}
         buttons = set(held) | set(combos) | set((ctx.get("available_modifiers") or {}).keys())
         contents = {}
@@ -191,6 +209,17 @@ class Reveal:
             if own:
                 contents[el.id] = Content(frozenset(own)) if el.kind == "dpad" else FULL
         return contents
+
+    def _activity(self, state, ctx, held):
+        """A button newly pressed or an action newly fired since the last
+        update. Adding a modifier doesn't count: that picks a layer."""
+        pressed = frozenset(ctx.get("active_buttons") or ())
+        last = state.get("last_action")
+        ts = last.get("ts") if isinstance(last, dict) else None
+        new_press = self._pressed is not None and bool(pressed - self._pressed - set(held))
+        new_action = self._action_ts is not _UNSEEN and ts is not None and ts != self._action_ts
+        self._pressed, self._action_ts = pressed, ts
+        return new_press or new_action
 
     def next_deadline(self):
         """Next time update() would change its answer with no new state."""
