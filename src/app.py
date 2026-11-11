@@ -262,7 +262,7 @@ class App(Gtk.Application):
         if theme.activate(name) and redraw:
             # The renderers' caches key on the theme; a redraw rebuilds them.
             self._win.queue_draw_title()
-            self._osd_win.on_state(self._state)
+            self._osd_win.configure(self._settings.osd.animation, _split_mode())
 
     # ── D-Bus method dispatch ─────────────────────────────────────────────
 

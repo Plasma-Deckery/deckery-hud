@@ -78,7 +78,10 @@ class OsdWin(Gtk.ApplicationWindow):
     # ── Settings (called by App) ─────────────────────────────────────────
 
     def configure(self, animation, split):
-        """`[osd] animation` and whether the split design is running."""
+        """`[osd] animation` and whether the split design is running. "auto"
+        takes the theme's animation when it names one (B-20)."""
+        if animation == "auto" and split and theme.current().osd_animation:
+            animation = theme.current().osd_animation
         self._anim = osd_anim.resolve(animation, split)
         self._split = split
         self._da.queue_draw()

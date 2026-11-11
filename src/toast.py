@@ -9,6 +9,7 @@ Signature: draw_toast(cr, sw, sh, toasts)  — works in screen coordinates.
 import time
 
 from helpers import _pill_row, _fmt
+import theme
 
 _TOAST_TTL    = 1.5    # total display time in seconds
 _HOLD_FRAC    = 0.35   # full opacity until this fraction of TTL, then (1-t)³ fade
@@ -18,9 +19,8 @@ _HOLD_FRAC    = 0.35   # full opacity until this fraction of TTL, then (1-t)³ f
 _START_Y_FRAC = 0.78
 _RISE_PX      = 48     # total upward travel in screen pixels over TTL
 
-_C_KEYS = (0.72, 0.55, 1.0)    # lavender — key tap
-_C_CMD  = (0.55, 0.90, 0.55)   # green    — command / exec
-_C_ERR  = (1.00, 0.45, 0.42)   # red      — a command that did not run
+# Colours: theme.toast_keys (lavender, key tap), theme.toast_command (green,
+# command / exec), theme.toast_error (red, a command that did not run).
 
 
 def draw_toast(cr, sw, sh, toasts, start_y=None):
@@ -76,18 +76,18 @@ def toast_label(la):
 
     if t == "keys":
         label = explicit_label or _fmt(value)
-        col   = _C_KEYS
+        col   = theme.current().toast_keys
     elif t in ("command", "exec"):
         label = explicit_label or (value if isinstance(value, str) else " ".join(str(v) for v in value))
-        col   = _C_CMD
+        col   = theme.current().toast_command
     elif t == "error":
         # A command binding that did not run. `label` names the binding the
         # user pressed, `value` says why — both, because neither alone is
         # enough to act on.
         reason = value if isinstance(value, str) else str(value)
         label  = f"{explicit_label}: {reason}" if explicit_label else reason
-        col    = _C_ERR
+        col    = theme.current().toast_error
     else:
         label = explicit_label or (str(value) if value else "—")
-        col   = _C_KEYS
+        col   = theme.current().toast_keys
     return label, col

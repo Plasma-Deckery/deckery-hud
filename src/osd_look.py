@@ -10,8 +10,8 @@ In the split design they speak the HUD's language (B-14, shadow.py): a toast
 is a coloured legend on a plate tinted with a dark version of its colour,
 with the soft cloud and the tight black edge; the glass pills keep their own
 gentle shadow in the neutral tint (pill_shadow.py). In classic they look as
-the slide animation draws them. Colours and the shadow style come from
-toast.py / helpers.py / shadow.py, not from here.
+the slide animation draws them. Colours, pill material and shadow come from
+the active theme (theme.py, B-20); every sprite is cached per theme.
 
 Needs numpy (via shadow.py). No GTK.
 """
@@ -22,7 +22,8 @@ from dataclasses import dataclass
 import cairo
 import numpy as np
 
-from helpers import _pill_row, _txt, capture_text_boxes, GLASS_PILL, GLASS_PILL_FG
+from helpers import _pill_row, _txt, capture_text_boxes
+import theme
 import pill_shadow
 from shadow import (GroupShadowSpec, group_shadow_layers, neutral_rgb, _alpha_surface,
                     _bleed_curve, _FIELD_DOWN)
@@ -110,7 +111,7 @@ def _cached(key, build):
 def toast_sprite(la, split, style, dev_scale=1.0):
     """A toast for last_action `la`, centred on (0, 0)."""
     label, col = toast_label(la)
-    return _cached(("toast", label, col, split, style, dev_scale),
+    return _cached(("toast", label, col, split, style, dev_scale, theme.current()),
                    lambda: _neon_toast(label, col, style, dev_scale) if split
                    else _classic_toast(label, col, dev_scale))
 
@@ -147,19 +148,21 @@ def _neon_toast(label, col, style, dev_scale):
 
 def pills_sprite(labels, style, dev_scale=1.0):
     """The active-outputs pill row, centred on (0, 0), with its shadow."""
+    t = theme.current()
+
     def build():
         def draw(cr):
             _pill_row(cr, 0, 0, list(labels), sep="+", size=PILL_SIZE,
-                      glass=GLASS_PILL, fg=GLASS_PILL_FG,
+                      glass=t.glass, fg=t.pill_fg,
                       sep_rgba=(0.5, 0.5, 0.52, 0.9), ha="center")
         rec, cap = _record(draw)
 
         def compose(cr):
-            pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(style))
+            pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(style), strength=t.pill_shadow)
             cr.set_source_surface(rec, 0, 0)
             cr.paint()
         return _sprite(compose, dev_scale)
-    return _cached(("pills", tuple(labels), style, dev_scale), build)
+    return _cached(("pills", tuple(labels), style, dev_scale, t), build)
 
 
 def paint(cr, sprite, cx, cy, scale=1.0, alpha=1.0, dev_scale=1.0):

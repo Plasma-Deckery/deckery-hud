@@ -112,3 +112,25 @@ def test_activate(user_themes):
 def test_setting():
     assert settings.Settings().layout.theme == "neon"
     assert "theme = " in settings.template()
+
+
+def test_osd_tokens(user_themes, capsys):
+    import toast
+    (user_themes / "o.toml").write_text(
+        '[osd]\nanimation = "slide"\ntoast_command = "#00ff00"\nwackel = 1\n')
+    t = theme.load("o")
+    assert t.osd_animation == "slide"
+    assert t.toast_command == (0.0, 1.0, 0.0)
+    assert "wackel" in capsys.readouterr().err
+    assert theme.load("ruhig").osd_animation == "bubble-soft"
+    theme.activate("o")
+    assert toast.toast_label({"type": "command", "value": ["x"]})[1] == (0.0, 1.0, 0.0)
+
+
+def test_osd_sprites_key_on_theme(user_themes):
+    import osd_look
+    style = theme.current().shadow_style()
+    a = osd_look.pills_sprite(("Ctrl",), style)
+    theme.activate("neon-kraeftig")
+    b = osd_look.pills_sprite(("Ctrl",), style)
+    assert a is not b

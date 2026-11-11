@@ -6,3 +6,7 @@ order = 20
 [shadow]
 tint = false
 rim_alpha = 0.0
+
+[osd]
+# Auch das OSD ruhiger: weiches Einblenden ohne Überschwingen.
+animation = "bubble-soft"
