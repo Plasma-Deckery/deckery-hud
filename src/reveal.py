@@ -312,3 +312,33 @@ class GroupAnim:
     @property
     def value(self):
         return self._v
+
+
+class Crossfade:
+    """An element's old picture dissolving into its new one in place, over
+    crossfade_ms. `old` is whatever the window draws the old picture with.
+    Its clock starts with begin() — the window's first tick after the frame
+    that started it, which rebuilt every changed element and can take
+    longer than the whole crossfade."""
+
+    def __init__(self, old):
+        self.old = old
+        self._start = None
+
+    def begin(self, now):
+        if self._start is None:
+            self._start = now
+
+    def progress(self, now, settings):
+        if self._start is None:
+            return 0.0
+        dur = settings.crossfade_ms / 1000
+        return min(1.0, max(0.0, (now - self._start) / dur)) if dur > 0 else 1.0
+
+    def running(self, now, settings):
+        return self.progress(now, settings) < 1.0
+
+    def delay(self, seconds):
+        """Take a stall out of its time — see GroupAnim.delay."""
+        if self._start is not None:
+            self._start += seconds

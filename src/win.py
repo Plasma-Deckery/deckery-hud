@@ -24,7 +24,7 @@ from layout import (HUD_W, HUD_H, _TITLE_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE
 from renderer import draw_hud
 from toast import draw_toast
 from anim import HoverAnim
-from reveal import GROUPS, GroupAnim, RevealSettings
+from reveal import GROUPS, GroupAnim, RevealSettings, Crossfade
 from settings import dbg, debug_enabled
 import layout_choice
 
@@ -190,7 +190,7 @@ class Win(Gtk.ApplicationWindow):
         self._full      = False   # the full HUD is open (input, centre, toasts)
         self._frame     = {}      # group -> what the last frame drew of it (_snapshot_split)
         self._frame_ctx = None    # (state, layers, press_t, sw, sh, scale, connector) of that frame
-        self._xfade     = {}      # group -> (texture, rect, start) fading out under new content
+        self._xfade     = {}      # group -> reveal.Crossfade, old = (texture, rect) under new content
         self._ghosts    = {}      # group -> [_Ghost]: frozen copies fading out, see _freeze
         self._tick_id   = None
         self._visible   = frozenset()
@@ -570,7 +570,10 @@ class Win(Gtk.ApplicationWindow):
             # ~390ms) would otherwise eat the whole slide. Count it as one
             # ordinary frame instead.
             if gap > _STALL_S:
-                for a in self._all_anims():
+                # Crossfades too: the frame that starts one rebuilds every
+                # changed element (a layer change in the full HUD: ~110ms),
+                # and the new legend would just pop.
+                for a in (*self._all_anims(), *self._xfade.values()):
                     a.delay(gap - _FRAME_S)
         self._last_tick = now
 
@@ -595,8 +598,9 @@ class Win(Gtk.ApplicationWindow):
             gh.anim.tick(now)
         self._ghosts = {g: live for g, ghosts in self._ghosts.items()
                         if (live := [gh for gh in ghosts if gh.anim.running])}
-        xf = self._settings.crossfade_ms / 1000
-        self._xfade = {g: x for g, x in self._xfade.items() if now - x[2] < xf}
+        for x in self._xfade.values():
+            x.begin(now)
+        self._xfade = {g: x for g, x in self._xfade.items() if x.running(now, self._settings)}
         self._da.queue_draw()
         self._check_visible()
         if running or self._xfade or self._ghosts:
@@ -869,7 +873,6 @@ class Win(Gtk.ApplicationWindow):
                 snapshot.pop()
         for _g, gh in ghosts:
             faded(gh, gh.connector)   # over both pads, as it is live
-        xf = self._settings.crossfade_ms / 1000
         for g in shown:
             layer = groups[g]
             tex = self._texture(g, layer.surface)
@@ -877,12 +880,12 @@ class Win(Gtk.ApplicationWindow):
             if prev is not None and prev["look"] != layer.look:
                 # Same element, new picture in place (L1 -> R1 rebinds a
                 # key, a gesture swaps a pad's label): dissolve old into new.
-                self._xfade[g] = (prev["tex"], prev["rect"], now)
+                self._xfade[g] = Crossfade((prev["tex"], prev["rect"]))
             if g in self._xfade:
                 # A real dissolve, not new-over-old: two plain alphas would
                 # dim whatever both textures share (the art) mid-way.
-                old_tex, old_rect, start = self._xfade[g]
-                k = min(1.0, (now - start) / xf) if xf > 0 else 1.0
+                (old_tex, old_rect) = self._xfade[g].old
+                k = self._xfade[g].progress(now, self._settings)
                 def both():
                     snapshot.push_cross_fade(k)
                     snapshot.append_texture(old_tex, rect(*old_rect))
