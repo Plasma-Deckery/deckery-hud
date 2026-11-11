@@ -67,8 +67,10 @@ def test_hold_release_is_immediate_but_bridged():
     assert h.next_change(2.0) is None
     assert h.update(True, 2.4)
     assert not h.update(False, 3.0)
-    assert not h.update(True, 3.6)   # gap longer than release_ms: hold again
-    assert h.update(True, 5.2)
+    assert h.update(True, 4.4)       # once shown, the grace is the hold itself
+    assert not h.update(False, 5.0)
+    assert not h.update(True, 6.6)   # gap longer than the grace: hold again
+    assert h.update(True, 8.1)
 
 
 # ── Reveal ────────────────────────────────────────────────────────────────
@@ -435,3 +437,81 @@ def test_crossfade_starts_after_the_frame_that_starts_it():
     x.delay(0.3)
     assert x.running(0.5, S)
     assert not x.running(0.62, S)
+
+
+# ── Live round 3: a grace window after the fade-out ───────────────────────
+# The test settings: hold 1.5 s, fade-out 0.3 s, so a shown element can be
+# brought back at once for 1.8 s after its finger or button lifted.
+
+def test_hold_grace_after_shown_lasts_fade_out_plus_hold():
+    h = Hold(1500, 500, 300)
+    h.update(True, 0.0)
+    assert h.update(True, 1.5)
+    h.update(False, 2.0)
+    assert h.update(True, 3.79)
+    h.update(False, 4.0)
+    assert not h.update(True, 5.81)
+    assert h.update(True, 7.31)
+
+
+def test_hold_without_being_shown_keeps_the_short_bridge():
+    h = Hold(1500, 500, 300)
+    h.update(True, 0.0)
+    h.update(False, 1.0)
+    assert not h.update(True, 1.6)
+    assert not h.update(True, 3.0)
+    assert h.update(True, 3.1)
+
+
+def test_pad_comes_back_at_once_within_the_grace():
+    """Live round 3: "if I release it and it just disappeared, and I tap
+    on it again, it should still come back for a moment"."""
+    r = Reveal(S)
+    r.update(_state(lpad=True), 0.0)
+    assert "LPad" in r.update(_state(lpad=True), 1.5)
+    assert r.update(_state(), 2.0) == {}
+    assert "LPad" in r.update(_state(lpad=True), 3.7)
+    r.update(_state(), 4.0)
+    assert r.update(_state(lpad=True), 5.9) == {}
+
+
+def test_gesture_comes_back_at_once_within_the_grace():
+    r = Reveal(S)
+    r.update(_makima_pads(True, True, True), 0.0)
+    assert set(r.update(_makima_pads(True, True, True), 1.5)) == {"LPad", "RPad"}
+    assert r.update(_makima_pads(False, False, False), 2.0) == {}
+    assert set(r.update(_makima_pads(True, True, True), 3.7)) == {"LPad", "RPad"}
+
+
+def test_gesture_grace_uses_the_gesture_hold():
+    r = Reveal(_s(hold_ms=3000, gesture_hold_ms=1000))
+    r.update(_makima_pads(True, True, True), 0.0)
+    assert set(r.update(_makima_pads(True, True, True), 1.0)) == {"LPad", "RPad"}
+    r.update(_makima_pads(False, False, False), 1.2)
+    assert set(r.update(_makima_pads(True, True, True), 2.4)) == {"LPad", "RPad"}
+
+
+def test_modifier_comes_back_at_once_within_the_grace():
+    r = Reveal(S)
+    r.update(_state(**L1), 0.0)
+    assert "A" in r.update(_state(**L1), 1.5)
+    assert r.update(_state(), 2.0) == {}
+    assert "A" in r.update(_state(**L1), 3.7)
+
+
+def test_a_keystroke_between_ends_the_modifier_grace():
+    """Pressing something else after letting go means moving on: the next
+    hold is a new one."""
+    r = Reveal(S)
+    r.update(_state(**L1), 0.0)
+    assert "A" in r.update(_state(**L1), 1.5)
+    r.update(_state(), 2.0)
+    r.update(_state(pressed=["BTN_SOUTH"]), 2.3)
+    r.update(_state(), 2.4)
+    assert r.update(_state(**L1), 2.6) == {}
+
+
+def test_set_settings_updates_the_grace():
+    r = Reveal(S)
+    r.set_settings(_s(fade_out_ms=100))
+    assert all(h.fade_out == 0.1 for h in r._holds())

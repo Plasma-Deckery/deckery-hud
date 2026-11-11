@@ -83,7 +83,8 @@ class RevealSettings:
         minimum=1))
     release_ms: int = field(default=250, metadata=_meta(
         "Loslassen blendet sofort aus; wer innerhalb dieser Zeit wieder drückt oder "
-        "berührt, sieht die Gruppe gleich wieder, ohne neue Haltezeit (ms).",
+        "berührt, sieht die Gruppe gleich wieder, ohne neue Haltezeit. War sie schon "
+        "zu sehen, gilt das noch bis Ausblenden plus Haltezeit (ms).",
         minimum=1))
     slide_ms: int = field(default=260, metadata=_meta(
         "Dauer des Hereinfahrens, wenn das volle HUD auf- oder zugeht (ms).",
