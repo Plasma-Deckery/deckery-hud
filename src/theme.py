@@ -26,12 +26,23 @@ its renders are pixel-identical.
     [modifiers]                     # colour by modifier: L1, R1, "···", Steam, "L1+R1", …
     L1 = "#6aa8ff"
 
+    [shape]                         # contours and fills of the controller's shapes
+    width = 1.0
+    style = "double"                # solid | dashed | double | none
+    fill = "#10121880"
+
+    [stick]                         # ring, cap, cap_border, width
+    [callout]                       # width, alpha, dot
+    [text]                          # font, weight, scale, transform = "upper"
+
     [pill]
     top = "#ffffffb8"
+    border = "#ffffffcc"
 
     [shadow]                        # preset + any shadow.ShadowStyle field
     preset = "hauch-dicht"
-    glow_alpha = 0.5
+    glow_alpha = 0.5                # neon glow; bleed_alpha = 0: no cloud;
+    offset_x = 3                    # core_alpha = 0: no plate; offset: drop shadow
 
     [font]
     family = "Adwaita Sans"
@@ -87,10 +98,28 @@ class Theme:
     # modifier draws in `modifier`.
     modifiers: tuple = ()
 
-    # ── Shapes (rgba) ──
+    # ── Shapes: the controller's buttons, pads, d-pad (rgba) ──
     outline: tuple = (1.0, 1.0, 1.0, 0.5)
     outline_width: float = 1.3 * 1.5
+    outline_style: str = "solid"          # solid | dashed | double | none
+    shape_fill: tuple = (0.0, 0.0, 0.0, 0.0)     # a shape at rest
     active_fill: tuple = (1.0, 1.0, 1.0, 0.58)   # a plain press
+
+    # ── Sticks ──
+    stick_ring: tuple = (1.0, 1.0, 1.0, 0.38)    # the moving outer ring
+    stick_cap: tuple = (0.0, 0.0, 0.0, 0.72)     # the cap in its middle
+    stick_cap_border: tuple = (0.0, 0.0, 0.0, 0.95)
+    stick_width: float = 1.0                      # line width factor
+
+    # ── Callouts: the line from a button to its legend ──
+    callout_width: float = 1.4
+    callout_alpha: float = 1.0            # factor on the lines' own alphas
+    dot_radius: float = 3.0               # the dot at the button
+
+    # ── Text ──
+    text_weight: str = ""                 # Pango weight for non-bold text: Light, Medium, …
+    text_scale: float = 1.0
+    text_transform: str = ""              # "" | "upper"
 
     # ── Glass pill (active outputs, OSD) ──
     pill_top: tuple = (1, 1, 1, 0.72)
@@ -98,6 +127,7 @@ class Theme:
     pill_sheen: float = 0.13
     pill_fg: tuple = (0.08, 0.08, 0.10, 0.92)
     pill_shadow: float = 1.0       # strength of the pill's own shadow
+    pill_border: tuple = None      # rgba of a contour around the pill, or None
 
     # ── Shadow ──
     shadow: str = ""               # shadow.PRESETS name; "" = the default preset
@@ -236,8 +266,23 @@ def load(name, _seen=()):
 _COLOR_KEYS = {"modifier", "layer", "game", "ink", "text", "unbound", "stick",
                "status_active", "status_paused", "outline", "active_fill"}
 _PILL_KEYS = {"top": "pill_top", "bottom": "pill_bottom", "sheen": "pill_sheen",
-              "fg": "pill_fg", "shadow": "pill_shadow"}
-_RGBA = {"outline", "active_fill", "pill_top", "pill_bottom", "pill_fg"}
+              "fg": "pill_fg", "shadow": "pill_shadow", "border": "pill_border"}
+_RGBA = {"outline", "active_fill", "pill_top", "pill_bottom", "pill_fg", "pill_border",
+         "shape_fill", "stick_ring", "stick_cap", "stick_cap_border"}
+
+# The per-component sections: [section] key -> (Theme field, kind). Kinds:
+# rgba / rgb colour, num, or a tuple of allowed strings.
+_SECTIONS = {
+    "shape": {"outline": ("outline", "rgba"), "width": ("outline_width", "num"),
+              "style": ("outline_style", ("solid", "dashed", "double", "none")),
+              "fill": ("shape_fill", "rgba"), "active_fill": ("active_fill", "rgba")},
+    "stick": {"ring": ("stick_ring", "rgba"), "cap": ("stick_cap", "rgba"),
+              "cap_border": ("stick_cap_border", "rgba"), "width": ("stick_width", "num")},
+    "callout": {"width": ("callout_width", "num"), "alpha": ("callout_alpha", "num"),
+                "dot": ("dot_radius", "num")},
+    "text": {"font": ("font", "str"), "weight": ("text_weight", "str"),
+             "scale": ("text_scale", "num"), "transform": ("text_transform", ("", "upper"))},
+}
 
 
 def _apply(data, vals, where, base):
@@ -277,6 +322,8 @@ def _apply(data, vals, where, base):
                     _col(vals, f, v, where, True)
         elif key == "shadow" and isinstance(value, dict):
             _shadow(value, vals, where, base)
+        elif key in _SECTIONS and isinstance(value, dict):
+            _section(key, value, vals, where)
         elif key == "osd" and isinstance(value, dict):
             _osd(value, vals, where)
         elif key == "font" and isinstance(value, dict):
@@ -311,11 +358,38 @@ def _shadow(value, vals, where, base):
         elif f.type in (str, "str"):
             if isinstance(v, str):
                 tweaks[k] = v
+        elif f.type in (tuple, "tuple"):
+            c = _color(v, False)
+            if c is None:
+                _warn(f"{where}: shadow.{k} braucht eine Farbe")
+            else:
+                tweaks[k] = c
         elif type(v) in (int, float):
             tweaks[k] = float(v)
         else:
             _warn(f"{where}: shadow.{k} braucht eine Zahl")
     vals["shadow_tweaks"] = tuple(sorted(tweaks.items()))
+
+
+def _section(name, value, vals, where):
+    spec = _SECTIONS[name]
+    for k, v in value.items():
+        f, kind = spec.get(k, (None, None))
+        if f is None:
+            _warn(f"{where}: unbekannter Schlüssel {name}.{k}, ignoriert")
+        elif kind in ("rgba", "rgb"):
+            _col(vals, f, v, where, kind == "rgba")
+        elif kind == "num":
+            _num(vals, f, v, where)
+        elif kind == "str":
+            if isinstance(v, str):
+                vals[f] = v.strip()
+            else:
+                _warn(f"{where}: {name}.{k} braucht Text")
+        elif v in kind:
+            vals[f] = v
+        else:
+            _warn(f"{where}: {name}.{k}: erlaubt {', '.join(repr(c) for c in kind)}; steht {v!r}")
 
 
 def _osd(value, vals, where):

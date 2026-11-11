@@ -229,9 +229,7 @@ _STICK_PRESS_SCALE_MAX = 0.11
 # of introducing a new hue. Pushed to a harder light/dark split than the
 # first pass (0.22/0.45 alpha) — that read as two close, muddy mid-greys
 # instead of a light ring against a dark cap, on request.
-_RING_OUTER_FILL   = (1.0, 1.0, 1.0, 0.38)
-_RING_INNER_FILL   = (0.0, 0.0, 0.0, 0.72)
-_RING_INNER_BORDER = (0.0, 0.0, 0.0, 0.95)
+# These three are the theme's stick_ring / stick_cap / stick_cap_border (B-20).
 
 
 def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_rings=False,
@@ -276,18 +274,19 @@ def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_ri
     # request.
     if deadzone > 0 and not fill_rings:
         dz_r = deadzone * r_fixed
-        cr.set_source_rgba(1, 1, 1, 0.20)
+        cr.set_source_rgba(*theme.current().ink, 0.20)
         cr.set_line_width(0.8)
         cr.arc(cx, cy, dz_r, 0, math.tau)
         cr.stroke()
 
     # ── Redraw both moving circles at their parallax positions ───────────────
+    t = theme.current()
     if active:
-        stroke_rgba = (1, 1, 1, 1.0)
-        lw = 1.5
+        stroke_rgba = (*t.ink, 1.0)
+        lw = 1.5 * t.stick_width
     else:
-        stroke_rgba = (1, 1, 1, 0.75)
-        lw = 1.0
+        stroke_rgba = (*t.ink, 0.75)
+        lw = 1.0 * t.stick_width
 
     # r_outer ring (moves further) — filled when fill_rings, standing in for
     # the lighter base-collar ring visible around a real stick cap (checked
@@ -296,7 +295,7 @@ def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_ri
     # own border eats into it instead of staying inside it.
     _erase_circle(cr, new_outer_cx, new_outer_cy, r_outer, erase_mode)
     if fill_rings:
-        cr.set_source_rgba(*_RING_OUTER_FILL)
+        cr.set_source_rgba(*t.stick_ring)
         cr.arc(new_outer_cx, new_outer_cy, r_outer, 0, math.tau)
         cr.fill()
     cr.set_source_rgba(*stroke_rgba)
@@ -311,10 +310,10 @@ def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_ri
     # lighter outer ring instead of just another identical circle.
     _erase_circle(cr, new_inner_cx, new_inner_cy, r_inner, erase_mode)
     if fill_rings:
-        cr.set_source_rgba(*_RING_INNER_FILL)
+        cr.set_source_rgba(*t.stick_cap)
         cr.arc(new_inner_cx, new_inner_cy, r_inner, 0, math.tau)
         cr.fill()
-        cr.set_source_rgba(*_RING_INNER_BORDER)
+        cr.set_source_rgba(*t.stick_cap_border)
         cr.set_line_width(lw)
         cr.arc(new_inner_cx, new_inner_cy, r_inner, 0, math.tau)
         cr.stroke()

@@ -77,6 +77,13 @@ class ShadowStyle:
     # strokes and text, under the tight edge. 0 = none.
     glow_alpha: float = 0.0
     glow_radius: float = 6.0
+    glow_text: bool = False      # the glow around text too (blurs small letters)
+    # Shape of the shadow (B-20 themes):
+    offset_x: float = 0.0        # px — a drop shadow: plate, edge and cloud move,
+    offset_y: float = 0.0        #      the rim and glow stay on their shapes
+    core_gain: float = 1.6       # how hard the plate's edge is: higher = crisper
+    plate_radius: float = -1.0   # corner radius of the legend plates; -1 = round ends
+    shadow_rgb: tuple = (0.0, 0.0, 0.0)   # colour without tint, and of the edge
 
 
 PRESETS = {
@@ -255,7 +262,7 @@ def light_of(colour, style=None):
 
 def neutral_rgb(style):
     """Shadow colour under white/grey legends (and glass pills) for `style`."""
-    return _NEUTRAL_DARK if style.tint else (0.0, 0.0, 0.0)
+    return _NEUTRAL_DARK if style.tint else tuple(style.shadow_rgb)
 
 
 def element_colour(spec):
@@ -286,7 +293,7 @@ def _spec_bounds(spec):
     return min(xs0), min(ys0), max(xs1), max(ys1)
 
 
-def _mask(spec, x0, y0, w, h, down, grow, padx, pady, with_text=True):
+def _mask(spec, x0, y0, w, h, down, grow, padx, pady, with_text=True, radius=-1.0):
     """Filled silhouettes (+ legend plates), grown by `grow`, rasterized into
     a (w/down x h/down) A8 grid whose origin is (x0, y0) in screen px."""
     mw, mh = max(1, int(math.ceil(w / down))), max(1, int(math.ceil(h / down)))
@@ -323,7 +330,8 @@ def _mask(spec, x0, y0, w, h, down, grow, padx, pady, with_text=True):
     if with_text:
         for x, y, tw, th in spec.text_boxes:
             bh = th + 2 * pady
-            _rrect(cr, x - padx, y - pady, tw + 2 * padx, bh, min(bh / 2, 10 + pady))
+            _rrect(cr, x - padx, y - pady, tw + 2 * padx, bh,
+                   min(bh / 2, 10 + pady) if radius < 0 else min(bh / 2, radius))
             cr.fill()
     surf.flush()
     a = np.ndarray((mh, surf.get_stride()), np.uint8, surf.get_data())[:, :mw]
@@ -378,15 +386,21 @@ def group_shadow(spec, style):
     # In "glyph" mode the legend's core comes from the letters themselves
     # (see edge_shadow); the plate is shapes only.
     core = _mask(spec, *core_rect, _CORE_DOWN, style.core_grow,
-                 style.legend_padx, style.legend_pady, with_text=style.legend == "line")
-    core = np.clip(_blur(core, style.core_blur / _CORE_DOWN) * 1.6, 0, 1) * style.core_alpha
+                 style.legend_padx, style.legend_pady, with_text=style.legend == "line",
+                 radius=style.plate_radius)
+    core = np.clip(_blur(core, style.core_blur / _CORE_DOWN) * style.core_gain, 0, 1) * style.core_alpha
 
     field = _mask(spec, x0, y0, w, h, _FIELD_DOWN, style.bleed_grow,
-                  style.legend_padx + 4, style.legend_pady + 3)
+                  style.legend_padx + 4, style.legend_pady + 3, radius=style.plate_radius)
     field = _blur(field, style.bleed_blur / _FIELD_DOWN)
 
     tint = _tint_map(spec, x0, y0, w, h, _FIELD_DOWN, style) if style.tint else None
-    gs = GroupShadow(x0, y0, w, h, _alpha_surface(field, tint), core_rect, _alpha_surface(core),
+    plain = None
+    if tint is None and tuple(style.shadow_rgb) != (0.0, 0.0, 0.0):
+        plain = np.empty(field.shape + (3,), np.float32)
+        plain[...] = style.shadow_rgb
+    gs = GroupShadow(x0, y0, w, h, _alpha_surface(field, tint if tint is not None else plain),
+                     core_rect, _alpha_surface(core),
                      _alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
                      if tint is not None else None,
                      _rim(spec, style), field)
@@ -474,17 +488,23 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
     if gs.tint_surface is not None:
         cr.set_source(_placed(gs.tint_surface, gs.x, gs.y, _FIELD_DOWN))
     else:
-        cr.set_source_rgb(0, 0, 0)
+        cr.set_source_rgb(*style.shadow_rgb)
     cr.mask(_placed(gs.core_surface, cx, cy, _CORE_DOWN))
+    # The layer is placed offset as a whole (a drop shadow); what has to
+    # stay on its shapes is drawn shifted back.
+    ox, oy = style.offset_x, style.offset_y
     if content is not None:
         if style.glow_alpha > 0:
-            draw_glow(cr, content, content_rect[0], content_rect[1], style, spec.text_boxes)
+            draw_glow(cr, content, content_rect[0] - ox, content_rect[1] - oy, style,
+                      () if style.glow_text else
+                      tuple((bx - ox, by - oy, bw, bh) for bx, by, bw, bh in spec.text_boxes))
         draw_edge_shadow(cr, content, content_rect[0], content_rect[1], style, spec.text_boxes)
     if gs.rim is not None:
         rim, rx, ry = gs.rim
-        cr.set_source_surface(rim, rx, ry)
+        cr.set_source_surface(rim, rx - ox, ry - oy)
         cr.paint()
-    return (surf, cx, cy, cw, ch), (gs.field_surface, gs.x, gs.y, gs.w, gs.h)
+    return ((surf, cx + ox, cy + oy, cw, ch),
+            (gs.field_surface, gs.x + ox, gs.y + oy, gs.w, gs.h))
 
 
 def _bleed_curve(style, x):
@@ -556,11 +576,11 @@ def _ring(radius, n):
             for i in range(n)]
 
 
-def _stamp(cr, content, x, y, offsets):
+def _stamp(cr, content, x, y, offsets, rgb=(0.0, 0.0, 0.0)):
     """Union of `content`'s alpha (placed at x, y) shifted by every offset —
     a cheap dilation done by cairo/pixman instead of numpy."""
     cr.push_group()
-    cr.set_source_rgba(0, 0, 0, 1)
+    cr.set_source_rgba(*rgb, 1)
     for dx, dy in offsets:
         cr.mask_surface(content, x + dx, y + dy)
     cr.pop_group_to_source()
@@ -573,10 +593,11 @@ def draw_edge_shadow(cr, content, x, y, style, text_boxes=()):
     plate — clipped to the text boxes, so lines and outlines keep only the
     tight edge."""
     r = style.edge_radius
-    _stamp(cr, content, x, y, [(0, 0)] + _ring(r, 8))
-    cr.paint_with_alpha(style.edge_alpha)
-    _stamp(cr, content, x, y, _ring(r * 2.2, 12))
-    cr.paint_with_alpha(style.edge_alpha * 0.35)
+    if style.edge_alpha > 0:
+        _stamp(cr, content, x, y, [(0, 0)] + _ring(r, 8), style.shadow_rgb)
+        cr.paint_with_alpha(style.edge_alpha)
+        _stamp(cr, content, x, y, _ring(r * 2.2, 12), style.shadow_rgb)
+        cr.paint_with_alpha(style.edge_alpha * 0.35)
     if style.legend == "glyph" and text_boxes:
         cr.save()
         for bx, by, bw, bh in text_boxes:
@@ -584,7 +605,7 @@ def draw_edge_shadow(cr, content, x, y, style, text_boxes=()):
         cr.clip()
         for rad, n, a in ((3, 12, style.core_alpha), (6, 16, style.core_alpha * 0.55),
                           (10, 20, style.core_alpha * 0.3)):
-            _stamp(cr, content, x, y, _ring(rad, n))
+            _stamp(cr, content, x, y, _ring(rad, n), style.shadow_rgb)
             cr.paint_with_alpha(a)
         cr.restore()
 
