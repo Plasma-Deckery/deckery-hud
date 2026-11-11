@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 
 import cairo
 
-from helpers import (_rrect, _txt, _txt_smooth, _txt_size, _pill_row, _fade_glass,
+from helpers import (_rrect, _txt, _txt_icon, _icon_indent, _txt_smooth, _txt_size, _pill_row, _fade_glass,
                      C_MOD, C_LAYER, GLASS_PILL, GLASS_PILL_FG, capture_text_boxes)
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
@@ -877,10 +877,11 @@ def _place_action_text(cr, cx, cy, ha, text, color, note=None):
         _draw_click_icon(cr, which, cx, cy, ha, color)
     else:
         cr.set_source_rgba(*color)
-        _txt(cr, cx, cy, text, size=_LABEL_SIZE, ha=ha, va="mid")
+        _txt_icon(cr, cx, cy, text, size=_LABEL_SIZE, ha=ha, va="mid")
     if note:
         cr.set_source_rgba(*_NOTE_COLOR)
-        _txt(cr, cx, cy + 2 * _NOTE_SHIFT, note, size=_NOTE_SIZE, ha=ha, va="mid")
+        ind = _icon_indent(cr, text, _LABEL_SIZE) * (1 if ha == "left" else -1)
+        _txt(cr, cx + ind, cy + 2 * _NOTE_SHIFT, note, size=_NOTE_SIZE, ha=ha, va="mid")
 
 
 # B-18 note line: smaller and dimmer than the action, so it reads as a
@@ -1711,7 +1712,7 @@ def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, shown=None, pad_row=
     row = 22 if is_four else 26
     anchor_row = 38 if is_four else None
     _callouts(cr, entries, text_side, ax, size=13, row=row, straight=straight,
-              y_nudge=y_nudge, anchor_row=anchor_row)
+              y_nudge=y_nudge, anchor_row=anchor_row, icons=True)
 
     if pad_icon is not None:
         # No legend row at all here on request — no dot, no line out to

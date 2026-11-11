@@ -9,6 +9,7 @@ half, so a second renderer can reuse it instead of recomputing the same
 classification inline.
 """
 
+import unicodedata
 from dataclasses import dataclass
 
 # Gaming Mode trigger is always BTN_BASE (QAM / three-dot button) — hardcoded,
@@ -146,6 +147,25 @@ _K = {
     "KEY_RIGHT":     "→",      "KEY_PAGEUP":    "PgUp",  "KEY_PAGEDOWN":  "PgDn",
     "BTN_LEFT":      "LClick", "BTN_RIGHT":     "RClick",
 }
+
+
+def split_icon(text):
+    """'☀ Brightness Up' → ('☀', 'Brightness Up'); anything else → (None, text).
+
+    B-17: icons live in the config label itself, as a leading Unicode symbol
+    and a space. The HUD doesn't recognise actions — it only splits that
+    prefix off so the split renderer can set it in its own slot. A symbol
+    with no text after it ("⌫", "↑" from _fmt) is the label, not an icon."""
+    head, sep, rest = text.partition(" ")
+    if not sep or not rest.strip() or not head:
+        return None, text
+    # Category So = "other symbol" (☀ ⏯ 🔇 ⏻ ⎙ …); Mn/Cf after the first
+    # character lets a variation selector (U+FE0E/FE0F) or ZWJ ride along.
+    if unicodedata.category(head[0]) != "So":
+        return None, text
+    if any(unicodedata.category(c) not in ("So", "Mn", "Cf") for c in head[1:]):
+        return None, text
+    return head, rest.lstrip()
 
 
 def _fmt(keys):

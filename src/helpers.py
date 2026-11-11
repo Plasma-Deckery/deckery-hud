@@ -19,7 +19,7 @@ import math
 # Canonical source is viewmodel.py (state classification, no GTK dependency);
 # re-exported here so existing call sites (`from helpers import _K, _fmt`)
 # don't need to change.
-from viewmodel import _K, _fmt
+from viewmodel import _K, _fmt, split_icon
 
 
 # ── Text-box capture ─────────────────────────────────────────────────────────
@@ -195,6 +195,50 @@ def _txt_size(cr, text, size=12, bold=False):
         Pango.FontDescription.from_string(f"Adwaita Sans {weight} {size}"))
     lo.set_text(text, -1)
     return lo.get_pixel_size()
+
+
+def _icon_slot(cr, icon, size):
+    """(slot width, gap) for a label icon — fixed per size so the text of a
+    column of labels stays flush whatever each glyph's own width."""
+    return max(_txt_size(cr, icon, size)[0], round(size * 1.5)), round(size * 0.4)
+
+
+def _txt_icon(cr, x, y, text, size=12, ha="left", va="top"):
+    """_txt for a label that may carry a leading icon ("☀ Brightness Up",
+    B-17). The icon sits at the anchor end — the side x is on, which in the
+    split renderer is always the button's side — centred in a fixed slot,
+    the text after it. So the icon reads left of the text on the left half
+    and right of it on the right half, mirrored like the layout. Plain
+    labels and ha="center" draw exactly as _txt."""
+    icon, rest = split_icon(text)
+    if icon is None or ha == "center":
+        _txt(cr, x, y, text, size, ha=ha, va=va)
+        return
+    slot, gap = _icon_slot(cr, icon, size)
+    sign = 1 if ha == "left" else -1
+    _txt(cr, x + sign * slot / 2, y, icon, size, ha="center", va=va)
+    _txt(cr, x + sign * (slot + gap), y, rest, size, ha=ha, va=va)
+
+
+def _icon_indent(cr, text, size=12):
+    """How far _txt_icon pushes the text of `text` past its anchor — 0
+    without an icon. Lets a line under it (a B-18 note) align with the
+    text rather than the icon."""
+    icon, _rest = split_icon(text)
+    if icon is None:
+        return 0
+    slot, gap = _icon_slot(cr, icon, size)
+    return slot + gap
+
+
+def _txt_icon_size(cr, text, size=12):
+    """_txt_size of what _txt_icon draws for `text`."""
+    icon, rest = split_icon(text)
+    if icon is None:
+        return _txt_size(cr, text, size)
+    slot, gap = _icon_slot(cr, icon, size)
+    w, h = _txt_size(cr, rest, size)
+    return slot + gap + w, max(h, _txt_size(cr, icon, size)[1])
 
 
 def _txt_markup(cr, x, y, markup, size=12, ha="left", va="top"):

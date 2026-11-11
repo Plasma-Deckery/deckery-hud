@@ -7,7 +7,8 @@ import math
 from dataclasses import dataclass
 
 from layout import _FX, _FY, _FS, _BX, _BY, _BS, _AX_L, _AX_R
-from helpers import _K, _fmt, _txt, _txt_size, C_MOD, C_LAYER, C_GAME
+from helpers import _K, _fmt, _txt, _txt_size, _txt_icon, _txt_icon_size, _icon_indent, C_MOD, C_LAYER, C_GAME
+from viewmodel import split_icon
 from viewmodel import classify_all, pad_legend_vm
 
 
@@ -168,7 +169,8 @@ def draw_callouts(cr, state):
     _callouts(cr, rb, "right", _AX_R)
 
 
-def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0, anchor_row=None):
+def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0, anchor_row=None,
+              icons=False):
     """straight=True skips the usual auto-stacked vertical centering and
     routes each entry's row at its own dot's y instead — the dot→text line
     degenerates to one straight horizontal segment (no diagonal-then-elbow)
@@ -188,9 +190,17 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
     by `row` itself. Lets a later `row` change compress/expand the gaps
     between rows without moving the top row's own position — pass the
     *previous* row value here when tightening row spacing after the fact,
-    so only the entries below the first one shift."""
+    so only the entries below the first one shift.
+
+    icons: set a label's leading icon ("☀ Brightness Up", B-17) in its own
+    slot at the line's end instead of drawing the label as plain text — see
+    helpers._txt_icon. Split renderer only; classic drops the icon and shows
+    the label exactly as before — its rows already run to the canvas edge
+    (R4's would push its modifier diamond off it)."""
     if not entries:
         return
+    label_txt = _txt_icon if icons else _txt
+    label_size = _txt_icon_size if icons else _txt_size
 
     ROW       = row
     SUB_EXTRA = row   # extra row height reserved for an entry's sub_label line
@@ -302,6 +312,8 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
 
         # ── Label ─────────────────────────────────────────────────────────────
         cr.set_source_rgba(*text_col)
+        if not icons:
+            action = split_icon(action)[1]
         label = f"{name}: {action}" if e.show_name else action
         # When the main row has nothing real to say ("—") and there's a
         # sub_label waiting to take its place, skip the "—" entirely and let
@@ -312,9 +324,9 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         show_main = not (sub_label and action == "—")
         if show_main:
             if side == "left":
-                _txt(cr, ax - 6, ly, label, size, ha="right", va="mid")
+                label_txt(cr, ax - 6, ly, label, size, ha="right", va="mid")
             else:
-                _txt(cr, ax + 6, ly, label, size, ha="left",  va="mid")
+                label_txt(cr, ax + 6, ly, label, size, ha="left",  va="mid")
 
         # ── Gaming Mode sub-label — second line below BTN_BASE's normal
         # callout, unless that callout was skipped above, in which case this
@@ -334,16 +346,17 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         # renderer sets it; classic never does.
         elif e.note and show_main:
             ny = ly + _txt_size(cr, label, size)[1] + 1
+            ind = _icon_indent(cr, label, size) if icons else 0
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.5)
             if side == "left":
-                _txt(cr, ax - 6, ny, e.note, size - 3, ha="right", va="mid")
+                _txt(cr, ax - 6 - ind, ny, e.note, size - 3, ha="right", va="mid")
             else:
-                _txt(cr, ax + 6, ny, e.note, size - 3, ha="left",  va="mid")
+                _txt(cr, ax + 6 + ind, ny, e.note, size - 3, ha="left",  va="mid")
 
         # ── Conflict accent: yellow underline beneath a teal label that is also
         # modifier-activated (app-specific override unlocked by a held modifier) ──
         if conflict:
-            pw, _  = _txt_size(cr, label, size)
+            pw, _  = label_size(cr, label, size)
             _, ph  = _txt_size(cr, "Ag", size)   # stable reference — avoids ☰ metric quirks
             uy = ly + ph / 2 - 1.0
             if side == "left":
@@ -367,7 +380,7 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         # override) — same signal language as the teal label + amber underline
         # used for conflict bindings. Redundant under a teal fill, so skipped.
         if is_avail_mod:
-            pw, _ = _txt_size(cr, label, size)
+            pw, _ = label_size(cr, label, size)
             r = 3
             if side == "left":
                 dot_x = ax - 6 - pw - 8
