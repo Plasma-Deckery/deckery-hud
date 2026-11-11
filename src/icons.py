@@ -59,37 +59,56 @@ def _find_icon_path(name):
     return found
 
 
-def _render_icon_surface(name, size_px):
+def _render_icon_surface(name, px):
     path = _find_icon_path(name)
     if path is None:
         return None
     handle = Rsvg.Handle.new_from_file(path)
-    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, size_px, size_px)
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, px, px)
     cr = cairo.Context(surf)
     rect = Rsvg.Rectangle()
-    rect.x, rect.y, rect.width, rect.height = 0, 0, size_px, size_px
+    rect.x, rect.y, rect.width, rect.height = 0, 0, px, px
     handle.render_document(cr, rect)
     return surf
 
 
-def get_icon_surface(name, size_px):
-    """The cached, pre-rendered (but not yet coloured) icon surface, or None
-    if `name` doesn't resolve in any known theme."""
-    key = (name, size_px)
+def get_icon_surface(name, px):
+    """The cached, pre-rendered (but not yet coloured) icon surface, `px`
+    *device* pixels square, or None if `name` doesn't resolve in any known
+    theme."""
+    key = (name, px)
     if key not in _surface_cache:
-        _surface_cache[key] = _render_icon_surface(name, size_px)
+        _surface_cache[key] = _render_icon_surface(name, px)
     return _surface_cache[key]
 
 
 def draw_icon(cr, name, cx, cy, size_px, color):
     """Paint `name` at `size_px`, centred at (cx, cy), in `color` (RGBA) —
     recoloured via mask_surface, see module docstring. Returns False (and
-    draws nothing) if the icon doesn't resolve, so callers can fall back."""
-    surf = get_icon_surface(name, size_px)
+    draws nothing) if the icon doesn't resolve, so callers can fall back.
+
+    Rendered at the target's own device resolution (the Deck runs at a 1.1
+    device scale, times any scale in the CTM) and placed on whole device
+    pixels, so the SVG's 1px strokes stay crisp instead of being upscaled
+    from a logical-pixel bitmap or resampled at a fractional offset (B-16).
+    The icon may come out a fraction of a device pixel off `size_px`."""
+    ds = cr.get_target().get_device_scale()[0]
+    m = cr.get_matrix()
+    axis_aligned = m.yx == 0 and m.xy == 0 and m.xx == m.yy > 0
+    scale = ds * m.xx if axis_aligned else ds
+    px = max(1, round(size_px * scale))
+    surf = get_icon_surface(name, px)
     if surf is None:
         return False
+    size = px / scale
+    x, y = cx - size / 2, cy - size / 2
+    if axis_aligned:
+        # user -> device, round, and back
+        x = (round((x * m.xx + m.x0) * ds) / ds - m.x0) / m.xx
+        y = (round((y * m.yy + m.y0) * ds) / ds - m.y0) / m.yy
+    surf.set_device_scale(scale, scale)
     cr.save()
     cr.set_source_rgba(*color)
-    cr.mask_surface(surf, cx - size_px / 2, cy - size_px / 2)
+    cr.mask_surface(surf, x, y)
     cr.restore()
     return True
