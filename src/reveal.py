@@ -258,6 +258,14 @@ class GroupAnim:
         self._v = self._from + (to - self._from) * e
         return True
 
+    def jump(self, value, target):
+        """Stand still at `value`, heading nowhere — a frozen copy taking
+        over an element where it was, or the element handing over to one."""
+        self._v = self._from = value
+        self.target = target
+        self.running = False
+        self.style = "fade"
+
     def restart_clock(self, now):
         """Re-anchor a running transition at `now`, from where it began —
         for a stall it shouldn't have spent its time on (the first frame of

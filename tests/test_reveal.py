@@ -351,3 +351,19 @@ def test_deadline_delay_is_clamped():
     assert deadline_delay_ms(1.5, 0.0) == 1501
     assert deadline_delay_ms(0.0, 1.0) == 1
     assert deadline_delay_ms(10 ** 9, 0.0) == 3_600_000
+
+
+def test_anim_jump_then_fade_out_from_there():
+    """A frozen copy takes over an element's visibility where it was."""
+    ghost = GroupAnim(S)
+    ghost.jump(0.5, True)
+    assert ghost.value == 0.5 and not ghost.running
+    ghost.set_target(False, "detector", 0.0)
+    assert ghost.style == "fade"
+    assert ghost.tick(0.14)
+    assert not ghost.tick(0.15)   # half the way: half of fade_out_ms
+    assert ghost.value == 0.0
+    el = GroupAnim(S)
+    el.set_target(True, "full", 0.0)
+    el.jump(0.0, False)
+    assert el.value == 0.0 and not el.target and not el.running

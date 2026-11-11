@@ -361,6 +361,7 @@ class GroupLayer:
     shadow: tuple        # (surface, x, y, w, h): core + edge shadow, final alpha; or None
     bleed: tuple         # (surface, x, y, w, h): pre-curve field, merged across elements; or None
     vms: dict            # the ButtonVMs this element draws with (masked)
+    look: tuple = None   # what it shows, minus mid-press: equal looks = same picture
 
 
 def _cluster_tx(name, sw, sh):
@@ -395,6 +396,13 @@ def _shown_buttons(element, content):
 # button of the cluster, since rows an element hides still take part in
 # the legend layout — plus its own presses, its pad and its content.
 _group_cache = {}
+
+
+def _look(content, vms_key, pv_key):
+    """What an element shows, for win.py to tell a new picture from the same
+    one: a press doesn't count — it is feedback, not a change of meaning, and
+    crossfading it would lag the press."""
+    return (content, {k: replace(v, is_active=False) for k, v in vms_key.items()}, pv_key)
 
 
 def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_press, dev_scale):
@@ -432,7 +440,7 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
     if c is not None and debug_enabled():
         _diff_vms(name, c["vms"], vms_key)
     layer = GroupLayer(name=name, side=side, surface=surf, rect=rect, tx=tx,
-                       shadow=shadow, bleed=bleed, vms=gvms)
+                       shadow=shadow, bleed=bleed, vms=gvms, look=_look(content, vms_key, pv_key))
     _group_cache[name] = {"key": key, "vms": vms_key, "layer": layer}
     return layer
 
@@ -510,7 +518,7 @@ def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
                                          rect, dev_scale)
         shadow = _with_glass_shadow(shadow, cap.glass_boxes)
         layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
-                           shadow=shadow, bleed=bleed, vms={})
+                           shadow=shadow, bleed=bleed, vms={}, look=key)
         _center_cache.update(key=key, layer=layer)
     return _center_cache["layer"]
 

@@ -49,3 +49,8 @@ def test_round_two_defaults():
     """Live round 2: the first reveal times felt far too long — halved."""
     s = RevealSettings()
     assert (s.hold_ms, s.gesture_hold_ms, s.release_ms) == (750, 750, 250)
+
+
+def test_round_two_crossfade():
+    """An element changing in place should read as old out, new in."""
+    assert RevealSettings().crossfade_ms == 200
