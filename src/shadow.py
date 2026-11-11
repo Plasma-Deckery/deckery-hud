@@ -97,8 +97,25 @@ PRESETS = {
                          legend="line", legend_padx=14, legend_pady=8,
                          edge_radius=1.5, edge_alpha=0.55,
                          tint=True, rim_alpha=0.5),
+    # hauch with a solid dark halo: every shape and legend line wrapped in a
+    # wide, dark plate (grown 16 px, ~3/4 opaque), then the same soft
+    # falloff — for bright pages and games, where hauch's light cloud left
+    # the items standing on almost nothing.
+    "hauch-dicht": ShadowStyle(core_grow=16, core_blur=14, core_alpha=0.78,
+                               bleed_grow=28, bleed_blur=90, bleed_alpha=0.48,
+                               merge_lo=0.0, merge_hi=0.45,
+                               legend="line", legend_padx=24, legend_pady=14,
+                               edge_radius=1.5, edge_alpha=0.55,
+                               tint=True, rim_alpha=0.5),
+    # Heavier still: a bigger, nearly opaque halo.
+    "hauch-satt": ShadowStyle(core_grow=22, core_blur=18, core_alpha=0.85,
+                              bleed_grow=36, bleed_blur=90, bleed_alpha=0.55,
+                              merge_lo=0.0, merge_hi=0.40,
+                              legend="line", legend_padx=28, legend_pady=16,
+                              edge_radius=1.5, edge_alpha=0.55,
+                              tint=True, rim_alpha=0.5),
 }
-DEFAULT_PRESET = "hauch"
+DEFAULT_PRESET = "hauch-dicht"
 
 
 def style_from_env():
