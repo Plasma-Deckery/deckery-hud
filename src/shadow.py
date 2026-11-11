@@ -68,6 +68,15 @@ class ShadowStyle:
     edge_alpha: float
     tint: bool = False   # core + bleed in a dark version of the legend colour
     rim_alpha: float = 0.0
+    # Tint and rim colour (B-20 themes): how deep and how saturated the dark
+    # shadow colour under a coloured legend is, and how saturated its rim.
+    tint_value: float = 0.26
+    tint_saturation: float = 0.90
+    rim_saturation: float = 0.7
+    # Neon glow: a soft halo in the legend's own colour around coloured
+    # strokes and text, under the tight edge. 0 = none.
+    glow_alpha: float = 0.0
+    glow_radius: float = 6.0
 
 
 PRESETS = {
@@ -214,22 +223,24 @@ def _mix(a, b, k):
     return tuple(x * (1 - k) + y * k for x, y in zip(a, b))
 
 
-def dark_of(colour):
+def dark_of(colour, style=None):
     """The shadow colour under a legend of `colour`."""
     k = _chroma(colour)
     if k <= 0:
         return _NEUTRAL_DARK
     h, _s, _v = colorsys.rgb_to_hsv(*colour)
-    return _mix(_NEUTRAL_DARK, colorsys.hsv_to_rgb(h, 0.90, 0.26), k)
+    sat, val = (style.tint_saturation, style.tint_value) if style else (0.90, 0.26)
+    return _mix(_NEUTRAL_DARK, colorsys.hsv_to_rgb(h, sat, val), k)
 
 
-def light_of(colour):
+def light_of(colour, style=None):
     """The rim colour for shapes whose legend is `colour`."""
     k = _chroma(colour)
     if k <= 0:
         return _NEUTRAL_LIGHT
     h, s, _v = colorsys.rgb_to_hsv(*colour)
-    return _mix(_NEUTRAL_LIGHT, colorsys.hsv_to_rgb(h, min(s, 0.7), 1.0), k)
+    cap = style.rim_saturation if style else 0.7
+    return _mix(_NEUTRAL_LIGHT, colorsys.hsv_to_rgb(h, min(s, cap), 1.0), k)
 
 
 def neutral_rgb(style):
@@ -364,7 +375,7 @@ def group_shadow(spec, style):
                   style.legend_padx + 4, style.legend_pady + 3)
     field = _blur(field, style.bleed_blur / _FIELD_DOWN)
 
-    tint = _tint_map(spec, x0, y0, w, h, _FIELD_DOWN) if style.tint else None
+    tint = _tint_map(spec, x0, y0, w, h, _FIELD_DOWN, style) if style.tint else None
     gs = GroupShadow(x0, y0, w, h, _alpha_surface(field, tint), core_rect, _alpha_surface(core),
                      _alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
                      if tint is not None else None,
@@ -375,11 +386,11 @@ def group_shadow(spec, style):
     return gs
 
 
-def _tint_map(spec, x0, y0, w, h, down):
+def _tint_map(spec, x0, y0, w, h, down, style=None):
     """Straight (h, w, 3) shadow colour over an element's grid: near a legend
     line its own dark colour, elsewhere the element's (see dark_of)."""
     mw, mh = max(1, int(math.ceil(w / down))), max(1, int(math.ceil(h / down)))
-    base = dark_of(element_colour(spec))
+    base = dark_of(element_colour(spec), style)
     num = np.empty((mh, mw, 3), np.float32)
     num[...] = base
     num *= 1e-3
@@ -392,7 +403,7 @@ def _tint_map(spec, x0, y0, w, h, down):
     # Lines of one colour share one mask and one blur.
     by_colour = {}
     for box, colour in zip(spec.text_boxes, spec.text_colours or (None,) * len(spec.text_boxes)):
-        by_colour.setdefault(dark_of(colour), []).append(box)
+        by_colour.setdefault(dark_of(colour, style), []).append(box)
     for dark, boxes in by_colour.items():
         m = _mask(GroupShadowSpec(text_boxes=tuple(boxes)), x0, y0, w, h, down, 0, 0, 0)
         f = _blur(m, 10 / down) * 6
@@ -412,7 +423,7 @@ def _rim(spec, style):
     sil = _mask(GroupShadowSpec(spec.parts, spec.rrects), x0, y0, w, h, 1, 0, 0, 0)
     ring = np.clip(_blur(sil, 1.2) * 2.0, 0, 1) * (1 - sil) * style.rim_alpha
     rgb = np.empty(ring.shape + (3,), np.float32)
-    rgb[...] = light_of(element_colour(spec))
+    rgb[...] = light_of(element_colour(spec), style)
     return _alpha_surface(ring, rgb), x0, y0
 
 
@@ -456,6 +467,8 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
         cr.set_source_rgb(0, 0, 0)
     cr.mask(_placed(gs.core_surface, cx, cy, _CORE_DOWN))
     if content is not None:
+        if style.glow_alpha > 0:
+            draw_glow(cr, content, content_rect[0], content_rect[1], style, spec.text_boxes)
         draw_edge_shadow(cr, content, content_rect[0], content_rect[1], style, spec.text_boxes)
     if gs.rim is not None:
         rim, rx, ry = gs.rim
@@ -564,3 +577,47 @@ def draw_edge_shadow(cr, content, x, y, style, text_boxes=()):
             _stamp(cr, content, x, y, _ring(rad, n))
             cr.paint_with_alpha(a)
         cr.restore()
+
+
+# ── neon glow ─────────────────────────────────────────────────────────────
+
+_GLOW_DOWN = 2
+
+
+def draw_glow(cr, content, x, y, style, text_boxes=()):
+    """Soft halo in the content's own colour around its coloured strokes —
+    outlines, callout lines, dots: the neon tubes. Text casts none (a halo
+    fills the gaps between letters and blurs them) and neither does white
+    or grey ink. `content` is a cached layer's ARGB surface placed at
+    (x, y); the halo is computed at 1/_GLOW_DOWN of its device pixels."""
+    content.flush()
+    sx = content.get_device_scale()[0]
+    w, h = content.get_width(), content.get_height()
+    px = np.ndarray((h, content.get_stride() // 4, 4), np.uint8,
+                    content.get_data())[:h:_GLOW_DOWN, :w:_GLOW_DOWN].astype(np.float32) / 255.0
+    a = px[..., 3]
+    rgb = px[..., [2, 1, 0]] / np.maximum(a, 1e-6)[..., None]
+    k = np.clip((rgb.max(axis=2) - rgb.min(axis=2) - 0.12) / 0.25, 0.0, 1.0) * a
+    for bx, by, bw, bh in text_boxes:
+        # text boxes are in the same logical px as (x, y)
+        f = sx / _GLOW_DOWN
+        c0, r0 = max(0, int((bx - x) * f) - 1), max(0, int((by - y) * f) - 1)
+        c1, r1 = int((bx + bw - x) * f) + 2, int((by + bh - y) * f) + 2
+        k[r0:r1, c0:c1] = 0
+    if not k.any():
+        return
+    sigma = style.glow_radius * sx / _GLOW_DOWN
+    kb = _blur(k, sigma)
+    col = np.stack([_blur(rgb[..., i] * k, sigma) for i in range(3)], axis=2)
+    col /= np.maximum(kb, 1e-6)[..., None]
+    # Full brightness, so the halo reads as light, not as a stain.
+    col /= np.maximum(col.max(axis=2), 1e-6)[..., None]
+    halo = _alpha_surface(np.clip(kb * 4.0, 0.0, 1.0) * style.glow_alpha, col)
+    cr.save()
+    cr.translate(x, y)
+    cr.scale(_GLOW_DOWN / sx, _GLOW_DOWN / sx)
+    pat = cairo.SurfacePattern(halo)
+    pat.set_filter(cairo.FILTER_BILINEAR)
+    cr.set_source(pat)
+    cr.paint()
+    cr.restore()

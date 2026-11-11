@@ -20,17 +20,18 @@ from dataclasses import dataclass, replace
 import cairo
 
 from helpers import (_rrect, _txt, _txt_icon, _icon_indent, _txt_smooth, _txt_size, _pill_row, _fade_glass,
-                     C_MOD, C_LAYER, GLASS_PILL, GLASS_PILL_FG, capture_text_boxes)
+                     capture_text_boxes)
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
 from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
 from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
 from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
-from parts import draw_part, part_bbox, clip_to_part, part_subpaths, _DEFAULT_COLOR, _DEFAULT_LW
+from parts import draw_part, part_bbox, clip_to_part, part_subpaths
 from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
                     neutral_rgb, style_from_env)
 import icons
 import pill_shadow
+import theme
 from reveal import FULL
 from elements import ELEMENTS, ELEMENT_IDS, side_of
 from settings import dbg, debug_enabled
@@ -67,7 +68,6 @@ _PART_BTN = {
     "paddle_r4": "BTN_GRIPR", "paddle_r5": "BTN_GRIPR2",
 }
 
-_ACTIVE_FILL = (1.0, 1.0, 1.0, 0.58)
 
 # Buttons that now carry their own in-shape label (see _draw_in_shape_labels)
 # — when there's nothing beyond the name to show for one of these (unbound,
@@ -228,7 +228,9 @@ _ABXY_RADIUS = 15.07
 # with it. Their wide soft clouds (the bleed) merge into each other instead
 # of stacking. A real blur-behind would need compositor support this stack
 # doesn't have (gtk4-layer-shell doesn't expose KDE's blur protocol).
-SHADOW_STYLE = style_from_env()
+def shadow_style():
+    """The active theme's shadow style (B-20)."""
+    return theme.current().shadow_style()
 
 
 def element_box(element, tx):
@@ -292,10 +294,10 @@ def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False):
         # rather than letting the legend's shadow blink out for the press.
         return hit[1]
     spec = _element_shadow_spec(element, tx, cap.boxes, rect, cap.colours)
-    key = (spec, tuple(cap.texts), SHADOW_STYLE, dev_scale)
+    key = (spec, tuple(cap.texts), shadow_style(), dev_scale)
     if hit is not None and hit[0] == key:
         return hit[1]
-    layers = group_shadow_layers(spec, SHADOW_STYLE, surf, rect, dev_scale)
+    layers = group_shadow_layers(spec, shadow_style(), surf, rect, dev_scale)
     _shadow_layer_cache[element.id] = (key, layers)
     return layers
 
@@ -415,7 +417,7 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
     pv_key = ((pv.lpad_label, pv.lpad_active, pv.gesture) if cluster == "l_pad" else
               (pv.rpad_label, pv.rpad_active, pv.gesture) if cluster == "r_pad" else None)
     key = (content, frozenset(k for k in active_press if k in element.buttons), pv_key,
-           sw, sh, dev_scale)
+           sw, sh, dev_scale, theme.current())
     c = _group_cache.get(name)
     if c is not None and c["key"] == key and c["vms"] == vms_key:
         return c["layer"]
@@ -499,7 +501,7 @@ def _with_glass_shadow(shadow, boxes):
     cr.set_source_surface(surf, 0, 0)
     cr.paint()
     cr.translate(-x, -y)
-    pill_shadow.paint(cr, boxes, rgb=neutral_rgb(SHADOW_STYLE))
+    pill_shadow.paint(cr, boxes, rgb=neutral_rgb(shadow_style()), strength=theme.current().pill_shadow)
     return out, x, y, w, h
 
 
@@ -507,7 +509,7 @@ def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
     ctx = state.get("context") or {}
     outs = tuple(e.get("key", "") if isinstance(e, dict) else e
                  for e in ctx.get("active_outputs") or ())
-    key = (sw, sh, dev_scale, tuple(ctx.get("config_stack") or ()),
+    key = (sw, sh, dev_scale, theme.current(), tuple(ctx.get("config_stack") or ()),
            tuple(ctx.get("held_modifiers") or ()), bool(ctx.get("paused", False)), outs)
     if _center_cache["key"] != key:
         with capture_text_boxes() as cap:
@@ -703,13 +705,13 @@ def _draw_gesture_connector(cr, l_tx, r_tx, pv, sw):
     cy = (ly + ry) / 2   # the two should already coincide; average absorbs any drift
     cx = sw / 2
 
-    # Amber (C_MOD), matching the old per-pad row's own colour while a
+    # Amber (theme.modifier), matching the old per-pad row's own colour while a
     # gesture is active (active_mod=pv.gesture there — see _callouts()'s
     # amber tier) — this connector only ever draws while pv.gesture is
     # True, so it's always that tier, not the plain white a bound-but-
     # ungestured pad legend row would use.
-    line_col = (*C_MOD, 0.85)
-    text_col = (*C_MOD, 1.0)
+    line_col = (*theme.current().modifier, 0.85)
+    text_col = (*theme.current().modifier, 1.0)
     label = pv.lpad_label     # == pv.rpad_label ("Gestures") while gesturing
 
     tw, _th = _txt_size(cr, label, 13)
@@ -761,7 +763,7 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
     # The bleed goes first and as one merged pass (see shadow.paint_bleed).
     paint_bleed(cr, [(layers["groups"][n].bleed, dx, opacity)
                      for n, (opacity, dx, _c) in groups.items() if layers["groups"][n].bleed],
-                sw, sh, SHADOW_STYLE)
+                sw, sh, shadow_style())
     for name, (opacity, dx, _c) in groups.items():
         if layers["groups"][name].shadow is None:
             continue
@@ -810,18 +812,19 @@ def _avail_mod_color(vm):
     the "available, not yet held" case."""
     if not vm:
         return None
-    # Alpha kept close to _DEFAULT_COLOR's own 0.5 (not the 0.9 the diamond
+    # Alpha kept close to the outline's own 0.5 (not the 0.9 the diamond
     # used) — the diamond was a small separate mark, where higher contrast
     # against its background made sense; this colours the button's own
-    # outline, already drawn at _DEFAULT_LW, and 0.9 there reads as a bolder
+    # outline, already drawn at the outline width, and 0.9 there reads as a bolder
     # stroke, not just a different hue, next to every default-coloured
     # outline sitting at 0.5 right beside it.
+    t = theme.current()
     if vm.is_avail_virt_mod and vm.is_avail_app_mod:
-        return (*C_LAYER, 0.6)
+        return (*t.layer, 0.6)
     if vm.is_avail_virt_mod:
-        return (1.0, 1.0, 1.0, 0.6)
+        return (*t.ink, 0.6)
     if vm.is_avail_mod:
-        return (*C_MOD, 0.6)
+        return (*t.mod_rgb(vm.mod_keys), 0.6)
     return None
 
 
@@ -830,19 +833,20 @@ def _active_fill_color(vm):
     external legend's own colour coding (callouts.py's _callouts: amber for
     a modifier-driven press — held modifier or a firing combo — teal for an
     app-layer override, white for a plain press with neither) instead of
-    the flat white _ACTIVE_FILL always used before. Conflict (both at once)
+    the flat white theme.active_fill always used before. Conflict (both at once)
     follows the legend's own call there too: teal wins, amber is secondary
     (shown as an underline in the legend; there's no equivalent secondary
     mark on a filled shape, so it's just teal here). Same alpha as
-    _ACTIVE_FILL in every case — only the hue changes."""
+    theme.active_fill in every case — only the hue changes."""
     if not vm or not vm.is_active:
         return None
     amber = vm.active_mod or (vm.is_combo and not vm.is_hint)
+    t = theme.current()
     if vm.layer_override:
-        return (*C_LAYER, 0.58)
+        return (*t.layer, t.active_fill[3])
     if amber:
-        return (*C_MOD, 0.58)
-    return _ACTIVE_FILL
+        return (*t.mod_rgb(vm.mod_keys), t.active_fill[3])
+    return t.active_fill
 
 
 def _action_text_color(vm):
@@ -853,14 +857,15 @@ def _action_text_color(vm):
     returns a colour rather than None: this text is drawn whenever the
     button is *bound*, not only while it's actively pressed, so "not
     active" isn't "nothing to draw" here the way it is for the fill."""
+    t = theme.current()
     if not vm:
-        return (1.0, 1.0, 1.0, 0.9)
+        return (*t.ink, 0.9)
     amber = vm.active_mod or (vm.is_combo and not vm.is_hint)
     if vm.layer_override:
-        return (*C_LAYER, 1.0)
+        return (*t.layer, 1.0)
     if amber:
-        return (*C_MOD, 1.0)
-    return (1.0, 1.0, 1.0, 0.9)
+        return (*t.mod_rgb(vm.mod_keys), 1.0)
+    return (*t.ink, 0.9)
 
 
 # Text that _K (viewmodel.py) produces for a plain BTN_LEFT/BTN_RIGHT
@@ -887,7 +892,7 @@ def _place_action_text(cr, cx, cy, ha, text, color, note=None):
         cr.set_source_rgba(*color)
         _txt_icon(cr, cx, cy, text, size=_LABEL_SIZE, ha=ha, va="mid")
     if note:
-        cr.set_source_rgba(*_NOTE_COLOR)
+        cr.set_source_rgba(*theme.current().ink, _NOTE_ALPHA)
         ind = _icon_indent(cr, text, _LABEL_SIZE) * (1 if ha == "left" else -1)
         _txt(cr, cx + ind, cy + 2 * _NOTE_SHIFT, note, size=_NOTE_SIZE, ha=ha, va="mid")
 
@@ -896,10 +901,10 @@ def _place_action_text(cr, cx, cy, ha, text, color, note=None):
 # remark on how to use it rather than a second action.
 _NOTE_SHIFT = 9
 _NOTE_SIZE = _LABEL_SIZE - 3
-_NOTE_COLOR = (1.0, 1.0, 1.0, 0.5)
+_NOTE_ALPHA = 0.5
 
 
-_PAD_DISABLED_COLOR = (1.0, 1.0, 1.0, 0.26)   # dimmer than _DEFAULT_COLOR's 0.5 alpha —
+_PAD_DISABLED_ALPHA = 0.26   # dimmer than the outline's own 0.5 alpha —
                                                 # a disabled pad's own border reads as such
                                                 # on the shape itself, not just via its
                                                 # (now-hidden) legend text
@@ -961,12 +966,12 @@ def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(),
         btn_key = _PART_BTN.get(part_name)
         vm = vms[btn_key] if btn_key else None
         fill_color = _active_fill_color(vm)
-        outline_color = _avail_mod_color(vm) or _DEFAULT_COLOR
+        outline_color = _avail_mod_color(vm) or theme.current().outline
         if pv is not None and (
             (part_name == "trackpad_l" and pv.lpad_label == "Disabled") or
             (part_name == "trackpad_r" and pv.rpad_label == "Disabled")
         ):
-            outline_color = _PAD_DISABLED_COLOR
+            outline_color = (*theme.current().outline[:3], _PAD_DISABLED_ALPHA)
         pox, poy = ox, oy
         if part_name in _PART_OFFSET:
             dx, dy = _PART_OFFSET[part_name]
@@ -990,7 +995,7 @@ def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(),
                 _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
                 cr.fill()
             cr.set_source_rgba(*outline_color)
-            cr.set_line_width(_DEFAULT_LW)
+            cr.set_line_width(theme.current().outline_width)
             _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
             cr.stroke()
         else:
@@ -1060,7 +1065,7 @@ def _draw_in_shape_labels(cr, name, ox, oy, scale, vms, stick=True, pad=True):
         else:
             cx, ha = ox + px1 * scale - margin, "right"
         cy = oy + py0 * scale + margin
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.75)
+        cr.set_source_rgba(*theme.current().ink, 0.75)
         _txt(cr, cx, cy, pad_label, size=9, ha=ha, va="top")
 
 
@@ -1171,7 +1176,7 @@ def _draw_shoulder_fills(cr, name, ox, oy, scale, vms, only=None):
     half_colors = {}
     for btn_key, poly in polys.items():
         vm = vms[btn_key]
-        color = _avail_mod_color(vm) or _DEFAULT_COLOR
+        color = _avail_mod_color(vm) or theme.current().outline
         half_colors[btn_key] = color
 
         def _clip_to_poly():
@@ -1217,7 +1222,8 @@ def _draw_shoulder_fills(cr, name, ox, oy, scale, vms, only=None):
     # "shoulder_l"/"shoulder_r"'s path) — coloured to match whichever half
     # isn't just the default, so it reads as belonging to that half's
     # highlight instead of looking like a leftover plain line across it.
-    divider_color = next((c for c in half_colors.values() if c != _DEFAULT_COLOR), _DEFAULT_COLOR)
+    outline = theme.current().outline
+    divider_color = next((c for c in half_colors.values() if c != outline), outline)
     if only is None:
         draw_part(cr, split_part, ox, oy, scale, color=divider_color)
     else:
@@ -1242,7 +1248,7 @@ def _draw_shoulder_fills(cr, name, ox, oy, scale, vms, only=None):
         px, py = _BTN_POS_OVERRIDE[btn_key]
         label_cx = ox + px * scale
         label_cy = oy + py * scale
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9)
+        cr.set_source_rgba(*theme.current().ink, 0.9)
         _txt(cr, label_cx, label_cy, _BTNS[btn_key][3], size=_LABEL_SIZE, ha="center", va="mid")
 
 
@@ -1402,7 +1408,7 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
         cr.translate(-cx, -cy)
 
     fill_color = _active_fill_color(vm)
-    outline_color = _avail_mod_color(vm) or _DEFAULT_COLOR
+    outline_color = _avail_mod_color(vm) or theme.current().outline
 
     if part_name in _FRAGMENTED_FILL_PARTS:
         rx, ry = pox + x0 * scale, poy + y0 * scale
@@ -1412,7 +1418,7 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
             _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
             cr.fill()
         cr.set_source_rgba(*outline_color)
-        cr.set_line_width(_DEFAULT_LW)
+        cr.set_line_width(theme.current().outline_width)
         _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
         cr.stroke()
     else:
@@ -1420,12 +1426,12 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
                   fill_color=fill_color)
 
     if part_name in ("btn_y", "btn_x", "btn_b", "btn_a"):
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9)
+        cr.set_source_rgba(*theme.current().ink, 0.9)
         _txt_smooth(cr, cx, cy, _BTNS[btn_key][3], size=_LABEL_SIZE)
     elif part_name in ("stick_l_fixed", "stick_r_fixed"):
         # Centred *under* the stick's own fixed outer ring, not on it — the
         # ring has no interior face to put text on like a flat button.
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9)
+        cr.set_source_rgba(*theme.current().ink, 0.9)
         _txt(cr, cx, poy + y1 * scale + 10, _BTNS[btn_key][3], size=_LABEL_SIZE, ha="center", va="top")
     elif part_name.startswith("paddle_"):
         cr.set_source_rgba(*_action_text_color(vm))
@@ -1438,10 +1444,10 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
             else:
                 _place_action_text(cr, pox + x0 * scale - gap, cy, "right", vm.action, _action_text_color(vm), vm.note)
     elif part_name == "pill_mode":
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9)
+        cr.set_source_rgba(*theme.current().ink, 0.9)
         _txt_smooth(cr, cx, cy, "STEAM", size=8.0)
     elif part_name == "pill_base":
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9)
+        cr.set_source_rgba(*theme.current().ink, 0.9)
         _txt_smooth(cr, cx, cy, "···", size=13.0, bold=True)
     elif part_name == "pill_start":
         # Drawn as actual bars, not the "☰" glyph — that pill is far
@@ -1451,7 +1457,7 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
         # bbox always fits exactly, regardless of font quirks.
         w, h = (x1 - x0) * scale, (y1 - y0) * scale
         half_w, gap, lw = w * 0.17, h * 0.26, max(1.0, h * 0.11)
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9)
+        cr.set_source_rgba(*theme.current().ink, 0.9)
         cr.set_line_width(lw)
         cr.set_line_cap(cairo.LineCap.ROUND)
         for i in (-1, 0, 1):
@@ -1630,7 +1636,7 @@ def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, shown=None, pad_row=
             is_avail_app_mod=False if has_inshape else vm.is_avail_app_mod,
             is_avail_virt_mod=False if has_inshape else vm.is_avail_virt_mod,
             sub_label=vm.sub_label, sub_active=vm.sub_active, note=vm.note,
-            is_hint=vm.is_hint,
+            is_hint=vm.is_hint, mod_rgb=theme.current().mod_rgb(vm.mod_keys),
             # QAM's own in-shape label is three small dots — about the
             # same size as this marker dot, so at BTN_BASE's position
             # (dead centre of the pill, same spot the label sits) the
@@ -1735,7 +1741,7 @@ def _draw_cluster_callouts(cr, side, name, tx, vms, pv, ax, shown=None, pad_row=
         else:
             icon_x, icon_ha = bx - gap, "right"
         _draw_mouse_icon(cr, icon_x, by, icon_ha,
-                          (1.0, 1.0, 1.0, 1.0 if active else 0.6),
+                          (*theme.current().ink, 1.0 if active else 0.6),
                           size=_MOUSE_SIZE * 2)
 
 
@@ -1751,21 +1757,23 @@ def _draw_center(cr, state, center, open_t):
 
     ctx = state.get("context") or {}
     stack = ctx.get("config_stack") or ["—"]
-    mods = [_btn_short(m) for m in ctx.get("held_modifiers", [])]
+    held = ctx.get("held_modifiers", [])
+    mods = [_btn_short(m) for m in held]
     paused = ctx.get("paused", False)
+    t = theme.current()
 
     cx = (x0 + x1) / 2
 
     # Title
-    cr.set_source_rgba(1, 1, 1, 1.0 * alpha)
+    cr.set_source_rgba(*t.ink, 1.0 * alpha)
     _txt(cr, cx, y0 + 28, "Deckery HUD", size=15, bold=True, ha="center", va="mid")
 
     # Pause/Resume badge
     if paused:
-        r, g, b = 1.0, 0.78, 0.2
+        r, g, b = t.status_paused
         label = "⏸  Controls Paused"
     else:
-        r, g, b = 0.27, 0.87, 0.44
+        r, g, b = t.status_active
         label = "⏵  Controls Active"
     bx, by, badge_w, badge_h = center_badge_rect(center)
     cr.set_source_rgba(r, g, b, 0.14 * alpha)
@@ -1777,14 +1785,14 @@ def _draw_center(cr, state, center, open_t):
     # Breadcrumb
     labels = stack + mods
     styles = (
-        [((1, 1, 1, 0.06 * alpha), (1, 1, 1, 0.80 * alpha))]
-        + [((*C_LAYER, alpha), (0, 0, 0, alpha))] * max(0, len(stack) - 1)
-        + [((*C_MOD, alpha), (0, 0, 0, alpha))] * len(mods)
+        [((*t.ink, 0.06 * alpha), (*t.ink, 0.80 * alpha))]
+        + [((*t.layer, alpha), (0, 0, 0, alpha))] * max(0, len(stack) - 1)
+        + [((*t.mod_rgb((m,)), alpha), (0, 0, 0, alpha)) for m in held]
     )
     n_gaps = max(0, len(labels) - 1)
     seps = ["›" if i < len(stack) else "" for i in range(n_gaps)]
     _pill_row(cr, cx, by + badge_h + 26, labels, sep=seps, size=10,
-              sep_rgba=(1.0, 1.0, 1.0, 0.55 * alpha), ha="center", styles=styles)
+              sep_rgba=(*t.ink, 0.55 * alpha), ha="center", styles=styles)
 
     # Active outputs strip — vertically centred on screen (not stacked under
     # the breadcrumb with everything else up top), on request.
@@ -1798,7 +1806,7 @@ def _draw_center(cr, state, center, open_t):
         # "LClick"/"RClick" text; every other key gets a small keyboard
         # glyph *before* its own text instead (Control, Alt, Brightness
         # Up/Down, ...) — on request.
-        icon_color = (*GLASS_PILL_FG[:3], GLASS_PILL_FG[3] * alpha)
+        icon_color = (*t.pill_fg[:3], t.pill_fg[3] * alpha)
         def _click_cb(which):
             def draw(cr, ccx, ccy):
                 _draw_click_icon(cr, which, ccx, ccy, "center", icon_color, size=_PILL_ICON_SIZE)
@@ -1810,7 +1818,7 @@ def _draw_center(cr, state, center, open_t):
         pill_icons = [_click_cb(k) if k in _CLICK_ICON_NAME else None for k in outputs]
         pill_prefix_icons = [None if k in _CLICK_ICON_NAME else _kbd_cb() for k in outputs]
         _pill_row(cr, cx, (y0 + y1) / 2, out_labels, sep="+", size=10,
-                  glass=_fade_glass(GLASS_PILL, alpha), fg=icon_color,
+                  glass=_fade_glass(t.glass, alpha), fg=icon_color,
                   sep_rgba=(0.5, 0.5, 0.52, 0.9 * alpha), ha="center",
                   icons=pill_icons, prefix_icons=pill_prefix_icons,
                   icon_size=_PILL_ICON_SIZE)
@@ -1818,10 +1826,10 @@ def _draw_center(cr, state, center, open_t):
     # Close affordance
     crx, cry, crw, crh = center_close_rect(center)
     ccx, ccy, cr_r = crx + crw / 2, cry + crh / 2, crw / 2
-    cr.set_source_rgba(1, 1, 1, 0.18 * alpha)
+    cr.set_source_rgba(*t.ink, 0.18 * alpha)
     cr.arc(ccx, ccy, cr_r, 0, math.tau)
     cr.fill()
-    cr.set_source_rgba(1, 1, 1, 0.7 * alpha)
+    cr.set_source_rgba(*t.ink, 0.7 * alpha)
     cr.set_line_width(1.5)
     for dx, dy in ((-4, -4), (4, 4)), ((-4, 4), (4, -4)):
         cr.move_to(ccx + dx[0], ccy + dx[1])
@@ -1830,8 +1838,8 @@ def _draw_center(cr, state, center, open_t):
 
     # Switch to the classic design — mirrors the close button on the left.
     kx, ky, kw, kh = center_classic_rect(center)
-    cr.set_source_rgba(1, 1, 1, 0.12 * alpha)
+    cr.set_source_rgba(*t.ink, 0.12 * alpha)
     _rrect(cr, kx, ky, kw, kh, kh / 2)
     cr.fill()
-    cr.set_source_rgba(1, 1, 1, 0.7 * alpha)
+    cr.set_source_rgba(*t.ink, 0.7 * alpha)
     _txt(cr, kx + kw / 2, ky + kh / 2, "Classic", size=10, ha="center", va="mid")

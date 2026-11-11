@@ -45,6 +45,9 @@ class LayoutSettings:
     design: str = field(default="classic", metadata=_meta(
         'Welches Design: "split" (neu) oder "classic".',
         choices=("classic", "split")))
+    theme: str = field(default="neon", metadata=_meta(
+        'Farben und Effekte im Split-Design: "neon", "neon-kraeftig", "ruhig", '
+        '"modifier" oder eigene aus ~/.config/deckery-hud/themes/.'))
 
 
 @dataclass(frozen=True)
