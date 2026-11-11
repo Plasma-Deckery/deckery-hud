@@ -25,7 +25,8 @@ from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
 from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
 from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
-from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
+from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
+                          center_theme_rect, theme_panel_rect)
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths
 from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
                     neutral_rgb, style_from_env)
@@ -1843,3 +1844,40 @@ def _draw_center(cr, state, center, open_t):
     cr.fill()
     cr.set_source_rgba(*t.ink, 0.7 * alpha)
     _txt(cr, kx + kw / 2, ky + kh / 2, "Classic", size=10, ha="center", va="mid")
+
+    # Start the theme mode (B-20) — beside the close button.
+    kx, ky, kw, kh = center_theme_rect(center)
+    cr.set_source_rgba(*t.ink, 0.12 * alpha)
+    _rrect(cr, kx, ky, kw, kh, kh / 2)
+    cr.fill()
+    cr.set_source_rgba(*t.ink, 0.7 * alpha)
+    _txt(cr, kx + kw / 2, ky + kh / 2, "Theme", size=10, ha="center", va="mid")
+
+
+def theme_panel(cr, sw, sh, label, index, count):
+    """The theme mode's panel (B-20): which theme is previewed, where it is
+    in the list, and how to leave. Drawn in the previewed theme itself.
+    Returns its rect, for the caller to clip a live layer to."""
+    t = theme.current()
+    name = f"‹   {label}   ›"
+    tw, _th = _txt_size(cr, name, 18, bold=True)
+    x, y, w, h = theme_panel_rect(sw, sh, max(300, tw + 80))
+    cr.set_source_rgba(0.04, 0.04, 0.06, 0.82)
+    _rrect(cr, x, y, w, h, 18)
+    cr.fill_preserve()
+    cr.set_source_rgba(*t.ink, 0.18)
+    cr.set_line_width(1.0)
+    cr.stroke()
+    cx = x + w / 2
+    cr.set_source_rgba(*t.ink, 0.55)
+    _txt(cr, cx, y + 18, "THEME", size=9, bold=True, ha="center", va="mid")
+    cr.set_source_rgba(*t.ink, 1.0)
+    _txt(cr, cx, y + 46, name, size=18, bold=True, ha="center", va="mid")
+    gap = 14
+    for i in range(count):
+        cr.set_source_rgba(*t.ink, 1.0 if i == index else 0.3)
+        cr.arc(cx + (i - (count - 1) / 2) * gap, y + 72, 3.5 if i == index else 2.5, 0, math.tau)
+        cr.fill()
+    cr.set_source_rgba(*t.ink, 0.6)
+    _txt(cr, cx, y + 93, "A übernehmen   ·   B abbrechen", size=10, ha="center", va="mid")
+    return x, y, w, h

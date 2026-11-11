@@ -16,6 +16,7 @@ distrobox enter deckery -- sudo pacman -S --needed --noconfirm $PACKAGES
 mkdir -p "$HOME/.local/bin"
 ln -sf "$REPO/deckery-hud-launch"  "$HOME/.local/bin/deckery-hud"
 ln -sf "$REPO/deckery-hud-toggle"  "$HOME/.local/bin/deckery-hud-toggle"
+ln -sf "$REPO/deckery-hud-theme"   "$HOME/.local/bin/deckery-hud-theme"
 echo "Linked scripts to ~/.local/bin"
 
 # ── 3. Symlink systemd service ────────────────────────────────────────────────

@@ -26,6 +26,7 @@ from elements import PAD_ELEMENTS
 import settings
 from settings import Settings
 import theme
+from theme_mode import ThemeMode
 
 def _split_mode():
     """Read at call time, not import: the layout can be switched while
@@ -43,6 +44,7 @@ _DBUS_XML  = """
     <method name="Show"/>
     <method name="Hide"/>
     <method name="ToggleOsd"/>
+    <method name="ThemeMode"/>
   </interface>
 </node>
 """
@@ -68,6 +70,11 @@ class App(Gtk.Application):
         # show single groups with this False — see Reveal / _reveal_sync.
         self._full              = False
         self._settings          = Settings()
+        # B-20: the running theme mode, and whether it opened the HUD itself
+        # (then leaving it closes the HUD again).
+        self._theme_mode        = None
+        self._theme_opened_hud  = False
+        self._theme_close_wait  = False   # closing once A/B are let go
         self._settings_monitor  = None
         self._settings_reload   = 0   # pending debounce source id
         self._reveal            = Reveal(self._settings.reveal)
@@ -169,6 +176,10 @@ class App(Gtk.Application):
             return
         self._state_stamp = stamp
         self._state = load_state()
+        if self._theme_mode is not None:
+            self._theme_feed()
+        elif self._theme_close_wait:
+            self._theme_close_when_released()
         if self._win.is_visible():
             self._win.on_state(self._state)
         if not self._full and self._osd_enabled and self._osd_win.is_visible():
@@ -264,6 +275,67 @@ class App(Gtk.Application):
             self._win.queue_draw_title()
             self._osd_win.configure(self._settings.osd.animation, _split_mode())
 
+    # ── Theme mode (B-20) ─────────────────────────────────────────────────
+
+    def toggle_theme_mode(self):
+        """Start the theme mode, or cancel it if it runs. Split design only.
+        The full HUD opens for it (and makima is paused, which keeps the
+        d-pad, A and B away from the app — see theme_mode.py)."""
+        if self._theme_mode is not None:
+            self._theme_leave(apply=False)
+            return
+        if self._win is None or not _split_mode():
+            return
+        self._theme_close_wait = False
+        self._theme_opened_hud = not self._full
+        if not self._full:
+            self.show_hud()
+        makima_pause()   # even if the badge had resumed it
+        self._theme_mode = ThemeMode(theme.names(), theme.current().name, self._state)
+        self._theme_show()
+
+    def _theme_show(self):
+        m = self._theme_mode
+        self._win.set_theme_panel((theme.load(m.name).label, m.index, len(m.names)))
+
+    def _theme_feed(self):
+        act = self._theme_mode.feed(self._state)
+        if act == "preview":
+            self._theme_preview(self._theme_mode.name)
+            self._theme_show()
+        elif act in ("apply", "cancel"):
+            self._theme_leave(apply=act == "apply")
+
+    def _theme_preview(self, name):
+        if theme.activate(name):
+            self._win.queue_draw_title()
+            self._osd_win.configure(self._settings.osd.animation, _split_mode())
+
+    def _theme_leave(self, apply, close=True):
+        m, self._theme_mode = self._theme_mode, None
+        self._win.set_theme_panel(None)
+        if apply:
+            # Taken over before the write comes back through the file
+            # monitor, so that event finds nothing changed.
+            self._settings = dataclasses.replace(
+                self._settings,
+                layout=dataclasses.replace(self._settings.layout, theme=m.name))
+            settings.remember("layout.theme", m.name)
+        else:
+            self._theme_preview(m.original)
+        if close and self._theme_opened_hud:
+            # Not while A or B is still down: closing resumes makima, which
+            # would hand the app that button's release without its press.
+            self._theme_close_wait = True
+            self._theme_close_when_released()
+
+    def _theme_close_when_released(self):
+        down = set((self._state.get("context") or {}).get("active_buttons") or ())
+        if not down & {"BTN_SOUTH", "BTN_EAST"}:
+            self._theme_close_wait = False
+            if self._full:
+                self.hide_hud()
+
     # ── D-Bus method dispatch ─────────────────────────────────────────────
 
     def _on_dbus_call(self, conn, sender, obj_path, iface, method, params, invocation):
@@ -271,6 +343,7 @@ class App(Gtk.Application):
         elif method == "Show":      self.show_hud()
         elif method == "Hide":      self.hide_hud()
         elif method == "ToggleOsd": self.toggle_osd()
+        elif method == "ThemeMode": self.toggle_theme_mode()
         invocation.return_value(GLib.Variant("()", ()))
 
     # ── Public API ────────────────────────────────────────────────────────
@@ -293,6 +366,9 @@ class App(Gtk.Application):
     def hide_hud(self):
         if self._win is None:
             return
+        if self._theme_mode is not None:
+            # Closed from outside (L3, the X): same as B.
+            self._theme_leave(apply=False, close=False)
         self._full = False
         if _split_mode():
             # Groups a detector still wants stay; the rest slides out. The
