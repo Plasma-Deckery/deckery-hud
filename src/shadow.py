@@ -4,7 +4,7 @@ shadow.py — Shape-following backdrop shadows (B-14), one per HUD element.
 Each element (one button with its shape and legend, a stick, a pad, the
 centre column — see elements.py) gets a shadow that follows its own
 shapes: the trackpad's rounded rectangle, a pill's oval, a stick's circle,
-each legend line's text. It is built from three layers, all black:
+each legend line's text. It is built from these layers:
 
   core   — a plate hugging every shape and legend line, so the element sits
            on a bit of background of its own;
@@ -16,7 +16,16 @@ each legend line's text. It is built from three layers, all black:
            like two metaballs, instead of their overlap getting darker;
   edge   — a tight shadow right along every stroke and glyph (outlines,
            callout lines, dots, text), so thin white lines stay legible on
-           a white page.
+           a white page;
+  rim    — a narrow, quiet light line just outside the shapes (not the
+           text: a light rim around letters costs contrast on white).
+
+With `tint`, core and bleed are not black but a dark counterpart of the
+legend's colour — an active teal line sits on deep teal, the pink Gaming
+Mode hint on dark berry, white legends on a slightly cool dark grey. Each
+legend line takes its own colour, the shapes take the most colourful legend
+of their element, and the rim is a light version of the same. The edge
+stays black: it is what keeps legends readable on white.
 
 An element's own shadow depends only on its own shapes, so it looks the same
 whether it is shown alone or with others; only the bleed merges with what
@@ -29,6 +38,7 @@ canvas.
 Needs numpy. No GTK.
 """
 
+import colorsys
 import math
 import os
 from dataclasses import dataclass
@@ -56,6 +66,8 @@ class ShadowStyle:
     legend_pady: float
     edge_radius: float   # px, tight stroke/glyph shadow
     edge_alpha: float
+    tint: bool = False   # core + bleed in a dark version of the legend colour
+    rim_alpha: float = 0.0
 
 
 PRESETS = {
@@ -77,8 +89,16 @@ PRESETS = {
                          merge_lo=0.03, merge_hi=0.40,
                          legend="line", legend_padx=14, legend_pady=8,
                          edge_radius=1.5, edge_alpha=0.55),
+    # E + tint 2 — tight core as in wolke, a long, light cloud that fades out
+    # instead of stopping short, tinted, with a quiet rim on the shapes.
+    "hauch": ShadowStyle(core_grow=4, core_blur=10, core_alpha=0.45,
+                         bleed_grow=10, bleed_blur=90, bleed_alpha=0.36,
+                         merge_lo=0.0, merge_hi=0.60,
+                         legend="line", legend_padx=14, legend_pady=8,
+                         edge_radius=1.5, edge_alpha=0.55,
+                         tint=True, rim_alpha=0.5),
 }
-DEFAULT_PRESET = "wolke"
+DEFAULT_PRESET = "hauch"
 
 
 def style_from_env():
@@ -102,6 +122,7 @@ class GroupShadowSpec:
                 that cuts it (one half of a shoulder wedge)
     rrects:     (x, y, w, h, r) — shapes drawn as plain rounded rects (paddles)
     text_boxes: (x, y, w, h) — one per drawn text line / label pill
+    text_colours: (r, g, b) or None per text box — the legend's colour
     ink:        (x, y, w, h) — everything the element draws; the shadow layers
                 always cover it, so the edge shadow reaches strokes that are
                 neither a part nor text (e.g. the centre's close button)
@@ -110,6 +131,7 @@ class GroupShadowSpec:
     rrects: tuple = ()
     text_boxes: tuple = ()
     ink: tuple = None
+    text_colours: tuple = ()
 
 
 # ── small numpy helpers ───────────────────────────────────────────────────
@@ -141,15 +163,68 @@ def _smoothstep(lo, hi, x):
     return t * t * (3.0 - 2.0 * t)
 
 
-def _alpha_surface(alpha):
-    """Black ARGB32 surface whose alpha is `alpha` (0..1) — already premultiplied."""
+def _alpha_surface(alpha, rgb=None):
+    """ARGB32 surface whose alpha is `alpha` (0..1), black or coloured by the
+    straight (h, w, 3) `rgb`."""
     h, w = alpha.shape
     s = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
     buf = np.ndarray((h, s.get_stride() // 4, 4), np.uint8, s.get_data())
-    buf[:, :w, :3] = 0
-    buf[:, :w, 3] = (np.clip(alpha, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    a = np.clip(alpha, 0.0, 1.0)
+    if rgb is None:
+        buf[:, :w, :3] = 0
+    else:
+        pm = (np.clip(rgb, 0.0, 1.0) * a[..., None] * 255.0 + 0.5).astype(np.uint8)
+        buf[:, :w, 0], buf[:, :w, 1], buf[:, :w, 2] = pm[..., 2], pm[..., 1], pm[..., 0]
+    buf[:, :w, 3] = (a * 255.0 + 0.5).astype(np.uint8)
     s.mark_dirty()
     return s
+
+
+# ── tint ──────────────────────────────────────────────────────────────────
+
+_NEUTRAL_DARK = (0.07, 0.08, 0.10)    # white legends: a slightly cool dark grey
+_NEUTRAL_LIGHT = (0.86, 0.90, 0.98)
+
+
+def _chroma(colour):
+    """0 for white/grey legends, 1 for clearly coloured ones."""
+    if colour is None:
+        return 0.0
+    return min(1.0, max(0.0, (max(colour) - min(colour) - 0.12) / 0.25))
+
+
+def _mix(a, b, k):
+    return tuple(x * (1 - k) + y * k for x, y in zip(a, b))
+
+
+def dark_of(colour):
+    """The shadow colour under a legend of `colour`."""
+    k = _chroma(colour)
+    if k <= 0:
+        return _NEUTRAL_DARK
+    h, _s, _v = colorsys.rgb_to_hsv(*colour)
+    return _mix(_NEUTRAL_DARK, colorsys.hsv_to_rgb(h, 0.90, 0.26), k)
+
+
+def light_of(colour):
+    """The rim colour for shapes whose legend is `colour`."""
+    k = _chroma(colour)
+    if k <= 0:
+        return _NEUTRAL_LIGHT
+    h, s, _v = colorsys.rgb_to_hsv(*colour)
+    return _mix(_NEUTRAL_LIGHT, colorsys.hsv_to_rgb(h, min(s, 0.7), 1.0), k)
+
+
+def neutral_rgb(style):
+    """Shadow colour under white/grey legends (and glass pills) for `style`."""
+    return _NEUTRAL_DARK if style.tint else (0.0, 0.0, 0.0)
+
+
+def element_colour(spec):
+    """An element's own colour: its most colourful legend (None if all are
+    white/grey)."""
+    best = max(spec.text_colours, key=_chroma, default=None)
+    return best if _chroma(best) > 0 else None
 
 
 # ── one element ────────────────────────────────────────────────────────────
@@ -219,21 +294,32 @@ def _mask(spec, x0, y0, w, h, down, grow, padx, pady, with_text=True):
 
 @dataclass
 class GroupShadow:
-    x: float             # screen px of the arrays' origin
+    x: float             # screen px the bleed field covers
     y: float
-    w: float             # screen px the arrays cover
+    w: float
     h: float
-    core: np.ndarray     # final core alpha (0..1) at 1/_CORE_DOWN resolution
-    field: np.ndarray    # pre-curve bleed field (0..1) at 1/_FIELD_DOWN resolution
-    field_surface: object = None
+    field_surface: object       # pre-curve bleed field at 1/_FIELD_DOWN, tinted or black
+    core_rect: tuple            # (x, y, w, h) screen px the core covers — far smaller
+    core_surface: object        # core alpha (A8) at 1/_CORE_DOWN
+    tint_surface: object = None  # opaque shadow colour at 1/_FIELD_DOWN over (x, y), or None
+    rim: tuple = None           # (surface, x, y) in screen px, or None
+    field: np.ndarray = None    # the pre-curve field itself (pill_shadow.py maps it)
 
 
 _group_cache = {}
 
 
+def _grid(b, reach, down):
+    """Origin and size of a grid snapped to `down` around bounds b ± reach."""
+    x0 = math.floor((b[0] - reach) / down) * down
+    y0 = math.floor((b[1] - reach) / down) * down
+    return (x0, y0, math.ceil((b[2] + reach - x0) / down) * down,
+            math.ceil((b[3] + reach - y0) / down) * down)
+
+
 def group_shadow(spec, style):
-    """The cached, per-element part of the shadow (core plate + bleed field).
-    None for an element with nothing to cast a shadow."""
+    """The cached, per-element part of the shadow (core plate, bleed field,
+    tint, rim). None for an element with nothing to cast a shadow."""
     key = (spec, style)
     hit = _group_cache.get(key)
     if hit is not None or key in _group_cache:
@@ -242,29 +328,85 @@ def group_shadow(spec, style):
     if b is None:
         _group_cache[key] = None
         return None
-    reach = style.bleed_grow + 3 * style.bleed_blur + style.legend_padx
-    # Snap the origin to the field grid so elements combine on one shared grid.
-    x0 = math.floor((b[0] - reach) / _FIELD_DOWN) * _FIELD_DOWN
-    y0 = math.floor((b[1] - reach) / _FIELD_DOWN) * _FIELD_DOWN
-    w = math.ceil((b[2] + reach - x0) / _FIELD_DOWN) * _FIELD_DOWN
-    h = math.ceil((b[3] + reach - y0) / _FIELD_DOWN) * _FIELD_DOWN
+    # The field reaches far (a long fade); snapped to the field grid so
+    # elements combine on one shared grid. The core only needs its own blur.
+    x0, y0, w, h = _grid(b, style.bleed_grow + 3 * style.bleed_blur + style.legend_padx,
+                         _FIELD_DOWN)
+    # +24: room for the glass pills' own shadow (pill_shadow.py), which the
+    # centre paints into this same slot.
+    core_rect = _grid(b, max(style.core_grow, style.legend_padx) + 3 * style.core_blur + 24,
+                      _CORE_DOWN)
 
     # In "glyph" mode the legend's core comes from the letters themselves
     # (see edge_shadow); the plate is shapes only.
-    core_text = style.legend == "line"
-    core = _mask(spec, x0, y0, w, h, _CORE_DOWN, style.core_grow,
-                 style.legend_padx, style.legend_pady, with_text=core_text)
+    core = _mask(spec, *core_rect, _CORE_DOWN, style.core_grow,
+                 style.legend_padx, style.legend_pady, with_text=style.legend == "line")
     core = np.clip(_blur(core, style.core_blur / _CORE_DOWN) * 1.6, 0, 1) * style.core_alpha
 
     field = _mask(spec, x0, y0, w, h, _FIELD_DOWN, style.bleed_grow,
                   style.legend_padx + 4, style.legend_pady + 3)
     field = _blur(field, style.bleed_blur / _FIELD_DOWN)
 
-    gs = GroupShadow(x0, y0, w, h, core, field, _alpha_surface(field))
+    tint = _tint_map(spec, x0, y0, w, h, _FIELD_DOWN) if style.tint else None
+    gs = GroupShadow(x0, y0, w, h, _alpha_surface(field, tint), core_rect, _alpha_surface(core),
+                     _alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
+                     if tint is not None else None,
+                     _rim(spec, style), field)
     if len(_group_cache) > 160:
         _group_cache.clear()
     _group_cache[key] = gs
     return gs
+
+
+def _tint_map(spec, x0, y0, w, h, down):
+    """Straight (h, w, 3) shadow colour over an element's grid: near a legend
+    line its own dark colour, elsewhere the element's (see dark_of)."""
+    mw, mh = max(1, int(math.ceil(w / down))), max(1, int(math.ceil(h / down)))
+    base = dark_of(element_colour(spec))
+    num = np.empty((mh, mw, 3), np.float32)
+    num[...] = base
+    num *= 1e-3
+    den = np.full((mh, mw), 1e-3, np.float32)
+    shapes = _mask(GroupShadowSpec(spec.parts, spec.rrects), x0, y0, w, h, down, 0, 0, 0)
+    if shapes.any():
+        f = _blur(shapes, 40 / down)
+        num += f[..., None] * base
+        den += f
+    # Lines of one colour share one mask and one blur.
+    by_colour = {}
+    for box, colour in zip(spec.text_boxes, spec.text_colours or (None,) * len(spec.text_boxes)):
+        by_colour.setdefault(dark_of(colour), []).append(box)
+    for dark, boxes in by_colour.items():
+        m = _mask(GroupShadowSpec(text_boxes=tuple(boxes)), x0, y0, w, h, down, 0, 0, 0)
+        f = _blur(m, 10 / down) * 6
+        num += f[..., None] * dark
+        den += f
+    return num / den[..., None]
+
+
+def _rim(spec, style):
+    """The quiet light line just outside an element's shapes, at 1 px per
+    screen px — (surface, x, y) or None."""
+    if style.rim_alpha <= 0 or not (spec.parts or spec.rrects):
+        return None
+    b = _spec_bounds(GroupShadowSpec(spec.parts, spec.rrects))
+    x0, y0 = math.floor(b[0]) - 6, math.floor(b[1]) - 6
+    w, h = math.ceil(b[2]) + 6 - x0, math.ceil(b[3]) + 6 - y0
+    sil = _mask(GroupShadowSpec(spec.parts, spec.rrects), x0, y0, w, h, 1, 0, 0, 0)
+    ring = np.clip(_blur(sil, 1.2) * 2.0, 0, 1) * (1 - sil) * style.rim_alpha
+    rgb = np.empty(ring.shape + (3,), np.float32)
+    rgb[...] = light_of(element_colour(spec))
+    return _alpha_surface(ring, rgb), x0, y0
+
+
+def _placed(surf, x, y, down):
+    """`surf` (a grid at 1/down with origin x, y) as a bilinear pattern in
+    screen px."""
+    pat = cairo.SurfacePattern(surf)
+    pat.set_matrix(cairo.Matrix(xx=1 / down, yy=1 / down, x0=-x / down, y0=-y / down))
+    pat.set_filter(cairo.FILTER_BILINEAR)
+    pat.set_extend(cairo.EXTEND_PAD)
+    return pat
 
 
 # ── per-element layers and the merged bleed ────────────────────────────────
@@ -272,8 +414,8 @@ def group_shadow(spec, style):
 def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
     """An element's two shadow layers, each (surface, x, y, w, h) in logical px:
 
-    shadow — core plate + tight edge shadow, final alpha: drawn as is,
-             with the element's own translate/opacity;
+    shadow — core plate + tight edge shadow + rim, final alpha: drawn as
+             is, with the element's own translate/opacity;
     bleed  — the pre-curve field: every visible element's bleed is drawn
              with its translate/opacity into one pass, and only that pass
              is mapped to alpha (see bleed_transfer / paint_bleed) — so
@@ -285,20 +427,24 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
     gs = group_shadow(spec, style)
     if gs is None:
         return None, None
-    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(math.ceil(gs.w * dev_scale)),
-                              int(math.ceil(gs.h * dev_scale)))
+    cx, cy, cw, ch = gs.core_rect
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(math.ceil(cw * dev_scale)),
+                              int(math.ceil(ch * dev_scale)))
     surf.set_device_scale(dev_scale, dev_scale)
     cr = cairo.Context(surf)
-    cr.save()
-    cr.scale(gs.w / gs.core.shape[1], gs.h / gs.core.shape[0])
-    cr.set_source_surface(_alpha_surface(gs.core), 0, 0)
-    cr.get_source().set_filter(cairo.FILTER_BILINEAR)
-    cr.paint()
-    cr.restore()
-    cr.translate(-gs.x, -gs.y)
+    cr.translate(-cx, -cy)
+    if gs.tint_surface is not None:
+        cr.set_source(_placed(gs.tint_surface, gs.x, gs.y, _FIELD_DOWN))
+    else:
+        cr.set_source_rgb(0, 0, 0)
+    cr.mask(_placed(gs.core_surface, cx, cy, _CORE_DOWN))
     if content is not None:
         draw_edge_shadow(cr, content, content_rect[0], content_rect[1], style, spec.text_boxes)
-    return (surf, gs.x, gs.y, gs.w, gs.h), (gs.field_surface, gs.x, gs.y, gs.w, gs.h)
+    if gs.rim is not None:
+        rim, rx, ry = gs.rim
+        cr.set_source_surface(rim, rx, ry)
+        cr.paint()
+    return (surf, cx, cy, cw, ch), (gs.field_surface, gs.x, gs.y, gs.w, gs.h)
 
 
 def _bleed_curve(style, x):
@@ -338,8 +484,12 @@ def paint_bleed(cr, items, sw, sh, style):
         ccr.paint_with_alpha(opacity)
         ccr.restore()
     canvas.flush()
-    a = np.ndarray((ch, canvas.get_stride() // 4, 4), np.uint8, canvas.get_data())[:, :cw, 3]
-    paint_scaled(cr, _alpha_surface(_bleed_curve(style, a.astype(np.float32) / 255.0)), sw, sh)
+    px = np.ndarray((ch, canvas.get_stride() // 4, 4), np.uint8, canvas.get_data())[:, :cw]
+    a = px[..., 3].astype(np.float32) / 255.0
+    # The curve reshapes alpha only; the colour (unpremultiplied) is kept —
+    # as the GPU's component transfer does.
+    rgb = px[..., [2, 1, 0]].astype(np.float32) / 255.0 / np.maximum(a, 1e-6)[..., None]
+    paint_scaled(cr, _alpha_surface(_bleed_curve(style, a), rgb), sw, sh)
 
 
 def paint_scaled(cr, surf, sw, sh, alpha=1.0):

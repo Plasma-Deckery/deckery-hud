@@ -26,7 +26,8 @@ def _layers(boxes):
     hit = _cache.get(spec)
     if hit is None:
         gs = group_shadow(spec, STYLE)
-        hit = (gs, [_alpha_surface(_bleed_curve(STYLE, gs.field)), _alpha_surface(gs.core)])
+        hit = (gs, [(_alpha_surface(_bleed_curve(STYLE, gs.field)), (gs.x, gs.y, gs.w, gs.h)),
+                    (gs.core_surface, gs.core_rect)])
         if len(_cache) > 32:
             _cache.clear()
         _cache[spec] = hit
@@ -38,11 +39,11 @@ def paint(cr, boxes, rgb=(0, 0, 0)):
     helpers.capture_text_boxes), painted in cr's user space."""
     if not boxes:
         return
-    gs, surfs = _layers(boxes)
-    for s in surfs:
+    _gs, surfs = _layers(boxes)
+    for s, (x, y, w, h) in surfs:
         cr.save()
-        cr.translate(gs.x, gs.y)
-        cr.scale(gs.w / s.get_width(), gs.h / s.get_height())
+        cr.translate(x, y)
+        cr.scale(w / s.get_width(), h / s.get_height())
         pat = cairo.SurfacePattern(s)
         pat.set_filter(cairo.FILTER_BILINEAR)
         cr.set_source_rgb(*rgb)

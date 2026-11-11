@@ -28,7 +28,7 @@ from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
 from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, _DEFAULT_COLOR, _DEFAULT_LW
 from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
-                    style_from_env)
+                    neutral_rgb, style_from_env)
 import icons
 import pill_shadow
 from reveal import FULL
@@ -246,7 +246,7 @@ def element_box(element, tx):
     return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
 
 
-def _element_shadow_spec(element, tx, text_boxes, ink):
+def _element_shadow_spec(element, tx, text_boxes, ink, text_colours=()):
     parts, rrects = [], []
     if element.kind != "center":
         ox, oy, scale = tx
@@ -270,12 +270,14 @@ def _element_shadow_spec(element, tx, text_boxes, ink):
             parts.append((part, ox + dx, oy + dy, scale, None))
     # Sub-pixel jitter in a recorded box shouldn't count as a geometry change.
     boxes = tuple(tuple(round(v) for v in b) for b in text_boxes)
-    return GroupShadowSpec(tuple(parts), tuple(rrects), boxes, tuple(round(v) for v in ink))
+    colours = tuple(c and tuple(round(v, 2) for v in c) for c in text_colours)
+    return GroupShadowSpec(tuple(parts), tuple(rrects), boxes, tuple(round(v) for v in ink),
+                           colours)
 
 
-# Keyed on the shadow's geometry and the legend strings, not on the
-# element's bitmap: a press or a colour change rebuilds the element's layer
-# but leaves its shadow (and its GPU texture) alone. The edge shadow is
+# Keyed on the shadow's geometry and the legend strings and colours, not on
+# the element's bitmap: a press rebuilds the element's layer but leaves its
+# shadow (and its GPU texture) alone; a legend changing colour retints it. The edge shadow is
 # traced from the bitmap of the build that missed — the same strokes and
 # glyphs, since nothing in the key changed.
 _shadow_layer_cache = {}
@@ -289,7 +291,7 @@ def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False):
         # and adjacent text are missing from it. Keep the at-rest shadow
         # rather than letting the legend's shadow blink out for the press.
         return hit[1]
-    spec = _element_shadow_spec(element, tx, cap.boxes, rect)
+    spec = _element_shadow_spec(element, tx, cap.boxes, rect, cap.colours)
     key = (spec, tuple(cap.texts), SHADOW_STYLE, dev_scale)
     if hit is not None and hit[0] == key:
         return hit[1]
@@ -489,7 +491,7 @@ def _with_glass_shadow(shadow, boxes):
     cr.set_source_surface(surf, 0, 0)
     cr.paint()
     cr.translate(-x, -y)
-    pill_shadow.paint(cr, boxes)
+    pill_shadow.paint(cr, boxes, rgb=neutral_rgb(SHADOW_STYLE))
     return out, x, y, w, h
 
 

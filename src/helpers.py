@@ -25,20 +25,23 @@ from viewmodel import _K, _fmt
 # ── Text-box capture ─────────────────────────────────────────────────────────
 # While a list is installed here, every text line and label pill drawn
 # through these helpers appends its box — in device space, i.e. screen px for
-# the HUD's own layers — so shadow.py can lay a shadow under each legend line
-# without re-deriving the layout that placed it.
+# the HUD's own layers — and its colour, so shadow.py can lay a shadow under
+# each legend line, tinted to match, without re-deriving the layout that
+# placed it.
 _text_sink = None
 
 
 class capture_text_boxes:
     """with capture_text_boxes() as cap: ... — cap.boxes fills with
-    (x, y, w, h), cap.texts with the matching strings. Glass pills (see
+    (x, y, w, h), cap.texts with the matching strings, cap.colours with
+    their (r, g, b) or None when it isn't a plain colour. Glass pills (see
     _glass_pill) go to cap.glass_boxes instead: they get a shadow of their
     own (pill_shadow.py), not a legend plate."""
 
     def __enter__(self):
         global _text_sink
-        self._prev, self.boxes, self.texts, self.glass_boxes = _text_sink, [], [], []
+        self._prev, self.boxes, self.texts, self.colours, self.glass_boxes = \
+            _text_sink, [], [], [], []
         _text_sink = self
         return self
 
@@ -47,9 +50,13 @@ class capture_text_boxes:
         _text_sink = self._prev
 
 
-def _note_box(cr, x, y, w, h, text, glass=False):
+def _note_box(cr, x, y, w, h, text, glass=False, colour=None):
     if _text_sink is None:
         return
+    if colour is None:
+        src = cr.get_source()
+        if isinstance(src, cairo.SolidPattern):
+            colour = src.get_rgba()[:3]
     pts = [cr.user_to_device(x + dx, y + dy) for dx in (0, w) for dy in (0, h)]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
@@ -58,6 +65,7 @@ def _note_box(cr, x, y, w, h, text, glass=False):
         return
     _text_sink.boxes.append(box)
     _text_sink.texts.append(text)
+    _text_sink.colours.append(tuple(colour[:3]) if colour else None)
 
 
 def _pango_esc(s):
@@ -315,7 +323,9 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         pill_y = cy - ph / 2
 
         p_bg, p_fg = (styles[i] if styles and i < len(styles) else (bg, fg))
-        _note_box(cr, x, pill_y, pill_w, ph, labels[i], glass=glass is not None)
+        # A filled pill reads as its fill colour, a faint one as its text.
+        _note_box(cr, x, pill_y, pill_w, ph, labels[i], glass=glass is not None,
+                  colour=p_bg if len(p_bg) > 3 and p_bg[3] >= 0.5 else p_fg)
 
         # Background
         if glass is not None:
