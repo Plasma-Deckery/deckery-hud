@@ -13,7 +13,9 @@ gi.require_version('Gdk', '4.0')
 gi.require_version('Gsk', '4.0')
 from gi.repository import Gtk, Gio, Gtk4LayerShell as LayerShell, Rsvg, GLib, Graphene, Gdk, Gsk
 import cairo
+import math
 import time
+from dataclasses import dataclass
 
 from ipc import makima_pause, makima_resume, _FRONT_SVG, _BACK_SVG
 from layout import (HUD_W, HUD_H, _TITLE_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE_H,
@@ -38,6 +40,21 @@ if _LAYOUT_MODE == "split":
                                 draw_gesture_connector_live, SHADOW_STYLE, warm_all)
     from shadow import bleed_transfer
     from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
+
+
+@dataclass
+class _Ghost:
+    """A frozen copy of one element's last frame, fading out on its own
+    (Win._freeze). Textures with their (x, y, w, h); None where it had none."""
+    anim: object        # reveal.GroupAnim, fading out
+    look: tuple         # GroupLayer.look it showed
+    tex: object
+    rect: tuple
+    shadow: tuple       # (texture, rect)
+    bleed: tuple        # (texture, rect)
+    live: tuple         # (texture, rect): its live strip, drawn once
+    connector: tuple    # (texture, rect): the gesture connector, for a pad
+    vms: dict           # the d-pad's, for its 3D cross; None otherwise
 
 
 class _HudArea(Gtk.Widget):
@@ -168,11 +185,12 @@ class Win(Gtk.ApplicationWindow):
         self._contents  = {}      # group -> reveal.Content it shows (kept while fading out)
         self._causes    = {}      # group -> cause of its last Want, decides slide vs fade out
         self._full      = False   # the full HUD is open (input, centre, toasts)
-        self._drawn     = {}      # group -> (Gdk.Texture, rect) last drawn, for a crossfade
+        self._frame     = {}      # group -> what the last frame drew of it (_snapshot_split)
+        self._frame_ctx = None    # (state, layers, press_t, sw, sh, scale, connector) of that frame
         self._xfade     = {}      # group -> (texture, rect, start) fading out under new content
+        self._ghosts    = {}      # group -> [_Ghost]: frozen copies fading out, see _freeze
         self._tick_id   = None
         self._visible   = frozenset()
-        self._gesture   = False   # last seen two-pad gesture, see on_state
 
         # Per-button press animations (see _PRESS_ANIM_KEYS) — one HoverAnim
         # each, all ticking off the same drawing area's frame clock. Built
@@ -202,8 +220,14 @@ class Win(Gtk.ApplicationWindow):
         """New reveal durations from the settings file. Running animations
         read them on their next tick; nothing restarts."""
         self._settings = settings
-        for a in self._anims.values():
+        for a in self._all_anims():
             a.settings = settings
+
+    def _all_anims(self):
+        yield from self._anims.values()
+        for ghosts in self._ghosts.values():
+            for gh in ghosts:
+                yield gh.anim
 
     def _badge_screen_rect(self):
         sw, sh = self._da.get_width(), self._da.get_height()
@@ -362,27 +386,94 @@ class Win(Gtk.ApplicationWindow):
 
     def set_wants(self, wants):
         """wants: {group: reveal.Want} — every group not in it goes away.
-        A group keeps the content it had while it fades or slides out, and
-        a group that stays visible but changes content crossfades."""
+        One a detector showed leaves as a frozen copy of its last frame
+        (_freeze): it fades out exactly as it was, instead of first turning
+        into whatever the new state says (L1 let go: the base bindings).
+        One the full HUD showed slides out live. A group that stays but
+        changes its look crossfades (_snapshot_split)."""
         now = time.monotonic()
         self._full = any(w.cause == "full" for w in wants.values())
+        connector = True   # the gesture connector goes with the first pad to leave
         for g, anim in self._anims.items():
             w = wants.get(g)
             if w is None:
-                anim.set_target(False, self._causes.get(g, "detector"), now)
+                if (anim.target and anim.value > 0 and g in self._frame
+                        and self._causes.get(g) == "detector"
+                        and not (anim.running and anim.style == "slide")):
+                    if self._freeze(g, anim, now, connector):
+                        connector = False
+                else:
+                    anim.set_target(False, self._causes.get(g, "detector"), now)
                 continue
-            old = self._contents.get(g)
-            if old is not None and old != w.content and anim.value > 0 and g in self._drawn:
-                tex, rect = self._drawn[g]
-                self._xfade[g] = (tex, rect, now)
+            cause = w.cause
+            ghosts = self._ghosts.get(g)
+            if ghosts and not anim.target and anim.value == 0:
+                # Back while its frozen copy still fades. The same picture
+                # takes over where the copy is, without a dip; a different
+                # one fades in over it in place — never a slide from off
+                # screen next to its own fading copy.
+                if self._look(g, w.content) == ghosts[-1].look:
+                    anim.jump(ghosts.pop().anim.value, False)
+                cause = "detector"
             self._contents[g] = w.content
             self._causes[g] = w.cause
-            anim.set_target(True, w.cause, now)
+            anim.set_target(True, cause, now)
         if any(a.target for a in self._anims.values()):
             self._need_surface(True)
         self._start_ticking()
         self._da.queue_draw()
         self._check_visible()
+
+    def _look(self, g, content):
+        """The look group g would have with `content` in the current state."""
+        if self._frame_ctx is None:
+            return None
+        _state, _layers, press_t, sw, sh, scale, _conn = self._frame_ctx
+        layers = group_layers(self._state, sw, sh, {g: content}, press_t, dev_scale=scale)
+        return layers["groups"][g].look
+
+    def _freeze(self, g, anim, now, connector):
+        """Hand group g over to a frozen copy of its last frame — bitmap,
+        shadows, live strip (pad dot, stick rings, a press) and, for a pad
+        leaving a gesture, the connector — which fades out on its own from
+        where g was. g itself is free at once: wanted again, it starts over
+        (see set_wants). Returns whether it took the connector."""
+        state, layers, press_t, sw, sh, scale, drew_connector = self._frame_ctx
+        f = self._frame[g]
+        live = None
+        layer = layers["groups"].get(g)
+        if layer is not None and layer.tx is not None:
+            rect = live_rect(g, layers, sw, sh)
+            live = (self._render_frozen(rect, scale, lambda cr: draw_group_live(
+                cr, g, state, layers, 0.0, press_t, draw_dpad=False)), rect)
+        conn = None
+        if connector and drew_connector and g in ("LPad", "RPad"):
+            # Drawn full-screen live; frozen only where it has ink — a
+            # full-screen bitmap took ~8ms to make and upload.
+            rec = cairo.RecordingSurface(cairo.Content.COLOR_ALPHA, None)
+            draw_gesture_connector_live(cairo.Context(rec), layers, sw, 0.0, 0.0)
+            x, y, w, h = rec.ink_extents()
+            if w > 0 and h > 0:
+                rect = (math.floor(x) - 1, math.floor(y) - 1, math.ceil(w) + 3, math.ceil(h) + 3)
+                conn = (self._render_frozen(rect, scale, lambda cr: (
+                    cr.set_source_surface(rec, 0, 0), cr.paint())), rect)
+        ghost = _Ghost(GroupAnim(self._settings), f["look"], f["tex"], f["rect"],
+                       f["shadow"], f["bleed"], live, conn, f["vms"] if g == "DPad" else None)
+        ghost.anim.jump(anim.value, True)
+        ghost.anim.set_target(False, "detector", now)
+        anim.jump(0.0, False)
+        self._ghosts.setdefault(g, []).append(ghost)
+        return conn is not None
+
+    def _render_frozen(self, rect, scale, draw):
+        x, y, w, h = rect
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, max(1, math.ceil(w * scale)),
+                                  max(1, math.ceil(h * scale)))
+        surf.set_device_scale(scale, scale)
+        cr = cairo.Context(surf)
+        cr.translate(-x, -y)
+        draw(cr)
+        return self._upload(surf)
 
     def visible_groups(self):
         """Groups on screen or on their way there."""
@@ -454,7 +545,8 @@ class Win(Gtk.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _start_ticking(self):
-        if self._tick_id is None and (any(a.running for a in self._anims.values()) or self._xfade):
+        if self._tick_id is None and (any(a.running for a in self._anims.values())
+                                      or self._xfade or self._ghosts):
             self._tick_id = self._da.add_tick_callback(self._on_group_tick)
 
     def _on_group_tick(self, _widget, _clock):
@@ -471,7 +563,7 @@ class Win(Gtk.ApplicationWindow):
             # ~390ms) would otherwise eat the whole slide. Count it as one
             # ordinary frame instead.
             if gap > _STALL_S:
-                for a in self._anims.values():
+                for a in self._all_anims():
                     a.delay(gap - _FRAME_S)
         self._last_tick = now
 
@@ -482,7 +574,7 @@ class Win(Gtk.ApplicationWindow):
         # after idle, measured up to ~275ms) would have finished it already.
         if self._map_ticks is not None:
             self._map_ticks += 1
-            for a in self._anims.values():
+            for a in self._all_anims():
                 a.restart_clock(now)
             if self._map_ticks >= 2:
                 self._map_ticks = None
@@ -492,11 +584,15 @@ class Win(Gtk.ApplicationWindow):
         running = False
         for a in self._anims.values():
             running = a.tick(now) or running
+        for gh in [gh for ghosts in self._ghosts.values() for gh in ghosts]:
+            gh.anim.tick(now)
+        self._ghosts = {g: live for g, ghosts in self._ghosts.items()
+                        if (live := [gh for gh in ghosts if gh.anim.running])}
         xf = self._settings.crossfade_ms / 1000
         self._xfade = {g: x for g, x in self._xfade.items() if now - x[2] < xf}
         self._da.queue_draw()
         self._check_visible()
-        if running or self._xfade:
+        if running or self._xfade or self._ghosts:
             return GLib.SOURCE_CONTINUE
         self._tick_id = None
         self._last_tick = None
@@ -508,18 +604,6 @@ class Win(Gtk.ApplicationWindow):
 
     def on_state(self, state):
         self._state = state
-        # A gesture swaps each visible pad's own mode label for the shared
-        # connector (which fades with the pads) and back; crossfade that
-        # swap instead of letting the label pop.
-        gesture = bool(((state.get("trackpads") or {}).get("gesture") or {}).get("touching"))
-        if gesture != self._gesture and self._anims:
-            now = time.monotonic()
-            for g in ("LPad", "RPad"):
-                if self._anims[g].value > 0 and g in self._drawn:
-                    tex, rect = self._drawn[g]
-                    self._xfade[g] = (tex, rect, now)
-            self._start_ticking()
-        self._gesture = gesture
         if self._press_anims:
             active = set((state.get("context") or {}).get("active_buttons", []))
             for key, anim in self._press_anims.items():
@@ -654,13 +738,17 @@ class Win(Gtk.ApplicationWindow):
         cached = self._tex_cache.get(name)
         if cached is not None and cached[0] is surf:
             return cached[1]
+        tex = self._upload(surf)
+        self._tex_cache[name] = (surf, tex)
+        return tex
+
+    @staticmethod
+    def _upload(surf):
         surf.flush()
         data = GLib.Bytes.new(bytes(surf.get_data()))
         # cairo's ARGB32 is native-endian premultiplied: B,G,R,A in memory here.
-        tex = Gdk.MemoryTexture.new(surf.get_width(), surf.get_height(),
-                                    Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, data, surf.get_stride())
-        self._tex_cache[name] = (surf, tex)
-        return tex
+        return Gdk.MemoryTexture.new(surf.get_width(), surf.get_height(),
+                                     Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, data, surf.get_stride())
 
     def _bleed_transfer(self):
         """(ramp, curve) — see shadow.bleed_transfer; the ramp applies first."""
@@ -690,7 +778,9 @@ class Win(Gtk.ApplicationWindow):
 
         shown = [g for g in GROUPS if g in self._contents
                  and (self._anims[g].value > 0 or self._anims[g].target)]
-        if not shown:
+        ghosts = [(g, gh) for g in GROUPS for gh in self._ghosts.get(g, ())]
+        if not shown and not ghosts:
+            self._frame = {}
             return
         press_t = {k: a.value for k, a in self._press_anims.items()}
         surface = self.get_surface()
@@ -716,33 +806,69 @@ class Win(Gtk.ApplicationWindow):
             snapshot.pop()
             snapshot.restore()
 
+        def faded(gh, slot):
+            # A frozen copy: in place, at its own opacity.
+            if slot is None:
+                return
+            tex, r = slot
+            snapshot.push_opacity(gh.anim.value)
+            snapshot.append_texture(tex, rect(*r))
+            snapshot.pop()
+
+        frame = {g: {"look": groups[g].look, "vms": groups[g].vms, "shadow": None, "bleed": None}
+                 for g in shown}
+
         # Every shadow before any content, so no element's shadow darkens a
         # neighbour's text. First the bleed: each element's soft field with
         # its own slide/fade, all in one pass that is only then mapped to
         # alpha — so neighbouring clouds fuse into one shape instead of
         # stacking (see shadow.py). Then each element's own core/edge shadow.
         bleeds = [g for g in shown if groups[g].bleed is not None]
-        if bleeds:
+        if bleeds or any(gh.bleed for _g, gh in ghosts):
             ident = Gsk.ComponentTransfer.new_identity()
             ramp, curve = self._bleed_transfer()
             snapshot.push_component_transfer(ident, ident, ident, curve)
             snapshot.push_component_transfer(ident, ident, ident, ramp)
+            for _g, gh in ghosts:
+                faded(gh, gh.bleed)
             for g in bleeds:
                 surf, x, y, w, h = groups[g].bleed
+                tex = self._texture("bleed_" + g, surf)
+                frame[g]["bleed"] = (tex, (x, y, w, h))
                 placed(g, lambda: snapshot.append_scaled_texture(
-                    self._texture("bleed_" + g, surf), Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+                    tex, Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
             snapshot.pop()
             snapshot.pop()
+        for _g, gh in ghosts:
+            faded(gh, gh.shadow)
         for g in shown:
             if groups[g].shadow is None:
                 continue
             surf, x, y, w, h = groups[g].shadow
+            tex = self._texture("shadow_" + g, surf)
+            frame[g]["shadow"] = (tex, (x, y, w, h))
             placed(g, lambda: snapshot.append_scaled_texture(
-                self._texture("shadow_" + g, surf), Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+                tex, Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+        # The frozen copies under everything live: what leaves sits below
+        # what arrives in its place.
+        for g, gh in ghosts:
+            faded(gh, (gh.tex, gh.rect))
+            faded(gh, gh.live)
+            if gh.vms is not None:
+                snapshot.push_opacity(gh.anim.value)
+                self._draw_dpad_3d(snapshot, sw, sh, 0.0, gh.vms)
+                snapshot.pop()
+        for _g, gh in ghosts:
+            faded(gh, gh.connector)   # over both pads, as it is live
         xf = self._settings.crossfade_ms / 1000
         for g in shown:
             layer = groups[g]
             tex = self._texture(g, layer.surface)
+            prev = self._frame.get(g)
+            if prev is not None and prev["look"] != layer.look:
+                # Same element, new picture in place (L1 -> R1 rebinds a
+                # key, a gesture swaps a pad's label): dissolve old into new.
+                self._xfade[g] = (prev["tex"], prev["rect"], now)
             if g in self._xfade:
                 # A real dissolve, not new-over-old: two plain alphas would
                 # dim whatever both textures share (the art) mid-way.
@@ -757,7 +883,7 @@ class Win(Gtk.ApplicationWindow):
                 placed(g, both)
             else:
                 placed(g, lambda: snapshot.append_texture(tex, rect(*layer.rect)))
-            self._drawn[g] = (tex, layer.rect)
+            frame[g]["tex"], frame[g]["rect"] = tex, layer.rect
         for g in shown:
             if groups[g].tx is None:
                 continue
@@ -771,7 +897,8 @@ class Win(Gtk.ApplicationWindow):
         # well short of centre (see draw_gesture_connector_live). It is as
         # visible as the fainter of the two pads.
         pv = layers.get("pv")
-        if pv is not None and pv.gesture and "LPad" in groups and "RPad" in groups:
+        connector = pv is not None and pv.gesture and "LPad" in groups and "RPad" in groups
+        if connector:
             snapshot.push_opacity(min(opacity["LPad"], opacity["RPad"]))
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
             draw_gesture_connector_live(cr, layers, sw, dx["LPad"], dx["RPad"])
@@ -785,6 +912,14 @@ class Win(Gtk.ApplicationWindow):
         if self._full and self._active_toasts:
             cr = snapshot.append_cairo(rect(0, 0, sw, sh))
             draw_toast(cr, sw, sh, self._active_toasts, start_y=sh - 40)
+
+        # What this frame showed, for freezing it (_freeze) and for telling
+        # a changed look next frame. Only elements actually drawn: one that
+        # comes back later starts fresh, without a crossfade from long ago.
+        self._frame = frame
+        self._frame_ctx = (self._state, layers, press_t, sw, sh, scale, connector)
+        if self._xfade:
+            self._start_ticking()
 
         if t0 is not None:
             vals = " ".join(f"{g}={opacity[g]:.2f}" for g in shown)

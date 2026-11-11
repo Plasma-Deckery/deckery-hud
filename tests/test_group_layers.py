@@ -208,3 +208,20 @@ def test_warm_all_names_match_textures():
     surfaces = warm_all(SAMPLES["base_only"], SW, SH, 1.0)
     assert set(surfaces) == (set(ELEMENT_IDS) | {"shadow_" + e for e in ELEMENT_IDS}
                              | {"bleed_" + e for e in ELEMENT_IDS})
+
+
+def test_look_ignores_a_press_but_not_a_binding():
+    """win.py crossfades an element whose look changes in place (L1 -> R1
+    rebinds a key) — but not a press, which only moves the button from the
+    bitmap to the live strip."""
+    base = _layers(SAMPLES["base_only"], {"A": FULL})["A"]
+    held = copy.deepcopy(SAMPLES["base_only"])
+    held.setdefault("context", {})["active_buttons"] = ["BTN_SOUTH"]
+    pressed = _layers(held, {"A": FULL}, press_t={"BTN_SOUTH": 1.0})["A"]
+    assert pressed.surface is not base.surface
+    assert pressed.look == base.look
+    state = copy.deepcopy(SAMPLES["base_only"])
+    state["bindings"]["BTN_SOUTH"] = {"action": ["KEY_F7"], "kind": "remap", "label": "Neu",
+                                      "origin": "Steam Deck", "silent": False}
+    rebound = _layers(state, {"A": FULL})["A"]
+    assert rebound.look != base.look
