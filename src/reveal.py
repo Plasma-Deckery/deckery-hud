@@ -25,6 +25,10 @@ class Content:
 
 
 FULL = Content(None)
+# The centre column's breadcrumb row alone ("Steam Deck Base › Claude
+# Desktop" and the held modifiers' pills), shown along with a partial
+# reveal: which application, and what the colours mean.
+CRUMBS = Content(frozenset({"crumbs"}))
 
 # Every element, in draw order. Named GROUPS for the window, which treats
 # them all alike.
@@ -194,6 +198,8 @@ class Reveal:
                 want("RPad", FULL)
             for name, content in self._modifier_reveal(state, ctx, now).items():
                 want(name, content)
+            if found and s.breadcrumbs:
+                want("center", CRUMBS)
 
         wants = {name: Want(content, "detector") for name, content in found.items()}
         if self.full:

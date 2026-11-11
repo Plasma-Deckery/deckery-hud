@@ -312,3 +312,16 @@ def test_reference_path_draws_the_connector_at_rest_and_mid_slide():
         import numpy as np
         px = np.ndarray((SH, surf.get_stride() // 4, 4), np.uint8, surf.get_data())
         assert px[:, SW // 2 - 200, 3].max() > 0, open_t   # the line, left of the label
+
+
+
+def test_breadcrumbs_alone_are_a_slice_of_the_centre():
+    from reveal import CRUMBS
+    full = _layers(SAMPLES["base_only"], {"center": FULL})["center"]
+    crumbs = _layers(SAMPLES["base_only"], {"center": CRUMBS})["center"]
+    fx, fy, fw, fh = full.rect
+    x, y, w, h = crumbs.rect
+    assert fx <= x and fy <= y and x + w <= fx + fw and y + h <= fy + fh
+    assert h < fh / 2
+    assert crumbs.look != full.look
+    assert crumbs.shadow is not None

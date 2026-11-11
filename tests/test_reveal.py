@@ -5,11 +5,11 @@ import dataclasses
 
 import pytest
 
-from reveal import (Content, FULL, GROUPS, Hold, Reveal, RevealSettings, Want, GroupAnim)
+from reveal import (Content, CRUMBS, FULL, GROUPS, Hold, Reveal, RevealSettings, Want, GroupAnim)
 
 # The logic tests below are written against these numbers, not whatever
 # the defaults are at the moment.
-S = RevealSettings(hold_ms=1500, gesture_hold_ms=1500, release_ms=500)
+S = RevealSettings(hold_ms=1500, gesture_hold_ms=1500, release_ms=500, breadcrumbs=False)
 
 
 def _s(**changes):
@@ -515,3 +515,41 @@ def test_set_settings_updates_the_grace():
     r = Reveal(S)
     r.set_settings(_s(fade_out_ms=100))
     assert all(h.fade_out == 0.1 for h in r._holds())
+
+
+# ── Live round 3: the breadcrumb row comes along with a partial reveal ────
+
+def test_a_partial_reveal_brings_the_breadcrumbs():
+    """Which application, and what the colours mean: the centre column's
+    breadcrumb row (not the whole column) shows with any single element."""
+    r = Reveal(_s(breadcrumbs=True))
+    r.update(_state(lpad=True), 0.0)
+    assert r.update(_state(lpad=True), 1.5) == {"LPad": Want(FULL, "detector"),
+                                                "center": Want(CRUMBS, "detector")}
+
+
+def test_breadcrumbs_with_the_modifier_layer_and_gesture():
+    r = Reveal(_s(breadcrumbs=True))
+    r.update(_state(**L1), 0.0)
+    assert r.update(_state(**L1), 1.5)["center"] == Want(CRUMBS, "detector")
+    r = Reveal(_s(breadcrumbs=True))
+    r.update(_makima_pads(True, True, True), 0.0)
+    assert r.update(_makima_pads(True, True, True), 1.5)["center"] == Want(CRUMBS, "detector")
+
+
+def test_no_breadcrumbs_without_a_reveal():
+    r = Reveal(_s(breadcrumbs=True))
+    assert r.update(_state(lpad=True), 0.0) == {}
+
+
+def test_full_hud_shows_the_whole_centre():
+    r = Reveal(_s(breadcrumbs=True))
+    r.full = True
+    r.update(_state(lpad=True), 0.0)
+    assert r.update(_state(lpad=True), 1.5)["center"] == Want(FULL, "full")
+
+
+def test_breadcrumbs_can_be_switched_off():
+    r = Reveal(_s(breadcrumbs=False))
+    r.update(_state(lpad=True), 0.0)
+    assert "center" not in r.update(_state(lpad=True), 1.5)

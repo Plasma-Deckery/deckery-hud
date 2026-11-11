@@ -75,6 +75,9 @@ class RevealSettings:
         "Beide Pads gleichzeitig berührt (Geste) blendet beide ein."))
     modifier_enabled: bool = field(default=True, metadata=_meta(
         "Ein länger gehaltener Modifier zeigt die Belegungen seiner Ebene."))
+    breadcrumbs: bool = field(default=True, metadata=_meta(
+        "Mit jedem einzeln eingeblendeten Element auch die Brotkrumen-Zeile der "
+        "Mitte zeigen: in welcher Anwendung du bist, und was die Farben heißen."))
     hold_ms: int = field(default=750, metadata=_meta(
         "Wie lange Pad oder Modifier benutzt werden, bis sie erscheinen (ms).",
         minimum=1))
