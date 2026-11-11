@@ -209,3 +209,36 @@ def test_text_tokens():
         assert h1 > h0 and w1 > w0
     finally:
         theme.activate(theme.DEFAULT)
+
+
+# ── The gesture connector (B-12) ──────────────────────────────────────────
+
+def test_connector_tokens(user_themes):
+    (user_themes / "kabel.toml").write_text(
+        '[connector]\ncolor = "#00ff00"\nalpha = 0.5\nwidth = 3\nstyle = "dashed"\n'
+        'glow = 0.4\nglow_radius = 9\nshadow = false\n'
+        'label_color = "#0000ff"\nlabel_size = 15\nlabel_glow = true\n')
+    t = theme.load("kabel")
+    assert (t.connector_color, t.connector_alpha, t.connector_width) == ((0.0, 1.0, 0.0), 0.5, 3.0)
+    assert (t.connector_style, t.connector_glow, t.connector_glow_radius) == ("dashed", 0.4, 9.0)
+    assert t.connector_shadow is False and t.connector_label_glow is True
+    assert (t.connector_label_color, t.connector_label_size) == ((0.0, 0.0, 1.0), 15.0)
+
+
+def test_connector_bad_values_cost_only_their_key(user_themes, capsys):
+    (user_themes / "kaputt.toml").write_text(
+        '[connector]\nshadow = 1\nstyle = "zickzack"\nwidth = "dick"\nglow = 0.3\n')
+    t = theme.load("kaputt")
+    d = theme.Theme()
+    assert (t.connector_shadow, t.connector_style, t.connector_width) == \
+        (d.connector_shadow, d.connector_style, d.connector_width)
+    assert t.connector_glow == 0.3
+    assert len(capsys.readouterr().err.strip().splitlines()) == 3
+
+
+def test_neon_connector_is_an_amber_power_line():
+    """Live round 3: "power connection line" — amber, glowing, on a shadow."""
+    t = theme.Theme()
+    assert t.connector_line_rgb() == t.modifier
+    assert t.connector_glow > 0 and t.connector_shadow
+    assert t.connector_label_rgb() == t.modifier

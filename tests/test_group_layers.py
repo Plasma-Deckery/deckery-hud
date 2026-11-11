@@ -250,3 +250,81 @@ def test_a_press_after_a_cached_switch_keeps_its_own_shadow():
     pressed = _layers(base, {"A": FULL}, press_t={"BTN_SOUTH": 1.0})["A"]
     assert pressed.surface is not rest.surface
     assert pressed.shadow == rest.shadow
+
+
+# ── The gesture connector as a cached layer with its own shadow ──────────
+
+def _gesture():
+    st = copy.deepcopy(SAMPLES["base_only"])
+    st["trackpads"] = {"left": {"touching": True, "x": 0.3, "y": 0.4, "mode": "mouse"},
+                       "right": {"touching": True, "x": 0.6, "y": 0.5, "mode": "mouse"},
+                       "gesture": {"touching": True}}
+    return st
+
+
+def _pads(state, **kw):
+    return group_layers(state, SW, SH, {"LPad": FULL, "RPad": FULL}, **kw)
+
+
+def test_connector_layer_has_a_shadow_like_every_element():
+    c = _pads(_gesture())["connector"]
+    assert c is not None and c.shadow is not None and c.bleed is not None
+    x, y, w, h = c.rect
+    assert x < SW / 2 < x + w   # spans screen centre
+
+
+def test_connector_layer_only_while_gesturing():
+    assert _pads(SAMPLES["base_only"])["connector"] is None
+    st = _gesture()
+    assert group_layers(st, SW, SH, {"LPad": FULL})["connector"] is None
+
+
+def test_connector_layer_is_cached():
+    st = _gesture()
+    assert _pads(st)["connector"] is _pads(copy.deepcopy(st))["connector"]
+
+
+def test_connector_without_shadow_or_glow(monkeypatch):
+    import dataclasses
+    import theme
+    monkeypatch.setattr(theme, "_active", dataclasses.replace(
+        theme.Theme(), connector_shadow=False, connector_glow=0.0))
+    c = _pads(_gesture())["connector"]
+    assert c.shadow is None and c.bleed is None
+
+
+def test_connector_glow_without_a_shadow(monkeypatch):
+    """No plate or cloud, but the neon halo still needs its slot."""
+    import dataclasses
+    import theme
+    monkeypatch.setattr(theme, "_active", dataclasses.replace(
+        theme.Theme(), connector_shadow=False, connector_glow=0.8))
+    c = _pads(_gesture())["connector"]
+    assert c.shadow is not None and c.bleed is None
+
+
+def test_connector_glows_in_its_own_colour(monkeypatch):
+    import dataclasses
+    import numpy as np
+    import theme
+    monkeypatch.setattr(theme, "_active", dataclasses.replace(
+        theme.Theme(), connector_color=(0.0, 1.0, 0.0), connector_shadow=False,
+        connector_glow=1.0))
+    c = _pads(_gesture())["connector"]
+    surf = c.shadow[0]
+    surf.flush()
+    px = np.ndarray((surf.get_height(), surf.get_stride() // 4, 4), np.uint8, surf.get_data())
+    lit = px[px[..., 3] > 40]
+    assert len(lit) and (lit[:, 1] > lit[:, 2] + 40).mean() > 0.9   # green, not red/blue
+
+
+def test_reference_path_draws_the_connector_at_rest_and_mid_slide():
+    import cairo
+    from renderer_split import draw_hud_split
+    for open_t in (0.5, 1.0):
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, SW, SH)
+        draw_hud_split(cairo.Context(surf), None, None, _gesture(), SW, SH, open_t=open_t)
+        surf.flush()
+        import numpy as np
+        px = np.ndarray((SH, surf.get_stride() // 4, 4), np.uint8, surf.get_data())
+        assert px[:, SW // 2 - 200, 3].max() > 0, open_t   # the line, left of the label

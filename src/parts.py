@@ -118,14 +118,14 @@ def clip_to_part(cr, name, ox, oy, scale):
     cr.clip()
 
 
-def stroke_outline(cr, color=None, lw=None):
+def stroke_outline(cr, color=None, lw=None, style=None):
     """Stroke (and consume) the current path as a shape contour, in the
     theme's outline style (B-20): solid, dashed, double (two thin lines
-    with a gap) or none. color/lw default to the theme's outline."""
+    with a gap) or none. color/lw/style default to the theme's outline."""
     t = theme.current()
     color = color or t.outline
     lw = lw if lw is not None else t.outline_width
-    style = t.outline_style
+    style = style or t.outline_style
     if style == "none" or lw <= 0 or color[3] <= 0:
         cr.new_path()
         return

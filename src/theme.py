@@ -14,7 +14,8 @@ same name in ~/.config/deckery-hud/themes/ replaces one, any other name adds
 one. A theme names another with `extends` and changes only what it lists.
 The default, "neon", is the HUD as it was before themes existed: every
 default below is the constant that used to sit in the drawing code, so
-its renders are pixel-identical.
+its renders are pixel-identical — except the gesture connector, which
+became an amber power line with glow and shadow (B-12).
 
     label = "Neon kräftig"          # shown in the theme mode
     extends = "neon"
@@ -33,6 +34,10 @@ its renders are pixel-identical.
 
     [stick]                         # ring, cap, cap_border, width
     [callout]                       # width, alpha, dot
+    [connector]                     # the gesture line between both pads and its label:
+    color = "#ffca33"               # color, alpha, width, style, glow, glow_radius,
+    glow = 0.9                      # shadow = true/false, label_color, label_size,
+                                    # label_glow = true/false
     [text]                          # font, weight, scale, transform = "upper"
 
     [pill]
@@ -116,6 +121,19 @@ class Theme:
     callout_alpha: float = 1.0            # factor on the lines' own alphas
     dot_radius: float = 3.0               # the dot at the button
 
+    # ── Gesture connector: the line between both pads touched at once, and
+    #    its label at screen centre — an amber power line in neon ──
+    connector_color: tuple = None         # rgb; None = `modifier`
+    connector_alpha: float = 0.95
+    connector_width: float = 2.0          # 0 = callout_width
+    connector_style: str = "solid"        # solid | dashed | double | none
+    connector_glow: float = 0.9           # neon halo around the line, 0 = none
+    connector_glow_radius: float = 7.0    # px
+    connector_shadow: bool = True         # the theme's shadow under it, as under every element
+    connector_label_color: tuple = None   # rgb; None = the line's colour
+    connector_label_size: float = 13.0
+    connector_label_glow: bool = False    # the halo around the label's letters too
+
     # ── Text ──
     text_weight: str = ""                 # Pango weight for non-bold text: Light, Medium, …
     text_scale: float = 1.0
@@ -166,6 +184,12 @@ class Theme:
 
     def shadow_style(self):
         return _shadow_style(self.shadow, self.shadow_tweaks)
+
+    def connector_line_rgb(self):
+        return self.connector_color or self.modifier
+
+    def connector_label_rgb(self):
+        return self.connector_label_color or self.connector_line_rgb()
 
 
 _style_cache = {}
@@ -271,7 +295,7 @@ _RGBA = {"outline", "active_fill", "pill_top", "pill_bottom", "pill_fg", "pill_b
          "shape_fill", "stick_ring", "stick_cap", "stick_cap_border"}
 
 # The per-component sections: [section] key -> (Theme field, kind). Kinds:
-# rgba / rgb colour, num, or a tuple of allowed strings.
+# rgba / rgb colour, num, bool, str, or a tuple of allowed strings.
 _SECTIONS = {
     "shape": {"outline": ("outline", "rgba"), "width": ("outline_width", "num"),
               "style": ("outline_style", ("solid", "dashed", "double", "none")),
@@ -280,6 +304,15 @@ _SECTIONS = {
               "cap_border": ("stick_cap_border", "rgba"), "width": ("stick_width", "num")},
     "callout": {"width": ("callout_width", "num"), "alpha": ("callout_alpha", "num"),
                 "dot": ("dot_radius", "num")},
+    "connector": {"color": ("connector_color", "rgb"), "alpha": ("connector_alpha", "num"),
+                  "width": ("connector_width", "num"),
+                  "style": ("connector_style", ("solid", "dashed", "double", "none")),
+                  "glow": ("connector_glow", "num"),
+                  "glow_radius": ("connector_glow_radius", "num"),
+                  "shadow": ("connector_shadow", "bool"),
+                  "label_color": ("connector_label_color", "rgb"),
+                  "label_size": ("connector_label_size", "num"),
+                  "label_glow": ("connector_label_glow", "bool")},
     "text": {"font": ("font", "str"), "weight": ("text_weight", "str"),
              "scale": ("text_scale", "num"), "transform": ("text_transform", ("", "upper"))},
 }
@@ -381,6 +414,11 @@ def _section(name, value, vals, where):
             _col(vals, f, v, where, kind == "rgba")
         elif kind == "num":
             _num(vals, f, v, where)
+        elif kind == "bool":
+            if type(v) is bool:
+                vals[f] = v
+            else:
+                _warn(f"{where}: {name}.{k} braucht true/false")
         elif kind == "str":
             if isinstance(v, str):
                 vals[f] = v.strip()
