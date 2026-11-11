@@ -13,7 +13,8 @@ gi.require_version('Gtk4LayerShell', '1.0')
 from gi.repository import Gtk, Gtk4LayerShell as LayerShell, GLib
 import cairo
 
-from helpers import _pill_row, _K, GLASS_PILL, GLASS_PILL_FG
+from helpers import _pill_row, _K, GLASS_PILL, GLASS_PILL_FG, capture_text_boxes
+import pill_shadow
 from toast import draw_toast
 
 _TOAST_TTL_MS   = 1500
@@ -148,15 +149,26 @@ class OsdWin(Gtk.ApplicationWindow):
         if outputs:
             labels = [_K.get(k, k.replace("KEY_", "").replace("BTN_", ""))
                       for k in outputs]
-            _pill_row(
-                cr,
-                sw / 2, sh - 28,
-                labels,
-                sep="+", size=9,
-                glass=GLASS_PILL, fg=GLASS_PILL_FG,
-                sep_rgba=(0.5, 0.5, 0.52, 0.9),
-                ha="center",
-            )
+            # The pills' shadow goes underneath, but where they sit is only
+            # known once they're laid out: draw them into a group first.
+            with capture_text_boxes() as cap:
+                cr.push_group()
+                _pill_row(
+                    cr,
+                    sw / 2, sh - 28,
+                    labels,
+                    sep="+", size=9,
+                    glass=GLASS_PILL, fg=GLASS_PILL_FG,
+                    sep_rgba=(0.5, 0.5, 0.52, 0.9),
+                    ha="center",
+                )
+                pills = cr.pop_group()
+            cr.save()
+            cr.identity_matrix()   # boxes are in device space
+            pill_shadow.paint(cr, cap.glass_boxes)
+            cr.restore()
+            cr.set_source(pills)
+            cr.paint()
 
         # ── Toast — rises from bottom-center ─────────────────────────────
         if self._active_toasts:

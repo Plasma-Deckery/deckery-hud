@@ -145,6 +145,32 @@ def test_shadow_sits_behind_its_element():
             assert sx <= bx and sx + sw_ >= bx + bw, name
 
 
+def _center_shadow_alpha(state):
+    import cairo
+    import numpy as np
+    from renderer_split import paint_scaled
+    surf, x, y, w, h = _layers(state, {"center": FULL})["center"].shadow
+    big = cairo.ImageSurface(cairo.FORMAT_ARGB32, SW, SH)
+    cr = cairo.Context(big)
+    cr.translate(x, y)
+    paint_scaled(cr, surf, w, h)
+    big.flush()
+    a = np.ndarray((SH, big.get_stride() // 4, 4), np.uint8, big.get_data())[:, :SW, 3]
+    return a.astype(np.float32) / 255.0
+
+
+def test_glass_pill_casts_a_gentle_shadow():
+    """The active-outputs glass pill (B-04) gets pill_shadow's soft cloud,
+    not a legend plate plus traced edge — those read as a dark rim (alpha
+    ~0.8 right at the pill)."""
+    state = copy.deepcopy(SAMPLES["held_modifier"])
+    state["context"]["active_outputs"] = []
+    without = _center_shadow_alpha(state)
+    state["context"]["active_outputs"] = [{"key": "KEY_LEFTCTRL", "silent": False}]
+    added = _center_shadow_alpha(state) - without
+    assert 0.1 < added.max() < 0.5
+
+
 def test_shoulder_halves_cast_separate_shadows():
     """L1 and L2 share one wedge; each casts only its own half."""
     groups = _layers(SAMPLES["base_only"], {e: FULL for e in ("L1", "L2")})

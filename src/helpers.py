@@ -32,11 +32,13 @@ _text_sink = None
 
 class capture_text_boxes:
     """with capture_text_boxes() as cap: ... — cap.boxes fills with
-    (x, y, w, h), cap.texts with the matching strings."""
+    (x, y, w, h), cap.texts with the matching strings. Glass pills (see
+    _glass_pill) go to cap.glass_boxes instead: they get a shadow of their
+    own (pill_shadow.py), not a legend plate."""
 
     def __enter__(self):
         global _text_sink
-        self._prev, self.boxes, self.texts = _text_sink, [], []
+        self._prev, self.boxes, self.texts, self.glass_boxes = _text_sink, [], [], []
         _text_sink = self
         return self
 
@@ -45,12 +47,16 @@ class capture_text_boxes:
         _text_sink = self._prev
 
 
-def _note_box(cr, x, y, w, h, text):
+def _note_box(cr, x, y, w, h, text, glass=False):
     if _text_sink is None:
         return
     pts = [cr.user_to_device(x + dx, y + dy) for dx in (0, w) for dy in (0, h)]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    _text_sink.boxes.append((min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)))
+    box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+    if glass:
+        _text_sink.glass_boxes.append(box)
+        return
+    _text_sink.boxes.append(box)
     _text_sink.texts.append(text)
 
 
@@ -309,7 +315,7 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         pill_y = cy - ph / 2
 
         p_bg, p_fg = (styles[i] if styles and i < len(styles) else (bg, fg))
-        _note_box(cr, x, pill_y, pill_w, ph, labels[i])
+        _note_box(cr, x, pill_y, pill_w, ph, labels[i], glass=glass is not None)
 
         # Background
         if glass is not None:

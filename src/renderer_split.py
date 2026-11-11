@@ -30,6 +30,7 @@ from parts import draw_part, part_bbox, clip_to_part, part_subpaths, _DEFAULT_CO
 from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
                     style_from_env)
 import icons
+import pill_shadow
 from reveal import FULL
 from elements import ELEMENTS, ELEMENT_IDS, side_of
 from settings import dbg, debug_enabled
@@ -456,6 +457,42 @@ def _diff_vms(side, old, new):
 _center_cache = {"key": None, "layer": None}
 
 
+def _without_glass(surf, rect, boxes):
+    """Copy of a layer bitmap with the glass pills cut out, for the edge
+    shadow to trace — traced around a light pill it reads as a dark rim."""
+    if not boxes:
+        return surf
+    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, surf.get_width(), surf.get_height())
+    out.set_device_scale(*surf.get_device_scale())
+    cr = cairo.Context(out)
+    cr.set_source_surface(surf, 0, 0)
+    cr.paint()
+    cr.set_operator(cairo.OPERATOR_CLEAR)
+    cr.translate(-rect[0], -rect[1])
+    for x, y, w, h in boxes:
+        _rrect(cr, x - 3, y - 3, w + 6, h + 6, h / 2 + 3)
+        cr.fill()
+    return out
+
+
+def _with_glass_shadow(shadow, boxes):
+    """The element's shadow slot with the glass pills' own shadow (see
+    pill_shadow.py) added — a new surface, the cached one stays as it is.
+    The pills sit inside the element's ink, which the slot already covers
+    with B-14's wider reach."""
+    if shadow is None or not boxes:
+        return shadow
+    surf, x, y, w, h = shadow
+    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, surf.get_width(), surf.get_height())
+    out.set_device_scale(*surf.get_device_scale())
+    cr = cairo.Context(out)
+    cr.set_source_surface(surf, 0, 0)
+    cr.paint()
+    cr.translate(-x, -y)
+    pill_shadow.paint(cr, boxes)
+    return out, x, y, w, h
+
+
 def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
     ctx = state.get("context") or {}
     outs = tuple(e.get("key", "") if isinstance(e, dict) else e
@@ -466,7 +503,10 @@ def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
         with capture_text_boxes() as cap:
             surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
                                          sw, sh, dev_scale)
-        shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap, surf, rect, dev_scale)
+        shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap,
+                                         _without_glass(surf, rect, cap.glass_boxes),
+                                         rect, dev_scale)
+        shadow = _with_glass_shadow(shadow, cap.glass_boxes)
         layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
                            shadow=shadow, bleed=bleed, vms={})
         _center_cache.update(key=key, layer=layer)
