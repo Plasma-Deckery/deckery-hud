@@ -32,6 +32,7 @@ class ButtonVM:
     is_avail_virt_mod: bool  # ...and it's a virtual (hint-only) modifier
     sub_label: str = None     # second-line label (Gaming Mode trigger only, today)
     sub_active: bool = False
+    note: str = None          # how the action is used ("halten"), from makima's note = "…"
 
 
 def classify_button(btn_key, state, *, gaming_mode_btn=_GAMING_MODE_BTN):
@@ -82,9 +83,11 @@ def classify_button(btn_key, state, *, gaming_mode_btn=_GAMING_MODE_BTN):
         # bindings, so this applies uniformly.
         layer_override = b.get("origin", base_layer) != base_layer
         action = b.get("label") or _fmt(b["action"])
+        note = b.get("note")
     else:
         layer_override = False
         action = "—"
+        note = None
 
     sub_label = gm_sub_label if btn_key == gaming_mode_btn else None
     sub_active = is_active if btn_key == gaming_mode_btn else False
@@ -94,7 +97,7 @@ def classify_button(btn_key, state, *, gaming_mode_btn=_GAMING_MODE_BTN):
         layer_override=layer_override, is_active=is_active, active_mod=is_mod,
         is_combo=is_combo, is_hint=is_hint, is_avail_mod=is_avail_mod,
         is_avail_app_mod=is_avail_app_mod, is_avail_virt_mod=is_avail_virt_mod,
-        sub_label=sub_label, sub_active=sub_active,
+        sub_label=sub_label, sub_active=sub_active, note=note,
     )
 
 
