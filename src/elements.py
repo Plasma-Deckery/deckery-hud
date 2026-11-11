@@ -59,6 +59,9 @@ _ALL = (
 ELEMENTS = {e.id: e for e in _ALL}
 ELEMENT_IDS = tuple(e.id for e in _ALL)
 
+# The trackpads: shown, they need makima's live touch positions.
+PAD_ELEMENTS = frozenset(e.id for e in _ALL if e.kind == "pad")
+
 # Which element a button's legend and art belong to.
 BUTTON_ELEMENT = {b: e.id for e in _ALL for b in e.buttons}
 

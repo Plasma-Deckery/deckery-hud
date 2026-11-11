@@ -22,6 +22,7 @@ import win
 import layout_choice
 from osd_win import OsdWin
 from reveal import Reveal, deadline_delay_ms
+from elements import PAD_ELEMENTS
 import settings
 from settings import Settings
 
@@ -202,7 +203,7 @@ class App(Gtk.Application):
         HUD closed). Switched off only once the pads are fully gone, not at
         the start of their exit — dropping the data mid-slide changed the
         pad legend and forced a re-render right in the middle of it."""
-        want = self._full or bool({"l_pad", "r_pad"} & self._win.visible_groups())
+        want = self._full or bool(PAD_ELEMENTS & self._win.visible_groups())
         if want != self._analog_on:
             self._analog_on = want
             (makima_analog_on if want else makima_analog_off)()

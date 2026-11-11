@@ -36,3 +36,23 @@ def test_layout_choice_reads_only_the_settings_file(monkeypatch, tmp_path):
     with layout_choice.building("classic"):
         assert layout_choice.current() == "classic"
     assert layout_choice.current() == "split"
+
+
+def test_analog_export_follows_a_single_pad(monkeypatch):
+    """A pad shown on its own needs the live touch positions too, not only
+    the full HUD (live round 2: the right pad's dot didn't follow)."""
+    import types
+    import app
+    calls = []
+    monkeypatch.setattr(app, "makima_analog_on", lambda: calls.append("on"))
+    monkeypatch.setattr(app, "makima_analog_off", lambda: calls.append("off"))
+    shown = set()
+    fake = types.SimpleNamespace(_full=False, _analog_on=False,
+                                 _win=types.SimpleNamespace(visible_groups=lambda: frozenset(shown)))
+    shown.add("RPad")
+    app.App._on_groups_changed(fake)
+    assert calls == ["on"]
+    shown.clear()
+    shown.add("QAM")
+    app.App._on_groups_changed(fake)
+    assert calls == ["on", "off"]
