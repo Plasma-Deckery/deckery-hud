@@ -118,17 +118,54 @@ def clip_to_part(cr, name, ox, oy, scale):
     cr.clip()
 
 
+def stroke_outline(cr, color=None, lw=None):
+    """Stroke (and consume) the current path as a shape contour, in the
+    theme's outline style (B-20): solid, dashed, double (two thin lines
+    with a gap) or none. color/lw default to the theme's outline."""
+    t = theme.current()
+    color = color or t.outline
+    lw = lw if lw is not None else t.outline_width
+    style = t.outline_style
+    if style == "none" or lw <= 0 or color[3] <= 0:
+        cr.new_path()
+        return
+    cr.set_source_rgba(*color)
+    if style == "double":
+        # One wide line with its middle cut out, in a group so the cut
+        # only removes this contour, not what is under it.
+        cr.push_group()
+        cr.set_source_rgba(*color)
+        cr.set_line_width(lw * 3)
+        cr.stroke_preserve()
+        cr.set_operator(cairo.OPERATOR_CLEAR)
+        cr.set_line_width(lw)
+        cr.stroke()
+        cr.pop_group_to_source()
+        cr.paint()
+        return
+    cr.set_line_width(lw)
+    if style == "dashed":
+        cr.set_dash([lw * 3.0, lw * 2.4])
+        cr.stroke()
+        cr.set_dash([])
+    else:
+        cr.stroke()
+
+
+def idle_fill():
+    """The theme's fill for a shape at rest, or None (B-20)."""
+    f = theme.current().shape_fill
+    return f if f[3] > 0 else None
+
+
 def draw_part(cr, name, ox, oy, scale, color=None, lw=None, fill_color=None):
     """fill_color: an active-state wash under the part's own outline stroke
     (kept as a separate colour/alpha from the stroke — filling with the
     stroke colour itself would wash the outline out along with the fill).
     color/lw default to the theme's outline."""
-    t = theme.current()
     cr.new_path()
     replay(cr, part_subpaths(name), ox, oy, scale)
     if fill_color is not None:
         cr.set_source_rgba(*fill_color)
         cr.fill_preserve()
-    cr.set_source_rgba(*(color or t.outline))
-    cr.set_line_width(lw if lw is not None else t.outline_width)
-    cr.stroke()
+    stroke_outline(cr, color, lw)

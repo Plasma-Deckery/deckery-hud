@@ -206,7 +206,8 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
 
     ROW       = row
     SUB_EXTRA = row   # extra row height reserved for an entry's sub_label line
-    DOT = 3
+    th = theme.current()
+    DOT = th.dot_radius
 
     # Row heights vary: an entry with a sub_label (Gaming Mode's second line
     # under BTN_BASE) reserves an extra ROW so the following entries don't
@@ -306,8 +307,8 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
             cr.fill()
 
         # ── Callout line ─────────────────────────────────────────────────────
-        cr.set_source_rgba(*line_col)
-        cr.set_line_width(1.4)
+        cr.set_source_rgba(*line_col[:3], line_col[3] * t.callout_alpha)
+        cr.set_line_width(t.callout_width)
         ex = (bx + ax) / 2
         cr.move_to(bx, by)
         cr.line_to(ex, ly)

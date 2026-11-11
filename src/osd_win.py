@@ -245,6 +245,7 @@ class OsdWin(Gtk.ApplicationWindow):
                     labels,
                     sep="+", size=9,
                     glass=theme.current().glass, fg=theme.current().pill_fg,
+                    border=theme.current().pill_border,
                     sep_rgba=(0.5, 0.5, 0.52, 0.9),
                     ha="center",
                 )

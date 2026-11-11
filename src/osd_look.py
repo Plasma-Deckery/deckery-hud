@@ -153,7 +153,7 @@ def pills_sprite(labels, style, dev_scale=1.0):
     def build():
         def draw(cr):
             _pill_row(cr, 0, 0, list(labels), sep="+", size=PILL_SIZE,
-                      glass=t.glass, fg=t.pill_fg,
+                      glass=t.glass, fg=t.pill_fg, border=t.pill_border,
                       sep_rgba=(0.5, 0.5, 0.52, 0.9), ha="center")
         rec, cap = _record(draw)
 

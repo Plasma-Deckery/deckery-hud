@@ -27,7 +27,7 @@ from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
 from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
 from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
                           center_theme_rect, theme_panel_rect)
-from parts import draw_part, part_bbox, clip_to_part, part_subpaths
+from parts import draw_part, part_bbox, clip_to_part, part_subpaths, stroke_outline, idle_fill
 from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
                     neutral_rgb, style_from_env)
 import icons
@@ -719,7 +719,7 @@ def _draw_gesture_connector(cr, l_tx, r_tx, pv, sw):
     gap = tw / 2 + 6   # stop the lines short of the text, same convention _callouts() uses
 
     cr.set_source_rgba(*line_col)
-    cr.set_line_width(1.4)
+    cr.set_line_width(theme.current().callout_width)
     cr.move_to(lx, ly)
     cr.line_to(cx - gap, cy)
     cr.stroke()
@@ -966,7 +966,7 @@ def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(),
             continue
         btn_key = _PART_BTN.get(part_name)
         vm = vms[btn_key] if btn_key else None
-        fill_color = _active_fill_color(vm)
+        fill_color = _active_fill_color(vm) or idle_fill()
         outline_color = _avail_mod_color(vm) or theme.current().outline
         if pv is not None and (
             (part_name == "trackpad_l" and pv.lpad_label == "Disabled") or
@@ -995,10 +995,8 @@ def _render_part_cluster(cr, name, ox, oy, scale, vms, active_press=frozenset(),
                 cr.set_source_rgba(*fill_color)
                 _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
                 cr.fill()
-            cr.set_source_rgba(*outline_color)
-            cr.set_line_width(theme.current().outline_width)
             _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
-            cr.stroke()
+            stroke_outline(cr, outline_color)
         else:
             draw_part(cr, part_name, pox, poy, scale, color=outline_color,
                       fill_color=fill_color)
@@ -1191,7 +1189,7 @@ def _draw_shoulder_fills(cr, name, ox, oy, scale, vms, only=None):
         # Fill: needs *both* clips (true shape ∩ half-plane) to stay inside
         # the real silhouette instead of the half-plane's own straight,
         # infinitely-extended edges.
-        fill_color = _active_fill_color(vm)
+        fill_color = _active_fill_color(vm) or idle_fill()
         if fill_color:
             cr.save()
             clip_to_part(cr, part, ox, oy, scale)
@@ -1380,7 +1378,7 @@ def draw_dpad_live(cr, ox, oy, scale, vms, press_t):
         cr.scale(sx, 1.0)
         cr.translate(-hinge_x, 0)
 
-    draw_part(cr, "dpad", pox, poy, scale)
+    draw_part(cr, "dpad", pox, poy, scale, fill_color=idle_fill())
     _draw_dpad_fills(cr, pox, poy, scale, vms)
     cr.restore()
 
@@ -1408,7 +1406,7 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
         cr.scale(s, s)
         cr.translate(-cx, -cy)
 
-    fill_color = _active_fill_color(vm)
+    fill_color = _active_fill_color(vm) or idle_fill()
     outline_color = _avail_mod_color(vm) or theme.current().outline
 
     if part_name in _FRAGMENTED_FILL_PARTS:
@@ -1418,10 +1416,8 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
             cr.set_source_rgba(*fill_color)
             _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
             cr.fill()
-        cr.set_source_rgba(*outline_color)
-        cr.set_line_width(theme.current().outline_width)
         _rrect(cr, rx, ry, rw, rh, _PADDLE_CORNER_R * scale)
-        cr.stroke()
+        stroke_outline(cr, outline_color)
     else:
         draw_part(cr, part_name, pox, poy, scale, color=outline_color,
                   fill_color=fill_color)
@@ -1820,6 +1816,7 @@ def _draw_center(cr, state, center, open_t):
         pill_prefix_icons = [None if k in _CLICK_ICON_NAME else _kbd_cb() for k in outputs]
         _pill_row(cr, cx, (y0 + y1) / 2, out_labels, sep="+", size=10,
                   glass=_fade_glass(t.glass, alpha), fg=icon_color,
+                  border=(*t.pill_border[:3], t.pill_border[3] * alpha) if t.pill_border else None,
                   sep_rgba=(0.5, 0.5, 0.52, 0.9 * alpha), ha="center",
                   icons=pill_icons, prefix_icons=pill_prefix_icons,
                   icon_size=_PILL_ICON_SIZE)

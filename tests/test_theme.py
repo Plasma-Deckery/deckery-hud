@@ -33,13 +33,13 @@ def test_default_is_the_old_constants():
 
 def test_builtins_in_order():
     names = theme.names()
-    assert names[:4] == ["neon", "neon-kraeftig", "ruhig", "modifier"]
+    assert names[:6] == ["neon", "neon-kraeftig", "ruhig", "modifier", "flach", "kontur"]
     for n in names:
         assert theme.load(n) is not None
 
 
 def test_builtin_presets_parse_cleanly(capsys):
-    for n in ("neon-kraeftig", "ruhig", "modifier"):
+    for n in ("neon-kraeftig", "ruhig", "modifier", "flach", "kontur"):
         theme.load(n)
     assert capsys.readouterr().err == ""
 
@@ -134,3 +134,78 @@ def test_osd_sprites_key_on_theme(user_themes):
     theme.activate("neon-kraeftig")
     b = osd_look.pills_sprite(("Ctrl",), style)
     assert a is not b
+
+
+def test_component_sections(user_themes, capsys):
+    (user_themes / "c.toml").write_text(
+        '[shape]\nstyle = "double"\nwidth = 2\nfill = "#10203040"\nwobble = 1\n'
+        '[stick]\ncap = "#ffffff"\n[callout]\ndot = 4\n'
+        '[text]\ntransform = "upper"\nweight = "Light"\nscale = 1.1\n'
+        '[pill]\nborder = "#ffffff80"\n[shadow]\nshadow_rgb = "#102030"\noffset_y = 3\n')
+    t = theme.load("c")
+    assert t.outline_style == "double" and t.outline_width == 2.0
+    assert t.shape_fill[3] == pytest.approx(0x40 / 255)
+    assert t.stick_cap == (1.0, 1.0, 1.0, 1.0)
+    assert t.dot_radius == 4.0
+    assert (t.text_transform, t.text_weight, t.text_scale) == ("upper", "Light", 1.1)
+    assert t.pill_border[3] == pytest.approx(0x80 / 255)
+    st = t.shadow_style()
+    assert st.offset_y == 3.0 and st.shadow_rgb == pytest.approx((0x10 / 255, 0x20 / 255, 0x30 / 255))
+    assert "wobble" in capsys.readouterr().err
+
+
+def test_bad_choice_in_section(user_themes, capsys):
+    (user_themes / "d.toml").write_text('[shape]\nstyle = "zickzack"\n')
+    assert theme.load("d").outline_style == "solid"
+    assert "zickzack" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("style", ["solid", "dashed", "double", "none"])
+def test_outline_styles_draw(user_themes, style):
+    import cairo
+    import parts
+    (user_themes / "o.toml").write_text(f'[shape]\nstyle = "{style}"\nwidth = 3\n')
+    theme.activate("o")
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 60, 60)
+    cr = cairo.Context(surf)
+    cr.set_source_rgb(0, 0, 1)
+    cr.paint()
+    cr.rectangle(15, 15, 30, 30)
+    parts.stroke_outline(cr)
+    surf.flush()
+    px = bytes(surf.get_data())
+    stride = surf.get_stride()
+    at = lambda x, y: px[y * stride + x * 4: y * stride + x * 4 + 4]
+    assert at(5, 5) == bytes((255, 0, 0, 255))          # outside: untouched
+    if style == "none":
+        assert at(15, 30) == bytes((255, 0, 0, 255))
+    elif style == "double":
+        assert at(15, 30) == bytes((255, 0, 0, 255))     # the gap shows what is under it
+        assert at(18, 30) != bytes((255, 0, 0, 255))
+    else:
+        assert at(19, 15) != bytes((255, 0, 0, 255))     # the start of the top edge
+
+
+def test_shadow_offset_moves_the_layers():
+    import cairo
+    spec = shadow.GroupShadowSpec(rrects=((40, 40, 60, 30, 8),), ink=(40, 40, 60, 30))
+    base = dataclasses.replace(shadow.PRESETS["dezent"])
+    off = dataclasses.replace(base, offset_x=3.0, offset_y=4.0)
+    a, ab = shadow.group_shadow_layers(spec, base, None, None)
+    b, bb = shadow.group_shadow_layers(spec, off, None, None)
+    assert (b[1] - a[1], b[2] - a[2]) == (3.0, 4.0)
+    assert (bb[1] - ab[1], bb[2] - ab[2]) == (3.0, 4.0)
+
+
+def test_text_tokens():
+    import cairo
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 10, 10)
+    cr = cairo.Context(surf)
+    w0, h0 = helpers._txt_size(cr, "abc", 12)
+    try:
+        theme._active = dataclasses.replace(theme.Theme(), text_transform="upper", text_scale=1.5)
+        w1, h1 = helpers._txt_size(cr, "abc", 12)
+        assert helpers._case("abc") == "ABC"
+        assert h1 > h0 and w1 > w0
+    finally:
+        theme.activate(theme.DEFAULT)

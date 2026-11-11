@@ -70,6 +70,21 @@ def _note_box(cr, x, y, w, h, text, glass=False, colour=None):
     _text_sink.colours.append(tuple(colour[:3]) if colour else None)
 
 
+def _font(size, bold=False):
+    """The theme's font at `size` (scaled by text_scale), bold or in the
+    theme's text_weight (B-20)."""
+    t = theme.current()
+    weight = "Bold" if bold else t.text_weight
+    if t.text_scale != 1.0:
+        size = size * t.text_scale
+    return Pango.FontDescription.from_string(f"{t.font} {weight} {size}")
+
+
+def _case(text):
+    """`text` in the theme's text_transform."""
+    return text.upper() if theme.current().text_transform == "upper" else text
+
+
 def _pango_esc(s):
     """Escape special characters for Pango markup."""
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -137,10 +152,8 @@ def _glass_pill(cr, x, y, w, h, r, g):
 
 def _txt(cr, x, y, text, size=12, bold=False, ha="left", va="top"):
     lo = PangoCairo.create_layout(cr)
-    weight = "Bold" if bold else ""
-    lo.set_font_description(
-        Pango.FontDescription.from_string(f"{theme.current().font} {weight} {size}"))
-    lo.set_text(text, -1)
+    lo.set_font_description(_font(size, bold))
+    lo.set_text(_case(text), -1)
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
     ty = y - (ph if va == "bottom" else ph / 2 if va == "mid" else 0)
@@ -173,10 +186,8 @@ def _txt_smooth(cr, x, y, text, size=12, bold=False, ha="center", va="mid"):
     lo = PangoCairo.create_layout(cr)
     PangoCairo.context_set_font_options(lo.get_context(), _UNHINTED)
     lo.context_changed()
-    weight = "Bold" if bold else ""
-    lo.set_font_description(
-        Pango.FontDescription.from_string(f"{theme.current().font} {weight} {size}"))
-    lo.set_text(text, -1)
+    lo.set_font_description(_font(size, bold))
+    lo.set_text(_case(text), -1)
     ink, _logical = lo.get_extents()
     ix, iy = ink.x / Pango.SCALE, ink.y / Pango.SCALE
     iw, ih = ink.width / Pango.SCALE, ink.height / Pango.SCALE
@@ -192,10 +203,8 @@ def _txt_smooth(cr, x, y, text, size=12, bold=False, ha="center", va="mid"):
 def _txt_size(cr, text, size=12, bold=False):
     """Return (pixel_width, pixel_height) of text without drawing."""
     lo = PangoCairo.create_layout(cr)
-    weight = "Bold" if bold else ""
-    lo.set_font_description(
-        Pango.FontDescription.from_string(f"{theme.current().font} {weight} {size}"))
-    lo.set_text(text, -1)
+    lo.set_font_description(_font(size, bold))
+    lo.set_text(_case(text), -1)
     return lo.get_pixel_size()
 
 
@@ -246,7 +255,7 @@ def _txt_icon_size(cr, text, size=12):
 def _txt_markup(cr, x, y, markup, size=12, ha="left", va="top"):
     """Like _txt but accepts Pango markup (inline colours via <span foreground=…>)."""
     lo = PangoCairo.create_layout(cr)
-    lo.set_font_description(Pango.FontDescription.from_string(f"{theme.current().font} {size}"))
+    lo.set_font_description(_font(size))
     lo.set_markup(markup, -1)
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
@@ -306,13 +315,13 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     PX, PY    = 7, 2   # horizontal / vertical padding inside pill
     SEP_GAP   = 4      # space on each side of a separator glyph
     PILL_GAP  = 5      # gap between adjacent pills when sep is empty string
-    font_str  = f"{theme.current().font} Bold {size}"
-    sep_font  = f"{theme.current().font} {size}"
+    font_str  = _font(size, True)
+    sep_font  = _font(size)
 
     def _lo(text, markup_font):
         lo = PangoCairo.create_layout(cr)
-        lo.set_font_description(Pango.FontDescription.from_string(markup_font))
-        lo.set_text(text, -1)
+        lo.set_font_description(markup_font)
+        lo.set_text(_case(text), -1)
         return lo, lo.get_pixel_size()
 
     # sep may be a single string (applied to all gaps) or a list (one per gap)
