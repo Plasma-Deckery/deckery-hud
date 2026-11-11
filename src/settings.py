@@ -72,8 +72,8 @@ class RevealSettings:
         "Wie lange die Geste gehalten wird, bis beide Pads erscheinen (ms).",
         minimum=1))
     release_ms: int = field(default=250, metadata=_meta(
-        "Wie lange eine Gruppe nach dem Loslassen stehen bleibt; kürzeres Abheben "
-        "wird überbrückt (ms).",
+        "Loslassen blendet sofort aus; wer innerhalb dieser Zeit wieder drückt oder "
+        "berührt, sieht die Gruppe gleich wieder, ohne neue Haltezeit (ms).",
         minimum=1))
     slide_ms: int = field(default=260, metadata=_meta(
         "Dauer des Hereinfahrens, wenn das volle HUD auf- oder zugeht (ms).",

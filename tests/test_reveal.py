@@ -55,14 +55,18 @@ def test_hold_gap_longer_than_release_restarts():
     assert h.update(True, 3.2)
 
 
-def test_hold_release_delay():
+def test_hold_release_is_immediate_but_bridged():
+    """Live round 2: letting go hides at once. Coming back within
+    release_ms shows again at once, without a new hold."""
     h = Hold(1500, 500)
     h.update(True, 0.0)
     assert h.update(True, 1.5)
-    assert h.update(False, 2.0)
-    assert h.next_change(2.0) == 2.5
-    assert h.update(False, 2.49)
-    assert not h.update(False, 2.5)
+    assert not h.update(False, 2.0)
+    assert h.next_change(2.0) is None
+    assert h.update(True, 2.4)
+    assert not h.update(False, 3.0)
+    assert not h.update(True, 3.6)   # gap longer than release_ms: hold again
+    assert h.update(True, 5.2)
 
 
 # ── Reveal ────────────────────────────────────────────────────────────────
@@ -111,13 +115,16 @@ def test_modifier_layer_switch_is_immediate():
     assert set(wants) == {"L1", "R1", "Y"}
 
 
-def test_modifier_release_keeps_last_groups():
+def test_modifier_release_hides_at_once():
     r = Reveal(S)
     st = _state(held=["BTN_TL"], combos=["BTN_DPAD_UP"])
     r.update(st, 0.0)
     shown = r.update(st, 1.5)
-    assert r.update(_state(), 2.0) == shown
-    assert r.update(_state(), 2.5) == {}
+    assert r.update(_state(), 2.0) == {}
+    # L1 -> R1 within release_ms: the next layer shows without a new hold
+    st_r1 = _state(held=["BTN_TR"], combos=["BTN_NORTH"])
+    assert set(r.update(st_r1, 2.2)) == {"R1", "Y"}
+    assert shown
 
 
 def test_virtual_modifier_triggers():
