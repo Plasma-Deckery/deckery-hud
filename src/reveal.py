@@ -46,12 +46,13 @@ class Want:
 
 
 class Hold:
-    """Debounced "held for a while". raw is the live signal; drops shorter
-    than release_ms count as still held. Fires once held (bridged) for
-    hold_ms while raw is on, and stays fired until raw has been off for
-    release_ms. A threshold that passes during a drop doesn't fire on its
-    own: otherwise an unrelated state write landing in that drop would
-    flash the group up just after the finger lifted."""
+    """Debounced "held for a while". raw is the live signal. Fires once
+    held for hold_ms, and only while raw is on: letting go hides at once.
+    Drops shorter than release_ms bridge the clock, so coming back within
+    them fires again at once instead of needing a new hold (an accidental
+    lift, or L1 -> R1). A threshold that passes during a drop doesn't fire
+    on its own: otherwise an unrelated state write landing in that drop
+    would flash the group up just after the finger lifted."""
 
     def __init__(self, hold_ms, release_ms):
         self.hold = hold_ms / 1000
@@ -61,25 +62,20 @@ class Hold:
 
     def update(self, raw, now):
         if raw:
+            if self._off_since is not None and now - self._off_since >= self.release:
+                self._since = None
             self._off_since = None
             if self._since is None:
                 self._since = now
-        elif self._since is not None:
-            if self._off_since is None:
-                self._off_since = now
-            if now - self._off_since >= self.release:
-                self._since = self._off_since = None
-        if self._since is None:
-            return False
-        held_until = now if self._off_since is None else self._off_since
-        return held_until - self._since >= self.hold
+            return now - self._since >= self.hold
+        if self._since is not None and self._off_since is None:
+            self._off_since = now
+        return False
 
     def next_change(self, now):
         """When update() would answer differently without a new raw value."""
-        if self._since is None:
+        if self._since is None or self._off_since is not None:
             return None
-        if self._off_since is not None:
-            return self._off_since + self.release
         fire = self._since + self.hold
         return fire if fire > now else None
 
@@ -104,7 +100,6 @@ class Reveal:
                      "RPad": Hold(settings.hold_ms, settings.release_ms)}
         self._gesture = Hold(settings.gesture_hold_ms, settings.release_ms)
         self._modifier = Hold(settings.hold_ms, settings.release_ms)
-        self._mod_contents = {}   # last non-empty modifier reveal, kept while bridged
         self._gesture_raw = False  # gesture touching at the last update
         self._gesture_shown = False  # the gesture is showing both pads
         self._now = 0.0
@@ -136,7 +131,6 @@ class Reveal:
             # aren't active there, so the legends would be wrong.
             for h in self._holds():
                 h.reset()
-            self._mod_contents = {}
             self._gesture_raw = self._gesture_shown = False
         else:
             pads = state.get("trackpads") or {}
@@ -181,25 +175,22 @@ class Reveal:
     def _modifier_reveal(self, state, ctx, now):
         """Elements for the held modifier layer — exactly the buttons that
         layer is about: its combos, the held modifier itself, and the
-        modifiers that could be added next (they keep their amber outline). Triggered by held_modifiers or
-        by combos alone (virtual hint modifiers never appear in
+        modifiers that could be added next (they keep their amber outline).
+        Triggered by held_modifiers or by combos alone (virtual hint modifiers never appear in
         held_modifiers). The clock runs from the first modifier held, so a
         layer change once shown takes effect at once."""
         held = list(ctx.get("held_modifiers") or ())
         combos = list((state.get("modifier_active") or {}).keys())
         raw = bool(held or combos) and self.settings.modifier_enabled
         if not self._modifier.update(raw, now):
-            self._mod_contents = {}
             return {}
-        if raw:
-            buttons = set(held) | set(combos) | set((ctx.get("available_modifiers") or {}).keys())
-            contents = {}
-            for el in ELEMENTS.values():
-                own = buttons & set(el.buttons)
-                if own:
-                    contents[el.id] = Content(frozenset(own)) if el.kind == "dpad" else FULL
-            self._mod_contents = contents
-        return self._mod_contents
+        buttons = set(held) | set(combos) | set((ctx.get("available_modifiers") or {}).keys())
+        contents = {}
+        for el in ELEMENTS.values():
+            own = buttons & set(el.buttons)
+            if own:
+                contents[el.id] = Content(frozenset(own)) if el.kind == "dpad" else FULL
+        return contents
 
     def next_deadline(self):
         """Next time update() would change its answer with no new state."""

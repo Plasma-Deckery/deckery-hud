@@ -25,9 +25,8 @@ def test_set_settings_switches_a_detector_off():
     r.update(_state(lpad=True), 0.0)
     assert r.update(_state(lpad=True), 1.5) == {"LPad": Want(FULL, "detector")}
     r.set_settings(_s(pad_enabled=False))
-    # Like lifting the finger: the pad stays release_ms, then goes.
-    assert r.update(_state(lpad=True), 1.6) == {"LPad": Want(FULL, "detector")}
-    assert r.update(_state(lpad=True), 2.1) == {}
+    # Like lifting the finger: the pad goes at once.
+    assert r.update(_state(lpad=True), 1.6) == {}
 
 
 def test_set_settings_gesture_and_release():
