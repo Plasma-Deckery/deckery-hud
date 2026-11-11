@@ -1,0 +1,65 @@
+# Terminal: Phosphorgrün und Bernstein in Fira Code auf schwarzen,
+# eckigen Feldern, gestrichelte Umrisse, alles klein geschrieben.
+label = "Terminal"
+order = 50
+
+[colors]
+ink = "#7dffa0"
+text = "#b7f5c8"
+unbound = "#2f6b3f"
+modifier = "#ffb000"
+layer = "#33ff66"
+game = "#ff5555"
+stick = "#ffb000"
+
+[shape]
+width = 1.2
+style = "dashed"
+outline = "#33ff66b3"
+fill = "#33ff6608"
+active_fill = "#33ff6699"
+
+[stick]
+ring = "#33ff6666"
+cap = "#000000e6"
+cap_border = "#33ff66b3"
+
+[callout]
+width = 1.0
+dot = 2
+
+[text]
+dim = 0                         # alle Legenden in voller Stärke
+font = "Fira Code"
+transform = "lower"
+scale = 0.95
+
+[pill]
+top = "#000000f2"
+bottom = "#000000f2"
+sheen = 0
+fg = "#33ff66"
+border = "#33ff66b3"
+shadow = 0
+
+[shadow]
+preset = "aura"
+shadow_rgb = "#000000"
+core_alpha = 0.9
+core_grow = 6
+core_soft = 0.8
+plate_radius = 2
+legend_padx = 8
+legend_pady = 3
+plate_border = "#33ff6640"
+bleed_alpha = 0
+glow_alpha = 0.35
+glow_radius = 3
+glow_text = true
+
+[connector]
+color = "#ffb000"
+style = "dashed"
+width = 1.5
+glow = 0.4
+glow_radius = 3

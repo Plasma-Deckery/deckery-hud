@@ -268,8 +268,8 @@ class App(Gtk.Application):
 
     def _apply_theme(self, redraw=True):
         """Make the theme from the settings current (B-20). Classic always
-        draws with the default theme — themes are a split-design thing."""
-        name = self._settings.layout.theme if _split_mode() else theme.DEFAULT
+        draws with the built-in tokens — themes are a split-design thing."""
+        name = self._settings.layout.theme if _split_mode() else None
         if theme.activate(name) and redraw:
             # The renderers' caches key on the theme; a redraw rebuilds them.
             self._win.queue_draw_title()

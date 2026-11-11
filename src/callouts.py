@@ -294,6 +294,8 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
             line_col = (*ink, 0.15)
             text_col = (*t.unbound, 0.4)
 
+        text_col = (*text_col[:3], t.emph(text_col[3]))   # the theme's emphasis (B-20)
+
         if not e.grow_on_active:
             # ABXY's own dot (on their circle's left edge) — on request, it
             # shouldn't grow on press the way every other dot here does; the
@@ -340,7 +342,8 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         # on/off state of the mode itself.
         if sub_label:
             sy2 = ly + _txt_size(cr, label, size)[1] + 3 if show_main else ly
-            cr.set_source_rgba(*C_GAME, 1.0 if sub_active else 0.4)
+            # off: dimmed even at full emphasis — it shows the mode's state
+            cr.set_source_rgba(*C_GAME, 1.0 if sub_active else 0.4 + 0.3 * (1 - t.text_dim))
             if side == "left":
                 _txt(cr, ax - 6, sy2, sub_label, size, ha="right", va="mid")
             else:
@@ -352,7 +355,7 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         elif e.note and show_main:
             ny = ly + _txt_size(cr, label, size)[1] + 1
             ind = _icon_indent(cr, label, size) if icons else 0
-            cr.set_source_rgba(*ink, 0.5)
+            cr.set_source_rgba(*ink, t.emph(0.5))
             if side == "left":
                 _txt(cr, ax - 6 - ind, ny, e.note, size - 3, ha="right", va="mid")
             else:

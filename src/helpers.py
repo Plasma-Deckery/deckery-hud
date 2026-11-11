@@ -74,7 +74,7 @@ def _font(size, bold=False):
     """The theme's font at `size` (scaled by text_scale), bold or in the
     theme's text_weight (B-20)."""
     t = theme.current()
-    weight = "Bold" if bold else t.text_weight
+    weight = t.text_bold if bold else t.text_weight
     if t.text_scale != 1.0:
         size = size * t.text_scale
     return Pango.FontDescription.from_string(f"{t.font} {weight} {size}")
@@ -82,7 +82,18 @@ def _font(size, bold=False):
 
 def _case(text):
     """`text` in the theme's text_transform."""
-    return text.upper() if theme.current().text_transform == "upper" else text
+    tr = theme.current().text_transform
+    return text.upper() if tr == "upper" else text.lower() if tr == "lower" else text
+
+
+def _set_text(lo, text):
+    """Put `text` into a layout in the theme's case and letter spacing."""
+    lo.set_text(_case(text), -1)
+    sp = theme.current().text_spacing
+    if sp:
+        attrs = Pango.AttrList()
+        attrs.insert(Pango.attr_letter_spacing_new(int(sp * Pango.SCALE)))
+        lo.set_attributes(attrs)
 
 
 def _pango_esc(s):
@@ -153,7 +164,7 @@ def _glass_pill(cr, x, y, w, h, r, g):
 def _txt(cr, x, y, text, size=12, bold=False, ha="left", va="top"):
     lo = PangoCairo.create_layout(cr)
     lo.set_font_description(_font(size, bold))
-    lo.set_text(_case(text), -1)
+    _set_text(lo, text)
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
     ty = y - (ph if va == "bottom" else ph / 2 if va == "mid" else 0)
@@ -187,7 +198,7 @@ def _txt_smooth(cr, x, y, text, size=12, bold=False, ha="center", va="mid"):
     PangoCairo.context_set_font_options(lo.get_context(), _UNHINTED)
     lo.context_changed()
     lo.set_font_description(_font(size, bold))
-    lo.set_text(_case(text), -1)
+    _set_text(lo, text)
     ink, _logical = lo.get_extents()
     ix, iy = ink.x / Pango.SCALE, ink.y / Pango.SCALE
     iw, ih = ink.width / Pango.SCALE, ink.height / Pango.SCALE
@@ -204,7 +215,7 @@ def _txt_size(cr, text, size=12, bold=False):
     """Return (pixel_width, pixel_height) of text without drawing."""
     lo = PangoCairo.create_layout(cr)
     lo.set_font_description(_font(size, bold))
-    lo.set_text(_case(text), -1)
+    _set_text(lo, text)
     return lo.get_pixel_size()
 
 
@@ -321,7 +332,7 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     def _lo(text, markup_font):
         lo = PangoCairo.create_layout(cr)
         lo.set_font_description(markup_font)
-        lo.set_text(_case(text), -1)
+        _set_text(lo, text)
         return lo, lo.get_pixel_size()
 
     # sep may be a single string (applied to all gaps) or a list (one per gap)

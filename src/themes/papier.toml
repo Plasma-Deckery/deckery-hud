@@ -1,0 +1,65 @@
+# Papier: hell und flach — weiße Karten mit dunkler Schrift und einem
+# kleinen Schatten darunter, gedeckte Akzentfarben. Für helle Seiten und
+# wer es nüchtern mag.
+label = "Papier"
+order = 20
+
+[colors]
+ink = "#1d2129"
+text = "#2a2f38"
+unbound = "#8a909a"
+modifier = "#b86e00"
+layer = "#00796b"
+game = "#c2185b"
+stick = "#1565c0"
+status_active = "#2e7d32"
+status_paused = "#b86e00"
+
+[shape]
+width = 1.6
+outline = "#1d2129b3"
+active_fill = "#1d212966"
+
+[stick]
+ring = "#1d212966"
+cap = "#ffffffe6"
+cap_border = "#1d2129cc"
+
+[callout]
+width = 1.3
+dot = 2.5
+
+[text]
+font = "Noto Sans"
+weight = "Medium"
+dim = 0                         # alle Legenden in voller Stärke
+
+[pill]
+top = "#1d2129e6"
+bottom = "#1d2129d9"
+sheen = 0
+fg = "#ffffff"
+shadow = 0.6
+
+[shadow]
+preset = "aura"
+shadow_rgb = "#fbfbfc"
+core_alpha = 0.94
+core_grow = 8
+core_soft = 2
+plate_radius = 8
+legend_padx = 10
+legend_pady = 5
+bleed_rgb = "#0a1020"
+bleed_alpha = 0.22
+bleed_reach = 18
+bleed_curve = 7
+bleed_dy = 3
+glow_alpha = 0
+edge_alpha = 0.8
+edge_radius = 1.1
+
+[connector]
+color = "#1565c0"
+glow = 0
+width = 2

@@ -55,6 +55,9 @@ applet sends Toggle calls to show/hide the overlay.
 # identically for dev (src/ipc.py → repo root) and RPM (/usr/lib/deckery-hud/src/ipc.py → /usr/lib/deckery-hud/).
 install -dm755 %{buildroot}%{_prefix}/lib/%{name}/src
 install -pm644 src/*.py %{buildroot}%{_prefix}/lib/%{name}/src/
+# Built-in themes (B-20), read from src/themes/ next to theme.py
+install -dm755 %{buildroot}%{_prefix}/lib/%{name}/src/themes
+install -pm644 src/themes/*.toml %{buildroot}%{_prefix}/lib/%{name}/src/themes/
 
 # Assets (SVG button layouts) — sit at parent level, next to src/
 install -dm755 %{buildroot}%{_prefix}/lib/%{name}/assets

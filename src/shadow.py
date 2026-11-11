@@ -84,6 +84,32 @@ class ShadowStyle:
     core_gain: float = 1.6       # how hard the plate's edge is: higher = crisper
     plate_radius: float = -1.0   # corner radius of the legend plates; -1 = round ends
     shadow_rgb: tuple = (0.0, 0.0, 0.0)   # colour without tint, and of the edge
+    # Distance-field shadow (B-20, profile = "sdf"): every layer is a curve
+    # of the distance to the element's shapes and legend plates, instead of
+    # a blurred mask. The plate is solid out to core_grow and fades over
+    # core_soft px; the veil around it (bleed_alpha) ends exactly
+    # bleed_reach px beyond the plate. bleed_curve shapes that fade: small =
+    # most of the veil hugs the plate with a light tail, large = an even
+    # S-ramp. Neighbours merge by an exponential smooth-min — the fields add
+    # — so close elements grow a soft neck. merge_lo/merge_hi are derived.
+    profile: str = "blur"        # "blur" | "sdf"
+    core_soft: float = 8.0       # px, width of the plate's edge
+    bleed_reach: float = 32.0    # px beyond the plate where the veil ends
+    bleed_curve: float = 12.0    # px, decay length of the merge field
+    # sdf only — the plate as a surface of its own:
+    plate_shape: str = "round"   # legend plates: "round" (plate_radius) | "chamfer" (cut = plate_radius)
+    plate_border: tuple = (0.0, 0.0, 0.0, 0.0)   # rgba contour along the plate's edge
+    plate_border_width: float = 1.0
+    plate_lines: float = 0.0     # CRT scanlines across the plate: 0..1 strength
+    bleed_rgb: tuple = ()        # colour of the veil; () = the plate's colour
+    bleed_dx: float = 0.0        # px the veil is moved by (an elevation shadow
+    bleed_dy: float = 0.0        #    under a light plate)
+
+    def __post_init__(self):
+        if self.profile == "sdf":
+            lo = max(math.exp(-self.bleed_reach / max(self.bleed_curve, 1e-3)), 0.04)
+            object.__setattr__(self, "merge_lo", lo)
+            object.__setattr__(self, "merge_hi", 1.0)
 
 
 PRESETS = {
@@ -140,6 +166,17 @@ PRESETS = {
                               legend="line", legend_padx=24, legend_pady=14,
                               edge_radius=1.5, edge_alpha=0.55,
                               tint=True, rim_alpha=0.5),
+    # B-20 neon: a smoked-glass plate that hugs every shape and legend line
+    # (solid out to its edge, a short soft edge) and a light veil that ends
+    # 26 px out and joins close neighbours by a neck — no haze across the
+    # page, no blurry blobs that don't follow the shapes.
+    "aura": ShadowStyle(core_grow=7, core_blur=0, core_alpha=0.80,
+                        bleed_grow=0, bleed_blur=0, bleed_alpha=0.28,
+                        merge_lo=0, merge_hi=1,
+                        legend="line", legend_padx=10, legend_pady=4,
+                        edge_radius=1.5, edge_alpha=0.55,
+                        shadow_rgb=(0.035, 0.04, 0.06), glow_alpha=0.6, glow_radius=5,
+                        profile="sdf", core_soft=7, bleed_reach=26, bleed_curve=9),
 }
 DEFAULT_PRESET = "hauch-kurz"
 
@@ -402,6 +439,8 @@ def group_shadow(spec, style):
     hit = _group_cache.get(key)
     if hit is not None or key in _group_cache:
         return hit
+    if style.profile == "sdf":
+        return _sdf_group_shadow(spec, style)
     b = _spec_bounds(spec)
     if b is None:
         _group_cache[key] = None
@@ -433,6 +472,168 @@ def group_shadow(spec, style):
                      _alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
                      if tint is not None else None,
                      _rim(spec, style), field)
+    if len(_group_cache) > 160:
+        _group_cache.clear()
+    _group_cache[key] = gs
+    return gs
+
+
+def _edt(inside, cap):
+    """Euclidean distance (in cells) from every cell to the nearest True
+    cell of `inside`, exact up to `cap` cells and `cap` beyond: a column
+    pass, then per row the minimum over horizontal shifts within cap."""
+    h, w = inside.shape
+    g = np.where(inside, np.float32(0), np.float32(cap)).astype(np.float32)
+    for y in range(1, h):
+        np.minimum(g[y], g[y - 1] + 1, out=g[y])
+    for y in range(h - 2, -1, -1):
+        np.minimum(g[y], g[y + 1] + 1, out=g[y])
+    g2 = g * g
+    out = g2.copy()
+    for k in range(1, min(cap, w - 1) + 1):
+        k2 = np.float32(k * k)
+        np.minimum(out[:, k:], g2[:, :-k] + k2, out=out[:, k:])
+        np.minimum(out[:, :-k], g2[:, k:] + k2, out=out[:, :-k])
+    return np.sqrt(np.minimum(out, np.float32(cap * cap)))
+
+
+def _sdf_mask(spec, x0, y0, w, h, down, style, dx=0.0, dy=0.0):
+    """The element's plate as a filled mask: its shapes grown by core_grow,
+    each legend line on a plate padded by legend_padx/pady — rounded or
+    chamfered. (dx, dy) moves the content within the grid."""
+    m = _mask(GroupShadowSpec(spec.parts, spec.rrects), x0 - dx, y0 - dy, w, h, down,
+              style.core_grow, 0, 0, with_text=False)
+    if style.legend != "line" or not spec.text_boxes:
+        return m
+    mw, mh = m.shape[1], m.shape[0]
+    surf = cairo.ImageSurface(cairo.FORMAT_A8, mw, mh)
+    cr = cairo.Context(surf)
+    cr.scale(1 / down, 1 / down)
+    cr.translate(-(x0 - dx), -(y0 - dy))
+    px, py = style.legend_padx, style.legend_pady
+    for x, y, tw, th in spec.text_boxes:
+        bx, by, bw, bh = x - px, y - py, tw + 2 * px, th + 2 * py
+        if style.plate_shape == "chamfer":
+            c = min(bh / 2, max(style.plate_radius, 0) if style.plate_radius >= 0 else 7)
+            cr.move_to(bx + c, by)
+            cr.line_to(bx + bw, by)
+            cr.line_to(bx + bw, by + bh - c)
+            cr.line_to(bx + bw - c, by + bh)
+            cr.line_to(bx, by + bh)
+            cr.line_to(bx, by + c)
+            cr.close_path()
+        else:
+            _rrect(cr, bx, by, bw, bh,
+                   bh / 2 if style.plate_radius < 0 else min(bh / 2, style.plate_radius))
+        cr.fill()
+    surf.flush()
+    t = np.ndarray((mh, surf.get_stride()), np.uint8, surf.get_data())[:, :mw]
+    return np.maximum(m, t.astype(np.float32) / 255.0)
+
+
+def _signed(m, down, reach, inner=0.0):
+    """Signed screen-px distance to the edge of mask `m` (negative inside),
+    exact out to `reach` px outside and `inner` px inside (0: inside is 0)."""
+    inside = m >= 0.5
+    d = _edt(inside, int(math.ceil(reach / down)) + 2) * down
+    if inner > 0:
+        d = np.where(inside, -_edt(~inside, int(math.ceil(inner / down)) + 2) * down, d)
+    # The true edge lies about half a cell between the two sides' centres;
+    # a one-cell blur takes out the staircase of the thresholded mask.
+    # (Padded with its own border values: _blur pads with zeros, which
+    # would pull the distance down at the grid's edge.)
+    d = np.pad(d - np.where(inside, -down * 0.5 if inner > 0 else 0.0, down * 0.5), 4, mode="edge")
+    return _blur(d, 1.0)[4:-4, 4:-4]
+
+
+def _upsample(a, down, w, h):
+    """Bilinear upsampling of a grid at 1/down (cell centres) to (h, w)."""
+    ys = (np.arange(h, dtype=np.float32) + 0.5) / down - 0.5
+    xs = (np.arange(w, dtype=np.float32) + 0.5) / down - 0.5
+    y0 = np.clip(np.floor(ys).astype(int), 0, a.shape[0] - 1)
+    x0 = np.clip(np.floor(xs).astype(int), 0, a.shape[1] - 1)
+    y1 = np.minimum(y0 + 1, a.shape[0] - 1)
+    x1 = np.minimum(x0 + 1, a.shape[1] - 1)
+    fy = np.clip(ys - y0, 0, 1)[:, None]
+    fx = np.clip(xs - x0, 0, 1)[None, :]
+    rows = a[y0] * (1 - fy) + a[y1] * fy
+    return rows[:, x0] * (1 - fx) + rows[:, x1] * fx
+
+
+def _plate_overlay(sd, rect, style):
+    """Full-resolution plate details — its contour and scanlines — from the
+    plate's signed distance at 1/_CORE_DOWN: (surface, x, y) or None. Drawn
+    in the rim's slot, so it stays on the shapes under an offset."""
+    bw, (br, bg, bb, ba) = style.plate_border_width, style.plate_border
+    if ba <= 0 and style.plate_lines <= 0:
+        return None
+    x, y, w, h = (int(v) for v in rect)
+    d = _upsample(sd, _CORE_DOWN, w, h)
+    alpha = np.zeros((h, w), np.float32)
+    rgb = np.zeros((h, w, 3), np.float32)
+    if style.plate_lines > 0:
+        inside = np.clip(0.5 - d, 0, 1)
+        rows = ((np.arange(h) + y) % 3 == 0).astype(np.float32)[:, None]
+        alpha = inside * rows * style.plate_lines
+        rgb[...] = style.shadow_rgb
+    if ba > 0:
+        ring = np.clip(bw / 2 + 0.5 - np.abs(d + bw / 2), 0, 1) * ba
+        if style.plate_lines > 0:
+            under = alpha * (1 - ring)
+            rgb = (rgb * under[..., None] + np.array((br, bg, bb), np.float32)
+                   * ring[..., None]) / np.maximum(under + ring, 1e-6)[..., None]
+            alpha = ring + under
+        else:
+            rgb[...] = (br, bg, bb)
+            alpha = ring
+    return _alpha_surface(alpha, rgb), x, y
+
+
+def _sdf_group_shadow(spec, style):
+    """group_shadow for profile = "sdf": plate and veil as curves of the
+    distance to the element's plate (see ShadowStyle). The veil field is
+    exp(-distance / bleed_curve), so the merge pass adds neighbours' fields
+    — an exponential smooth-min — and the curve ends at bleed_reach."""
+    key = (spec, style)
+    b = _spec_bounds(spec)
+    if b is None:
+        _group_cache[key] = None
+        return None
+    soft = max(style.core_soft, 0.5)
+    pad = max(style.legend_padx, style.legend_pady, style.core_grow)
+    shift = max(abs(style.bleed_dx), abs(style.bleed_dy))
+    x0, y0, w, h = _grid(b, pad + style.bleed_reach + shift + 4 * _FIELD_DOWN, _FIELD_DOWN)
+    core_rect = _grid(b, pad + soft + 24, _CORE_DOWN)
+
+    sd = _signed(_sdf_mask(spec, *core_rect, _CORE_DOWN, style), _CORE_DOWN,
+                 soft + 4, soft / 2 + style.plate_border_width + 4)
+    t = np.clip(sd / soft + 0.5, 0.0, 1.0)
+    core = (1.0 - t * t * (3.0 - 2.0 * t)) * style.core_alpha
+
+    fd = np.maximum(_signed(_sdf_mask(spec, x0, y0, w, h, _FIELD_DOWN, style,
+                                      style.bleed_dx, style.bleed_dy), _FIELD_DOWN,
+                            style.bleed_reach + 2 * _FIELD_DOWN), 0.0)
+    # Past bleed_reach the curve maps the field to nothing anyway; there it
+    # tapers to exactly 0 before the grid's border, so neighbours' fields,
+    # which add, never meet a cut edge.
+    taper = np.clip((style.bleed_reach + 1.5 * _FIELD_DOWN - fd) / _FIELD_DOWN, 0.0, 1.0)
+    field = (np.exp(-fd / max(style.bleed_curve, 1e-3)) * taper).astype(np.float32)
+
+    tint = _tint_map(spec, x0, y0, w, h, _FIELD_DOWN, style) if style.tint else None
+    veil = None
+    if style.bleed_rgb:
+        veil = np.empty(field.shape + (3,), np.float32)
+        veil[...] = style.bleed_rgb
+    elif tint is not None:
+        veil = tint
+    elif tuple(style.shadow_rgb) != (0.0, 0.0, 0.0):
+        veil = np.empty(field.shape + (3,), np.float32)
+        veil[...] = style.shadow_rgb
+    gs = GroupShadow(x0, y0, w, h, _alpha_surface(field, veil),
+                     core_rect, _alpha_surface(core),
+                     _alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
+                     if tint is not None else None,
+                     _plate_overlay(sd, core_rect, style), field)
     if len(_group_cache) > 160:
         _group_cache.clear()
     _group_cache[key] = gs
