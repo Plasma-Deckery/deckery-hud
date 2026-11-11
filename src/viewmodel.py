@@ -31,7 +31,7 @@ class ButtonVM:
     is_avail_mod: bool       # could be held next to unlock something (not already held)
     is_avail_app_mod: bool   # ...and what it unlocks includes an app-layer binding
     is_avail_virt_mod: bool  # ...and it's a virtual (hint-only) modifier
-    sub_label: str = None     # second-line label (Gaming Mode trigger only, today)
+    sub_label: str = None     # second-line label (Gaming Mode trigger, unless held as a modifier)
     sub_active: bool = False
     note: str = None          # how the action is used ("halten"), from makima's note = "…"
     mod_keys: tuple = ()      # the modifier(s) behind it: itself for a modifier button,
@@ -92,8 +92,11 @@ def classify_button(btn_key, state, *, gaming_mode_btn=_GAMING_MODE_BTN):
         action = "—"
         note = None
 
-    sub_label = gm_sub_label if btn_key == gaming_mode_btn else None
-    sub_active = is_active if btn_key == gaming_mode_btn else False
+    # Held as a modifier, the trigger is picking a combo layer, not starting
+    # a double-click: its Gaming Mode line would describe the wrong thing.
+    gm_line = btn_key == gaming_mode_btn and not is_mod
+    sub_label = gm_sub_label if gm_line else None
+    sub_active = is_active if gm_line else False
 
     return ButtonVM(
         key=btn_key, bound=has_action, action=action,
