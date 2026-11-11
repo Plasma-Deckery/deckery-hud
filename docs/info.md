@@ -10,7 +10,7 @@ Required inside the container (installed by `install.sh`):
 - `python-gobject` (GTK4 bindings)
 - `librsvg` (SVG rendering)
 - `pango` / `pangocairo` (text layout)
-- `python-numpy` (split layout's backdrop field, `src/metaball.py`)
+- `python-numpy` (split layout's shape shadows, `src/shadow.py`)
 
 ## File watch
 
