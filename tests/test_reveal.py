@@ -16,12 +16,14 @@ def _s(**changes):
     return dataclasses.replace(S, **changes)
 
 
-def _state(held=(), combos=(), avail=(), lpad=False, rpad=False, gesture=False, gaming=False):
+def _state(held=(), combos=(), avail=(), lpad=False, rpad=False, gesture=False, gaming=False,
+           pressed=(), action_ts=None):
     entry = {"action": ["KEY_A"], "kind": "remap", "label": None, "origin": "Steam Deck",
              "silent": False}
     return {
         "context": {"held_modifiers": list(held), "available_modifiers": {k: {} for k in avail},
-                    "gaming_mode": gaming},
+                    "gaming_mode": gaming, "active_buttons": list(held) + list(pressed)},
+        "last_action": None if action_ts is None else {"label": "Copy", "ts": action_ts},
         "modifier_active": {k: dict(entry) for k in combos},
         "trackpads": {"left": {"touching": lpad}, "right": {"touching": rpad},
                       "gesture": {"touching": gesture}},
@@ -367,3 +369,49 @@ def test_anim_jump_then_fade_out_from_there():
     el.set_target(True, "full", 0.0)
     el.jump(0.0, False)
     assert el.value == 0.0 and not el.target and not el.running
+
+
+# ── Live feedback: the modifier reveal is for an idle hold ────────────────
+
+L1 = dict(held=["BTN_TL"], combos=["BTN_SOUTH"])
+
+
+def test_a_keystroke_restarts_the_modifier_hold():
+    """Holding L1 and firing L1+A knows what it does: no reveal until the
+    hold has been idle for hold_ms."""
+    r = Reveal(S)
+    r.update(_state(**L1), 0.0)
+    r.update(_state(**L1, pressed=["BTN_SOUTH"]), 1.0)
+    r.update(_state(**L1), 1.1)
+    assert r.update(_state(**L1), 1.6) == {}
+    assert r.next_deadline() == 2.5
+    assert "A" in r.update(_state(**L1), 2.5)
+
+
+def test_a_fired_action_restarts_the_modifier_hold():
+    r = Reveal(S)
+    r.update(_state(**L1), 0.0)
+    r.update(_state(**L1, action_ts=100.0), 1.0)
+    assert r.update(_state(**L1, action_ts=100.0), 1.6) == {}
+    assert "A" in r.update(_state(**L1, action_ts=100.0), 2.5)
+
+
+def test_activity_keeps_a_shown_reveal():
+    r = Reveal(S)
+    r.update(_state(**L1), 0.0)
+    assert "A" in r.update(_state(**L1), 1.5)
+    assert "A" in r.update(_state(**L1, pressed=["BTN_SOUTH"], action_ts=5.0), 1.6)
+
+
+def test_adding_a_modifier_is_not_activity():
+    r = Reveal(S)
+    r.update(_state(**L1), 0.0)
+    r.update(_state(held=["BTN_TL", "BTN_TR"], combos=["BTN_NORTH"]), 1.0)
+    assert "Y" in r.update(_state(held=["BTN_TL", "BTN_TR"], combos=["BTN_NORTH"]), 1.5)
+
+
+def test_pad_reveal_ignores_keystrokes():
+    r = Reveal(S)
+    r.update(_state(lpad=True), 0.0)
+    r.update(_state(lpad=True, pressed=["BTN_SOUTH"], action_ts=3.0), 1.0)
+    assert "LPad" in r.update(_state(lpad=True), 1.5)
