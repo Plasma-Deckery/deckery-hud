@@ -37,7 +37,7 @@ _LAYOUT_MODE = layout_choice.current()
 if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
-                                draw_gesture_connector_live, SHADOW_STYLE, warm_all)
+                                draw_gesture_connector_live, shadow_style, warm_all)
     from shadow import bleed_transfer
     from layout_split import compute_layout, center_badge_rect, center_close_rect, center_classic_rect
 
@@ -752,11 +752,12 @@ class Win(Gtk.ApplicationWindow):
 
     def _bleed_transfer(self):
         """(ramp, curve) — see shadow.bleed_transfer; the ramp applies first."""
-        if getattr(self, "_bleed_ct", None) is None:
-            m, b, table = bleed_transfer(SHADOW_STYLE)
-            self._bleed_ct = (Gsk.ComponentTransfer.new_linear(m, b),
-                              Gsk.ComponentTransfer.new_table(table))
-        return self._bleed_ct
+        style = shadow_style()
+        if getattr(self, "_bleed_ct", None) is None or self._bleed_ct[0] != style:
+            m, b, table = bleed_transfer(style)
+            self._bleed_ct = (style, (Gsk.ComponentTransfer.new_linear(m, b),
+                                      Gsk.ComponentTransfer.new_table(table)))
+        return self._bleed_ct[1]
 
     def _snapshot_split(self, snapshot, sw, sh):
         """Split mode as GPU layers instead of one full-screen cairo node.

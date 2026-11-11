@@ -7,7 +7,8 @@ import math
 from dataclasses import dataclass
 
 from layout import _FX, _FY, _FS, _BX, _BY, _BS, _AX_L, _AX_R
-from helpers import _K, _fmt, _txt, _txt_size, _txt_icon, _txt_icon_size, _icon_indent, C_MOD, C_LAYER, C_GAME
+from helpers import _K, _fmt, _txt, _txt_size, _txt_icon, _txt_icon_size, _icon_indent
+import theme
 from viewmodel import split_icon
 from viewmodel import classify_all, pad_legend_vm
 
@@ -39,6 +40,7 @@ class _Callout:
     note: str = None       # B-18: dimmed second line, how the action is used ("halten")
     hidden: bool = False   # laid out like any row, but not drawn — keeps the
                            # rows that are drawn exactly where they'd be with it
+    mod_rgb: tuple = None  # B-20: colour of the modifier behind it; None = theme.modifier
 
 # ── Display option ────────────────────────────────────────────────────────────
 # True  → show all buttons, unbound = dimmed with "—"
@@ -257,6 +259,8 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         # just "available". Computed once so both branches below (and the
         # underline accent further down) can't drift out of sync.
         mod_alpha = 1.0 if (active_mod or (is_combo and active)) else 0.75
+        t = theme.current()
+        C_MOD, C_LAYER, C_GAME, ink = e.mod_rgb or t.modifier, t.layer, t.game, t.ink
 
         if conflict:
             dot_col  = (*C_LAYER, 1.0)
@@ -274,20 +278,20 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
             line_col = (*C_LAYER, 0.85 if active else 0.55)
             text_col = (*C_LAYER, 1.0 if active else 0.75)
         elif active:
-            dot_col  = (1.0, 1.0, 1.0, 1.0)
+            dot_col  = (*ink, 1.0)
             dot_r    = DOT + 2
-            line_col = (1.0, 1.0, 1.0, 0.85)
-            text_col = (1.0, 1.0, 1.0, 1.0)
+            line_col = (*ink, 0.85)
+            text_col = (*ink, 1.0)
         elif bound:
-            dot_col  = (1.0, 1.0, 1.0, 0.6)
+            dot_col  = (*ink, 0.6)
             dot_r    = DOT
-            line_col = (1.0, 1.0, 1.0, 0.55)
-            text_col = (0.88, 0.88, 0.88, 1.0)
+            line_col = (*ink, 0.55)
+            text_col = (*t.text, 1.0)
         else:                                  # unbound
-            dot_col  = (1.0, 1.0, 1.0, 0.2)
+            dot_col  = (*ink, 0.2)
             dot_r    = DOT
-            line_col = (1.0, 1.0, 1.0, 0.15)
-            text_col = (0.55, 0.55, 0.55, 0.4)
+            line_col = (*ink, 0.15)
+            text_col = (*t.unbound, 0.4)
 
         if not e.grow_on_active:
             # ABXY's own dot (on their circle's left edge) — on request, it
@@ -347,7 +351,7 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
         elif e.note and show_main:
             ny = ly + _txt_size(cr, label, size)[1] + 1
             ind = _icon_indent(cr, label, size) if icons else 0
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.5)
+            cr.set_source_rgba(*ink, 0.5)
             if side == "left":
                 _txt(cr, ax - 6 - ind, ny, e.note, size - 3, ha="right", va="mid")
             else:
@@ -398,7 +402,7 @@ def _callouts(cr, entries, side, ax, size=10, row=22, straight=False, y_nudge=0,
             if is_avail_virt_mod and is_avail_app_mod:
                 _diam_col = C_LAYER
             elif is_avail_virt_mod:
-                _diam_col = (1.0, 1.0, 1.0)
+                _diam_col = ink
             else:
                 _diam_col = C_MOD
             cr.set_source_rgba(*_diam_col, 0.85)

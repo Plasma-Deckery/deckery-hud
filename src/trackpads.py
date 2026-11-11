@@ -8,6 +8,7 @@ import math
 import cairo
 from layout import _FX, _FY, _FS
 from helpers import _txt_smooth
+import theme
 
 # ── Trackpad bounds — front SVG viewBox 0 0 1024 414 ─────────────────────────
 # Derived from the rounded-rect paths in steamdeckFront.svg
@@ -102,7 +103,6 @@ def _rrect(cr, x, y, w, h, r):
     cr.close_path()
 
 
-_AMBER = (1.0, 0.78, 0.2)
 
 
 def _clamp_to_rrect(cx, cy, sx, sy, sw, sh, r):
@@ -144,11 +144,11 @@ def _draw_pad(cr, pad, bounds, gesture=False, tx=None, dim=False):
     # ── Fill overlay — sits inside the existing SVG shape, no new border ────────
     # gesture → amber glow; individual touch/press → white glow; idle → nothing
     if gesture:
-        cr.set_source_rgba(*_AMBER, 0.18 * fade)
+        cr.set_source_rgba(*theme.current().stick, 0.18 * fade)
         _rrect(cr, sx, sy, sw, sh, r)
         cr.fill()
     elif touching or pressed:
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.10 * fade)
+        cr.set_source_rgba(*theme.current().ink, 0.10 * fade)
         _rrect(cr, sx, sy, sw, sh, r)
         cr.fill()
 
@@ -175,13 +175,13 @@ def _draw_pad(cr, pad, bounds, gesture=False, tx=None, dim=False):
     cx, cy = _clamp_to_rrect(cx, cy, sx, sy, sw, sh, r)
 
     if gesture:
-        cr.set_source_rgba(*_AMBER, 0.9)
+        cr.set_source_rgba(*theme.current().stick, 0.9)
         dot_r = 3.5
     elif pressed:
-        cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
+        cr.set_source_rgba(*theme.current().ink, 1.0)
         dot_r = 5.0
     else:
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.85)
+        cr.set_source_rgba(*theme.current().ink, 0.85)
         dot_r = 3.5
     cr.arc(cx, cy, dot_r, 0, math.tau)
     cr.fill()
@@ -335,6 +335,6 @@ def _draw_stick(cr, stick, geom, tx=None, erase_mode="panel", press=0.0, fill_ri
         cr.save()
         cr.translate(new_inner_cx, new_inner_cy)
         cr.scale(press_s, press_s)
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.75)
+        cr.set_source_rgba(*theme.current().ink, 0.75)
         _txt_smooth(cr, 0, 0, label, size=9, ha="center", va="mid")
         cr.restore()

@@ -34,6 +34,8 @@ class ButtonVM:
     sub_label: str = None     # second-line label (Gaming Mode trigger only, today)
     sub_active: bool = False
     note: str = None          # how the action is used ("halten"), from makima's note = "…"
+    mod_keys: tuple = ()      # the modifier(s) behind it: itself for a modifier button,
+                              # the held set for a combo (B-20 colour by modifier)
 
 
 def classify_button(btn_key, state, *, gaming_mode_btn=_GAMING_MODE_BTN):
@@ -99,6 +101,8 @@ def classify_button(btn_key, state, *, gaming_mode_btn=_GAMING_MODE_BTN):
         is_combo=is_combo, is_hint=is_hint, is_avail_mod=is_avail_mod,
         is_avail_app_mod=is_avail_app_mod, is_avail_virt_mod=is_avail_virt_mod,
         sub_label=sub_label, sub_active=sub_active, note=note,
+        mod_keys=((btn_key,) if is_mod or btn_key in avail_mods else
+                  tuple(held_mods) if is_combo else ()),
     )
 
 

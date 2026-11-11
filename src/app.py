@@ -25,6 +25,7 @@ from reveal import Reveal, deadline_delay_ms
 from elements import PAD_ELEMENTS
 import settings
 from settings import Settings
+import theme
 
 def _split_mode():
     """Read at call time, not import: the layout can be switched while
@@ -107,6 +108,7 @@ class App(Gtk.Application):
         self._osd_enabled = self._settings.osd.enabled
         settings._set_debug(self._settings.debug.enabled)
         self._reveal   = Reveal(self._settings.reveal)
+        self._apply_theme(redraw=False)
 
         self._state    = load_state()
         self._state_stamp = None
@@ -245,11 +247,22 @@ class App(Gtk.Application):
         if "layout.design" in changed and hasattr(self, "switch_layout"):
             # B-05: switches in process; persist=False because the file already says so.
             self.switch_layout(new.layout.design, persist=False)
+        if "layout.theme" in changed:
+            self._apply_theme()
         if any(k.startswith("reveal.") for k in changed):
             self._reveal.set_settings(new.reveal)
             self._win.set_settings(new.reveal)
             if _split_mode():
                 self._reveal_sync()   # re-evaluate now, e.g. a detector switched off
+
+    def _apply_theme(self, redraw=True):
+        """Make the theme from the settings current (B-20). Classic always
+        draws with the default theme — themes are a split-design thing."""
+        name = self._settings.layout.theme if _split_mode() else theme.DEFAULT
+        if theme.activate(name) and redraw:
+            # The renderers' caches key on the theme; a redraw rebuilds them.
+            self._win.queue_draw_title()
+            self._osd_win.on_state(self._state)
 
     # ── D-Bus method dispatch ─────────────────────────────────────────────
 
@@ -343,6 +356,7 @@ class App(Gtk.Application):
             old = self._win
             with layout_choice.building(mode):
                 importlib.reload(win)
+            self._apply_theme(redraw=False)
             self._win = win.Win(application=self, settings=self._settings.reveal)
             old.retire()
             self._win.on_state(self._state)

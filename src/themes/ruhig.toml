@@ -1,0 +1,8 @@
+# Ruhig: derselbe Schatten wie Neon, aber schwarz statt getönt und ohne
+# hellen Rand. Die Legenden behalten ihre Farben.
+label = "Ruhig"
+order = 20
+
+[shadow]
+tint = false
+rim_alpha = 0.0

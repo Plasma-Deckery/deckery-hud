@@ -15,6 +15,8 @@ from gi.repository import Pango, PangoCairo
 import cairo
 import math
 
+import theme
+
 # ── Key → human label ────────────────────────────────────────────────────────
 # Canonical source is viewmodel.py (state classification, no GTK dependency);
 # re-exported here so existing call sites (`from helpers import _K, _fmt`)
@@ -137,7 +139,7 @@ def _txt(cr, x, y, text, size=12, bold=False, ha="left", va="top"):
     lo = PangoCairo.create_layout(cr)
     weight = "Bold" if bold else ""
     lo.set_font_description(
-        Pango.FontDescription.from_string(f"Adwaita Sans {weight} {size}"))
+        Pango.FontDescription.from_string(f"{theme.current().font} {weight} {size}"))
     lo.set_text(text, -1)
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
@@ -173,7 +175,7 @@ def _txt_smooth(cr, x, y, text, size=12, bold=False, ha="center", va="mid"):
     lo.context_changed()
     weight = "Bold" if bold else ""
     lo.set_font_description(
-        Pango.FontDescription.from_string(f"Adwaita Sans {weight} {size}"))
+        Pango.FontDescription.from_string(f"{theme.current().font} {weight} {size}"))
     lo.set_text(text, -1)
     ink, _logical = lo.get_extents()
     ix, iy = ink.x / Pango.SCALE, ink.y / Pango.SCALE
@@ -192,7 +194,7 @@ def _txt_size(cr, text, size=12, bold=False):
     lo = PangoCairo.create_layout(cr)
     weight = "Bold" if bold else ""
     lo.set_font_description(
-        Pango.FontDescription.from_string(f"Adwaita Sans {weight} {size}"))
+        Pango.FontDescription.from_string(f"{theme.current().font} {weight} {size}"))
     lo.set_text(text, -1)
     return lo.get_pixel_size()
 
@@ -244,7 +246,7 @@ def _txt_icon_size(cr, text, size=12):
 def _txt_markup(cr, x, y, markup, size=12, ha="left", va="top"):
     """Like _txt but accepts Pango markup (inline colours via <span foreground=…>)."""
     lo = PangoCairo.create_layout(cr)
-    lo.set_font_description(Pango.FontDescription.from_string(f"Adwaita Sans {size}"))
+    lo.set_font_description(Pango.FontDescription.from_string(f"{theme.current().font} {size}"))
     lo.set_markup(markup, -1)
     pw, ph = lo.get_pixel_size()
     tx = x - (pw if ha == "right" else pw / 2 if ha == "center" else 0)
@@ -304,8 +306,8 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     PX, PY    = 7, 2   # horizontal / vertical padding inside pill
     SEP_GAP   = 4      # space on each side of a separator glyph
     PILL_GAP  = 5      # gap between adjacent pills when sep is empty string
-    font_str  = f"Adwaita Sans Bold {size}"
-    sep_font  = f"Adwaita Sans {size}"
+    font_str  = f"{theme.current().font} Bold {size}"
+    sep_font  = f"{theme.current().font} {size}"
 
     def _lo(text, markup_font):
         lo = PangoCairo.create_layout(cr)

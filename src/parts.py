@@ -29,6 +29,7 @@ no Rsvg.
 import os
 import cairo
 from svgpath import parse_svg_paths, replay
+import theme
 
 _DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _FRONT = os.path.join(_DIR, "assets", "steamdeckFront.svg")
@@ -88,8 +89,8 @@ def part_bbox(name):
     return min(xs0), min(ys0), max(xs1), max(ys1)
 
 
-_DEFAULT_COLOR = (1.0, 1.0, 1.0, 0.5)
-_DEFAULT_LW = 1.3 * 1.5   # bumped 1.5x on request, to see whether thicker lines read better at this scale
+# The outline's colour and width come from the active theme (theme.outline,
+# theme.outline_width; B-20).
 
 
 def part_outline_points(name):
@@ -117,15 +118,17 @@ def clip_to_part(cr, name, ox, oy, scale):
     cr.clip()
 
 
-def draw_part(cr, name, ox, oy, scale, color=_DEFAULT_COLOR, lw=_DEFAULT_LW, fill_color=None):
+def draw_part(cr, name, ox, oy, scale, color=None, lw=None, fill_color=None):
     """fill_color: an active-state wash under the part's own outline stroke
     (kept as a separate colour/alpha from the stroke — filling with the
-    stroke colour itself would wash the outline out along with the fill)."""
+    stroke colour itself would wash the outline out along with the fill).
+    color/lw default to the theme's outline."""
+    t = theme.current()
     cr.new_path()
     replay(cr, part_subpaths(name), ox, oy, scale)
     if fill_color is not None:
         cr.set_source_rgba(*fill_color)
         cr.fill_preserve()
-    cr.set_source_rgba(*color)
-    cr.set_line_width(lw)
+    cr.set_source_rgba(*(color or t.outline))
+    cr.set_line_width(lw if lw is not None else t.outline_width)
     cr.stroke()

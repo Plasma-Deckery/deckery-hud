@@ -7,7 +7,9 @@ real makima.
 Not a test suite — a fixture-rendering tool. Run inside the `deckery`
 distrobox, where cairo/gi.Rsvg are installed (see docs/info.md):
 
-    distrobox enter deckery -- python3 tools/render_sample.py <out_dir> [classic|split|split_groups]
+    distrobox enter deckery -- python3 tools/render_sample.py <out_dir> [classic|split|split_groups] [theme]
+
+theme: a B-20 theme name for the split renderer (default: the default theme).
 
 Writes one PNG per sample state into <out_dir>.
 """
@@ -252,4 +254,7 @@ def render(renderer_name, out_dir):
 if __name__ == "__main__":
     out_dir = sys.argv[1] if len(sys.argv) > 1 else "/tmp/hud_renders"
     which = sys.argv[2] if len(sys.argv) > 2 else "classic"
+    if len(sys.argv) > 3:
+        import theme
+        theme.activate(sys.argv[3])
     render(which, out_dir)

@@ -17,9 +17,10 @@ gi.require_version('Gtk4LayerShell', '1.0')
 from gi.repository import Gtk, Gtk4LayerShell as LayerShell, GLib
 import cairo
 
-from helpers import _pill_row, _K, GLASS_PILL, GLASS_PILL_FG, capture_text_boxes
+from helpers import _pill_row, _K, capture_text_boxes
 import pill_shadow
-from shadow import neutral_rgb, style_from_env
+from shadow import neutral_rgb
+import theme
 from toast import draw_toast
 import osd_anim
 import osd_look
@@ -240,14 +241,16 @@ class OsdWin(Gtk.ApplicationWindow):
                     sw / 2, sh - 28,
                     labels,
                     sep="+", size=9,
-                    glass=GLASS_PILL, fg=GLASS_PILL_FG,
+                    glass=theme.current().glass, fg=theme.current().pill_fg,
                     sep_rgba=(0.5, 0.5, 0.52, 0.9),
                     ha="center",
                 )
                 pills = cr.pop_group()
             cr.save()
             cr.identity_matrix()   # boxes are in device space
-            pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(style_from_env()))
+            t = theme.current()
+            pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(t.shadow_style()),
+                              strength=t.pill_shadow)
             cr.restore()
             cr.set_source(pills)
             cr.paint()
@@ -262,7 +265,7 @@ class OsdWin(Gtk.ApplicationWindow):
         a, now = self._anim, time.time()
         surf = self.get_surface()
         scale = surf.get_scale() if surf is not None else 1.0
-        style = style_from_env()
+        style = theme.current().shadow_style()
 
         labels = tuple(_K.get(k, k.replace("KEY_", "").replace("BTN_", "")) for k in outputs)
         if labels != self._pills:

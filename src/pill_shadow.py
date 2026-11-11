@@ -34,10 +34,11 @@ def _layers(boxes):
     return hit
 
 
-def paint(cr, boxes, rgb=(0, 0, 0)):
+def paint(cr, boxes, rgb=(0, 0, 0), strength=1.0):
     """Shadow for glass pills at `boxes` ((x, y, w, h), as noted by
-    helpers.capture_text_boxes), painted in cr's user space."""
-    if not boxes:
+    helpers.capture_text_boxes), painted in cr's user space. strength
+    scales it (the theme's pill_shadow)."""
+    if not boxes or strength <= 0:
         return
     _gs, surfs = _layers(boxes)
     for s, (x, y, w, h) in surfs:
@@ -46,6 +47,13 @@ def paint(cr, boxes, rgb=(0, 0, 0)):
         cr.scale(w / s.get_width(), h / s.get_height())
         pat = cairo.SurfacePattern(s)
         pat.set_filter(cairo.FILTER_BILINEAR)
-        cr.set_source_rgb(*rgb)
+        if strength == 1.0:
+            cr.set_source_rgb(*rgb)
+        else:
+            cr.set_source_rgba(*rgb, min(strength, 1.0))
         cr.mask(pat)
+        if strength > 1.0:
+            # Above 1 the same mask again, for the part past full strength.
+            cr.set_source_rgba(*rgb, min(strength - 1.0, 1.0))
+            cr.mask(pat)
         cr.restore()
