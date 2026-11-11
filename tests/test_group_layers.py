@@ -145,30 +145,14 @@ def test_shadow_sits_behind_its_element():
             assert sx <= bx and sx + sw_ >= bx + bw, name
 
 
-def _center_shadow_alpha(state):
-    import cairo
-    import numpy as np
-    from renderer_split import paint_scaled
-    surf, x, y, w, h = _layers(state, {"center": FULL})["center"].shadow
-    big = cairo.ImageSurface(cairo.FORMAT_ARGB32, SW, SH)
-    cr = cairo.Context(big)
-    cr.translate(x, y)
-    paint_scaled(cr, surf, w, h)
-    big.flush()
-    a = np.ndarray((SH, big.get_stride() // 4, 4), np.uint8, big.get_data())[:, :SW, 3]
-    return a.astype(np.float32) / 255.0
-
-
-def test_glass_pill_casts_a_gentle_shadow():
-    """The active-outputs glass pill (B-04) gets pill_shadow's soft cloud,
-    not a legend plate plus traced edge — those read as a dark rim (alpha
-    ~0.8 right at the pill)."""
+def test_centre_column_leaves_the_outputs_to_the_osd():
+    """The open HUD shows its active outputs where the closed one does, in
+    the OSD (osd_win.py) — the centre column draws no second pill row."""
     state = copy.deepcopy(SAMPLES["held_modifier"])
     state["context"]["active_outputs"] = []
-    without = _center_shadow_alpha(state)
+    without = _layers(state, {"center": FULL})["center"]
     state["context"]["active_outputs"] = [{"key": "KEY_LEFTCTRL", "silent": False}]
-    added = _center_shadow_alpha(state) - without
-    assert 0.1 < added.max() < 0.5
+    assert _layers(state, {"center": FULL})["center"] is without
 
 
 def test_shoulder_halves_cast_separate_shadows():

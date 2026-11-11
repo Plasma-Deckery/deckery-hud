@@ -56,3 +56,55 @@ def test_analog_export_follows_a_single_pad(monkeypatch):
     shown.add("QAM")
     app.App._on_groups_changed(fake)
     assert calls == ["on", "off"]
+
+
+class _FakeOsd:
+    def __init__(self):
+        self.visible, self.over_hud = False, None
+
+    def set_over_hud(self, over):
+        self.over_hud = over
+
+    def is_visible(self):
+        return self.visible
+
+    def on_state(self, _state):
+        pass
+
+    def present(self):
+        self.visible = True
+
+    def set_visible(self, v):
+        self.visible = v
+
+
+def _osd_after(monkeypatch, split, full, osd=True, remap=True, theme_mode=None):
+    import types
+    import app
+    monkeypatch.setattr(app, "_split_mode", lambda: split)
+    fake = types.SimpleNamespace(_full=full, _osd_enabled=osd, _remapping_enabled=remap,
+                                 _theme_mode=theme_mode, _state={}, _osd_win=_FakeOsd())
+    app.App._sync_osd(fake)
+    return fake._osd_win
+
+
+def test_osd_stays_up_over_the_open_split_hud(monkeypatch):
+    """The open split HUD draws no toasts or output pills of its own: the
+    OSD shows them, the same as with it closed — even with the OSD switched
+    off, since the HUD's own toasts used to show regardless."""
+    for osd in (True, False):
+        o = _osd_after(monkeypatch, split=True, full=True, osd=osd)
+        assert o.visible and o.over_hud
+
+
+def test_osd_hides_under_classic_and_the_theme_panel(monkeypatch):
+    assert not _osd_after(monkeypatch, split=False, full=True).visible
+    assert not _osd_after(monkeypatch, split=True, full=True, theme_mode=object()).visible
+
+
+def test_osd_with_the_hud_closed_follows_its_switches(monkeypatch):
+    for split in (True, False):
+        o = _osd_after(monkeypatch, split=split, full=False)
+        assert o.visible and o.over_hud is False
+        assert not _osd_after(monkeypatch, split=split, full=False, osd=False).visible
+        assert not _osd_after(monkeypatch, split=split, full=False, remap=False).visible

@@ -2,7 +2,9 @@
 osd_win.py — OSD (On-Screen Display): active outputs (bottom-center) + toast.
 
 Persistent full-screen transparent overlay, fully input-transparent (no events captured).
-No pause, no analog export. Shown when OSD is enabled and the main HUD is hidden.
+No pause, no analog export. Shown when OSD is enabled and the main HUD is hidden,
+and in the split design over the open HUD as well — there it is the HUD's own
+toasts and output pills, the same as with the HUD closed (App._sync_osd).
 State updates arrive via on_state() called by App.
 
 How toasts and pills come and go is an osd_anim preset (`[osd] animation`):
@@ -62,6 +64,7 @@ class OsdWin(Gtk.ApplicationWindow):
         self._drawn          = None
         self._anim           = osd_anim.PRESETS["slide"]
         self._split          = False
+        self._over_hud       = False
         # Pop mode: the pill row on screen, when it popped in, and — while it
         # bubbles out — when that started and what it showed.
         self._pills          = ()
@@ -85,6 +88,14 @@ class OsdWin(Gtk.ApplicationWindow):
         self._anim = osd_anim.resolve(animation, split)
         self._split = split
         self._da.queue_draw()
+
+    def set_over_hud(self, over):
+        """Whether the open split HUD is underneath. makima is paused while
+        it is open, and its toasts then say what a press would do — shown,
+        where with the HUD closed a pause hides everything."""
+        if over != self._over_hud:
+            self._over_hud = over
+            self._da.queue_draw()
 
     # ── State update (called by App) ─────────────────────────────────────
 
@@ -207,8 +218,9 @@ class OsdWin(Gtk.ApplicationWindow):
 
         # While makima is paused, nothing is actually executed — don't render
         # ANY OSD content (pill row, toast, ...). Single gate up front so no
-        # future addition below can accidentally bypass it.
-        if self._state.get("context", {}).get("paused", False):
+        # future addition below can accidentally bypass it. Over the open
+        # HUD the pause is the HUD's own, and the toasts are its previews.
+        if self._state.get("context", {}).get("paused", False) and not self._over_hud:
             return
 
         ctx = self._state.get("context", {})

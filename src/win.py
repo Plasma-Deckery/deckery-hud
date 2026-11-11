@@ -187,7 +187,7 @@ class Win(Gtk.ApplicationWindow):
         self._anims     = {g: GroupAnim(self._settings) for g in GROUPS} if _LAYOUT_MODE == "split" else {}
         self._contents  = {}      # group -> reveal.Content it shows (kept while fading out)
         self._causes    = {}      # group -> cause of its last Want, decides slide vs fade out
-        self._full      = False   # the full HUD is open (input, centre, toasts)
+        self._full      = False   # the full HUD is open (input, centre)
         self._frame     = {}      # group -> what the last frame drew of it (_snapshot_split)
         self._frame_ctx = None    # (state, layers, press_t, sw, sh, scale, connector) of that frame
         self._xfade     = {}      # group -> reveal.Crossfade, old = (texture, rect) under new content
@@ -620,7 +620,10 @@ class Win(Gtk.ApplicationWindow):
             for key, anim in self._press_anims.items():
                 anim.set(key in active)
         self._da.queue_draw()
-        self._schedule_toast_animation()
+        if _LAYOUT_MODE != "split":
+            # In split the OSD window shows the toasts, over the open HUD
+            # too, exactly as with it closed (App._sync_osd).
+            self._schedule_toast_animation()
 
     def queue_draw_title(self):
         self._da.queue_draw()
@@ -921,10 +924,6 @@ class Win(Gtk.ApplicationWindow):
             self._draw_dpad_3d(snapshot, sw, sh, dx["DPad"], groups["DPad"].vms)
             snapshot.pop()
 
-        if self._full and self._active_toasts:
-            cr = snapshot.append_cairo(rect(0, 0, sw, sh))
-            draw_toast(cr, sw, sh, self._active_toasts, start_y=sh - 40)
-
         if self._full and self._theme_panel is not None:
             cr = snapshot.append_cairo(rect(0, sh - 200, sw, 200))
             theme_panel(cr, sw, sh, *self._theme_panel)
@@ -954,8 +953,6 @@ class Win(Gtk.ApplicationWindow):
         press_t = {k: a.value for k, a in self._press_anims.items()}
         draw_hud_split(cr, self._front, self._back, self._state, sw, sh,
                        open_t=self._anims["center"].value, press_t=press_t, draw_dpad=False)
-
-        draw_toast(cr, sw, sh, self._active_toasts, start_y=sh - 40)
 
     def _draw_dpad_3d(self, snapshot, sw, sh, dx, vms):
         """The d-pad's real 3D tilt — a genuine Gtk.Snapshot perspective/

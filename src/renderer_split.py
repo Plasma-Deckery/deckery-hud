@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 
 import cairo
 
-from helpers import (_rrect, _txt, _txt_icon, _icon_indent, _txt_smooth, _txt_size, _pill_row, _fade_glass,
+from helpers import (_rrect, _txt, _txt_icon, _icon_indent, _txt_smooth, _txt_size, _pill_row,
                      capture_text_boxes)
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
@@ -29,9 +29,8 @@ from layout_split import (compute_layout, center_badge_rect, center_close_rect, 
                           center_theme_rect, theme_panel_rect)
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, stroke_outline, idle_fill
 from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
-                    neutral_rgb, style_from_env)
+                    style_from_env)
 import icons
-import pill_shadow
 import theme
 from reveal import FULL
 from elements import ELEMENTS, ELEMENT_IDS, side_of
@@ -473,55 +472,18 @@ def _diff_vms(side, old, new):
         dbg(f"{side} vms changed: {changed} {' '.join(detail)}")
 
 
-# Centre column (title, status badge, breadcrumb, active-output pills, close
-# affordance) — the ninth group. Cached like the clusters, drawn at full
-# opacity; its visibility fades it as a whole at blit time. Keyed only on
-# the state it actually reads.
+# Centre column (title, status badge, breadcrumb, close affordance) — the
+# ninth group. Cached like the clusters, drawn at full opacity; its
+# visibility fades it as a whole at blit time. Keyed only on the state it
+# actually reads. The active outputs are not part of it: the OSD shows them,
+# over the open HUD too (osd_win.py).
 _center_cache = []   # [(key, layer)], most recent first, like _group_cache
-
-
-def _without_glass(surf, rect, boxes):
-    """Copy of a layer bitmap with the glass pills cut out, for the edge
-    shadow to trace — traced around a light pill it reads as a dark rim."""
-    if not boxes:
-        return surf
-    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, surf.get_width(), surf.get_height())
-    out.set_device_scale(*surf.get_device_scale())
-    cr = cairo.Context(out)
-    cr.set_source_surface(surf, 0, 0)
-    cr.paint()
-    cr.set_operator(cairo.OPERATOR_CLEAR)
-    cr.translate(-rect[0], -rect[1])
-    for x, y, w, h in boxes:
-        _rrect(cr, x - 3, y - 3, w + 6, h + 6, h / 2 + 3)
-        cr.fill()
-    return out
-
-
-def _with_glass_shadow(shadow, boxes):
-    """The element's shadow slot with the glass pills' own shadow (see
-    pill_shadow.py) added — a new surface, the cached one stays as it is.
-    The pills sit inside the element's ink, which the slot already covers
-    with B-14's wider reach."""
-    if shadow is None or not boxes:
-        return shadow
-    surf, x, y, w, h = shadow
-    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, surf.get_width(), surf.get_height())
-    out.set_device_scale(*surf.get_device_scale())
-    cr = cairo.Context(out)
-    cr.set_source_surface(surf, 0, 0)
-    cr.paint()
-    cr.translate(-x, -y)
-    pill_shadow.paint(cr, boxes, rgb=neutral_rgb(shadow_style()), strength=theme.current().pill_shadow)
-    return out, x, y, w, h
 
 
 def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
     ctx = state.get("context") or {}
-    outs = tuple(e.get("key", "") if isinstance(e, dict) else e
-                 for e in ctx.get("active_outputs") or ())
     key = (sw, sh, dev_scale, theme.current(), tuple(ctx.get("config_stack") or ()),
-           tuple(ctx.get("held_modifiers") or ()), bool(ctx.get("paused", False)), outs)
+           tuple(ctx.get("held_modifiers") or ()), bool(ctx.get("paused", False)))
     for i, (k, layer) in enumerate(_center_cache):
         if k == key:
             _center_cache.insert(0, _center_cache.pop(i))
@@ -529,10 +491,7 @@ def _get_center_layer(state, center, sw, sh, dev_scale=1.0):
     with capture_text_boxes() as cap:
         surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0),
                                      sw, sh, dev_scale)
-    shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap,
-                                     _without_glass(surf, rect, cap.glass_boxes),
-                                     rect, dev_scale)
-    shadow = _with_glass_shadow(shadow, cap.glass_boxes)
+    shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap, surf, rect, dev_scale)
     layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
                        shadow=shadow, bleed=bleed, vms={}, look=key)
     _center_cache.insert(0, (key, layer))
@@ -1497,19 +1456,13 @@ def _draw_scale_button_live(cr, btn_key, part_name, ox, oy, scale, vm, t):
     cr.restore()
 
 
-
 # Mouse glyphs — the real Breeze symbolic icons (see icons.py), not
 # hand-drawn: no reason to redraw a mouse by hand when the system already
 # ships one, including the left/right-highlighted variants a hand-drawn
-# glyph can't cheaply tell apart from a flat recolour. The keyboard glyph
-# is the exception, see _draw_kbd_icon.
+# glyph can't cheaply tell apart from a flat recolour.
 _MOUSE_SIZE = 16     # idle (MT-Trackpad's legend glyph), doubled at its call site
 _CLICK_SIZE = 30     # LClick/RClick beside L1/L2/R1/R2 etc. (_place_action_text) — picked
                      # from a side-by-side render, the largest of the candidates shown
-_PILL_ICON_SIZE = 26   # LClick/RClick and the keyboard prefix glyph, both inside the
-                        # active-outputs strip's own pill — one shared size so the row
-                        # reads as one consistent icon scale, and so _pill_row only
-                        # needs to grow its pill height/width to fit a single value
 
 _MOUSE_ICON_NAME = "input-mouse-symbolic"
 _CLICK_ICON_NAME = {"BTN_LEFT": "input-mouse-click-left-symbolic",
@@ -1540,48 +1493,6 @@ def _draw_click_icon(cr, which, x, y, ha, color, size=_CLICK_SIZE):
     name = _CLICK_ICON_NAME.get(which, _MOUSE_ICON_NAME)
     if not icons.draw_icon(cr, name, cx, y, size, color):
         icons.draw_icon(cr, _MOUSE_ICON_NAME, cx, y, size, color)
-
-
-def _draw_kbd_icon(cr, x, y, ha, color, size=_PILL_ICON_SIZE):
-    """Keyboard glyph, hand-drawn rather than themed — on request (B-06):
-    Breeze's input-keyboard-symbolic read busier and heavier than the mouse
-    beside it, and the other themed keyboards (Breeze sizes, Adwaita) were
-    just as dense or a solid filled block. This one shares the mouse's 1px
-    outline: two rows of five 2x2 keys and a spacebar, built in whole
-    *device* pixels so it stays crisp under fractional scaling (the Deck
-    runs at 1.1, where a logical-pixel grid would land between pixels).
-    Same placement convention as _draw_mouse_icon."""
-    ds = cr.get_target().get_device_scale()[0]
-    m = cr.get_matrix()
-    cx = _icon_cx(x, ha, size)
-    cr.save()
-    if (m.xx, m.yx, m.xy, m.yy) == (1, 0, 0, 1):
-        # Translation-only CTM: switch to device pixels and snap to them.
-        cx, cy = (cx + m.x0) * ds, (y + m.y0) * ds
-        cr.identity_matrix()
-        cr.scale(1 / ds, 1 / ds)
-        u = size * ds / 26
-    else:
-        cy, u = y, size / 26
-    key, gap, lw = max(1, round(2 * u)), max(1, round(u)), max(1, round(u))
-    hpad, vpad = round(2 * u), max(1, round(u))
-    row_w = 5 * key + 4 * gap
-    space_w = round(8 * u)
-    space_w += (row_w - space_w) % 2  # keep it centred on whole pixels
-    bw = row_w + 2 * (hpad + lw)
-    bh = 3 * key + 2 * gap + 2 * (vpad + lw)
-    bx, by = round(cx - bw / 2), round(cy - bh / 2)
-    cr.set_source_rgba(*color)
-    _rrect(cr, bx + lw / 2, by + lw / 2, bw - lw, bh - lw, 2 * u)
-    cr.set_line_width(lw)
-    cr.stroke()
-    kx, ky = bx + lw + hpad, by + lw + vpad
-    for row in range(2):
-        for i in range(5):
-            cr.rectangle(kx + i * (key + gap), ky + row * (key + gap), key, key)
-    cr.rectangle(kx + (row_w - space_w) // 2, ky + 2 * (key + gap), space_w, key)
-    cr.fill()
-    cr.restore()
 
 
 # Pad legend labels with nothing useful to say as text — the shape itself
@@ -1804,36 +1715,6 @@ def _draw_center(cr, state, center, open_t):
     seps = ["›" if i < len(stack) else "" for i in range(n_gaps)]
     _pill_row(cr, cx, by + badge_h + 26, labels, sep=seps, size=10,
               sep_rgba=(*t.ink, 0.55 * alpha), ha="center", styles=styles)
-
-    # Active outputs strip — vertically centred on screen (not stacked under
-    # the breadcrumb with everything else up top), on request.
-    raw = ctx.get("active_outputs") or []
-    def _key(e): return e.get("key", "") if isinstance(e, dict) else e
-    outputs = [_key(e) for e in raw if _key(e)]
-    if outputs:
-        from viewmodel import _K
-        out_labels = [_K.get(k, k.replace("KEY_", "").replace("BTN_", "")) for k in outputs]
-        # BTN_LEFT/BTN_RIGHT get a mouse-click glyph instead of the literal
-        # "LClick"/"RClick" text; every other key gets a small keyboard
-        # glyph *before* its own text instead (Control, Alt, Brightness
-        # Up/Down, ...) — on request.
-        icon_color = (*t.pill_fg[:3], t.pill_fg[3] * alpha)
-        def _click_cb(which):
-            def draw(cr, ccx, ccy):
-                _draw_click_icon(cr, which, ccx, ccy, "center", icon_color, size=_PILL_ICON_SIZE)
-            return draw
-        def _kbd_cb():
-            def draw(cr, px, py):
-                _draw_kbd_icon(cr, px, py, "left", icon_color, size=_PILL_ICON_SIZE)
-            return draw
-        pill_icons = [_click_cb(k) if k in _CLICK_ICON_NAME else None for k in outputs]
-        pill_prefix_icons = [None if k in _CLICK_ICON_NAME else _kbd_cb() for k in outputs]
-        _pill_row(cr, cx, (y0 + y1) / 2, out_labels, sep="+", size=10,
-                  glass=_fade_glass(t.glass, alpha), fg=icon_color,
-                  border=(*t.pill_border[:3], t.pill_border[3] * alpha) if t.pill_border else None,
-                  sep_rgba=(0.5, 0.5, 0.52, 0.9 * alpha), ha="center",
-                  icons=pill_icons, prefix_icons=pill_prefix_icons,
-                  icon_size=_PILL_ICON_SIZE)
 
     # Close affordance
     crx, cry, crw, crh = center_close_rect(center)
