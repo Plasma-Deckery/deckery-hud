@@ -1,8 +1,8 @@
 # Neon: leuchtende Linien und Farbcodes auf Rauchglas-Plättchen, die jeder
 # Form und Legendenzeile eng folgen und einen Hauch des Farbtons dessen
 # annehmen, was auf ihnen liegt; ein kurzer Schleier verbindet nahe
-# Nachbarn. Ruhig gehalten: nur die farbigen Linien leuchten, und das
-# leise — Schrift und alles Weiße bleiben scharf und ohne Schein.
+# Nachbarn. Alles leuchtet ein wenig — Linien, Schrift, Weißes —, aber
+# leise genug, dass nichts blendet.
 label = "Neon"
 order = 5
 
@@ -19,11 +19,22 @@ preset = "aura"
 tint = true
 tint_value = 0.12
 tint_saturation = 0.5
-# Ein schmaler, schwacher Schein um farbige Linien — keiner um Schrift
-# (er überstrahlt kleine Buchstaben) und keiner um Weißes (er blendet).
-glow_alpha = 0.35
-glow_radius = 3.5
+# Ein schmaler, schwacher Schein um alles Helle: farbige Linien in ihrer
+# Farbe, weiße Linien, Ringe und Buchstaben halb so stark in Weiß, Schrift
+# etwas schwächer als Linien, damit kleine Buchstaben scharf bleiben.
+glow_alpha = 0.4
+glow_radius = 4
+glow_neutral = 0.5
+glow_text = true
+glow_text_alpha = 0.6
 
 [connector]
 glow = 0.55                     # die Gestenlinie leuchtet, aber blendet nicht
 glow_radius = 5
+
+# Leicht abgedunkelt hinter dem offenen HUD, heller als Wireframe; die Mitte
+# bleibt klarer.
+[backdrop]
+color = "#06070d"
+opacity = 0.25
+vignette = 0.55
