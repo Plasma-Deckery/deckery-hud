@@ -75,4 +75,4 @@ def test_panel_text_stands_out_in_every_builtin_theme():
         title = px[int(y + 36):int(y + 56), int(x + 20):int(x + w - 20)]
         luma = (title[..., :3].astype(float) @ (0.0722, 0.7152, 0.2126)) / 255
         assert luma.max() - luma.min() > 0.5, name
-    theme.activate(theme.DEFAULT)
+    theme.activate(theme.BASE)

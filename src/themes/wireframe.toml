@@ -2,7 +2,7 @@
 # gesperrten Versalien auf dunklen Plättchen mit abgeschrägten Ecken und
 # leuchtendem Rahmen; Gelb und Pink als Signalfarben.
 label = "Wireframe"
-order = 30
+order = 0
 
 [colors]
 ink = "#d8fbff"

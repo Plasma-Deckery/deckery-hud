@@ -94,7 +94,7 @@ def main():
                 scr.get_source().set_filter(cairo.FILTER_GOOD)
                 scr.paint()
                 scr.restore()
-                theme.activate(theme.DEFAULT)   # titles in one font
+                theme.activate(theme.BASE)   # titles in one font
                 scr.set_source_rgb(1, 1, 1)
                 helpers._txt(scr, x, y + 4, f"{theme.load(name).label}  ·  "
                              f"{os.path.basename(bgs[c]).split('.')[0]}", size=12, bold=True)
