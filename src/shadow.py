@@ -206,12 +206,15 @@ class GroupShadowSpec:
     ink:        (x, y, w, h) — everything the element draws; the shadow layers
                 always cover it, so the edge shadow reaches strokes that are
                 neither a part nor text (e.g. the centre's close button)
+    ink_colours: InkColours of the element's bitmap, or None — what the tint
+                follows (see _local_tint); without it, the text boxes' colours
     """
     parts: tuple = ()
     rrects: tuple = ()
     text_boxes: tuple = ()
     ink: tuple = None
     text_colours: tuple = ()
+    ink_colours: object = None
 
 
 # ── small numpy helpers ───────────────────────────────────────────────────
@@ -219,13 +222,19 @@ class GroupShadowSpec:
 def _box_blur(a, r, axis):
     if r < 1:
         return a
-    pad = [(0, 0), (0, 0)]
-    pad[axis] = (r + 1, r)
-    c = np.cumsum(np.pad(a, pad), axis=axis, dtype=np.float32)
     n = a.shape[axis]
-    hi = np.take(c, np.arange(2 * r + 1, 2 * r + 1 + n), axis=axis)
-    lo = np.take(c, np.arange(0, n), axis=axis)
-    return (hi - lo) / (2 * r + 1)
+    # Zero-padded running sum along `axis` (slices, not np.pad/np.take:
+    # same numbers, a fraction of the overhead on these small arrays).
+    shape = list(a.shape)
+    shape[axis] = n + 2 * r + 1
+    padded = np.zeros(shape, np.float32)
+    inner = [slice(None)] * a.ndim
+    inner[axis] = slice(r + 1, r + 1 + n)
+    padded[tuple(inner)] = a
+    c = np.cumsum(padded, axis=axis, dtype=np.float32)
+    hi, lo = [slice(None)] * a.ndim, [slice(None)] * a.ndim
+    hi[axis], lo[axis] = slice(2 * r + 1, 2 * r + 1 + n), slice(0, n)
+    return (c[tuple(hi)] - c[tuple(lo)]) / (2 * r + 1)
 
 
 def _box_radius(sigma):
@@ -309,6 +318,128 @@ def light_of(colour, style=None):
 def neutral_rgb(style):
     """Shadow colour under white/grey legends (and glass pills) for `style`."""
     return _NEUTRAL_DARK if style.tint else tuple(style.shadow_rgb)
+
+
+def _hsv_rgb(h, s, v):
+    """colorsys.hsv_to_rgb over arrays."""
+    i = np.floor(h * 6.0) % 6
+    f = h * 6.0 - np.floor(h * 6.0)
+    p, q, t = v * (1 - s), v * (1 - s * f), v * (1 - s * (1 - f))
+    sel = [i == n for n in range(6)]
+    return np.stack([np.select(sel, c) for c in
+                     ((v, q, p, p, t, v), (t, v, v, q, p, p), (p, p, t, v, v, q))], axis=-1)
+
+
+def _rgb_hsv(rgb):
+    """colorsys.rgb_to_hsv over an (..., 3) array."""
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    mx, mn = rgb.max(-1), rgb.min(-1)
+    d = np.maximum(mx - mn, 1e-6)
+    h = np.where(mx == r, (g - b) / d, np.where(mx == g, 2 + (b - r) / d, 4 + (r - g) / d))
+    return (h / 6.0) % 1.0, np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0), mx
+
+
+def _tint_colours(rgb, style=None):
+    """dark_of and light_of over an (..., 3) array of straight colours, as
+    one (..., 6) array: the shadow colour, then its rim colour."""
+    k = np.clip((rgb.max(-1) - rgb.min(-1) - 0.12) / 0.25, 0, 1)[..., None]
+    h, s, _v = _rgb_hsv(rgb)
+    sat, val = (style.tint_saturation, style.tint_value) if style else (0.90, 0.26)
+    cap = style.rim_saturation if style else 0.7
+    dark = _hsv_rgb(h, np.full_like(h, sat), np.full_like(h, val))
+    light = _hsv_rgb(h, np.minimum(s, cap), np.ones_like(h))
+    return np.concatenate([np.asarray(_NEUTRAL_DARK, np.float32) * (1 - k) + dark * k,
+                           np.asarray(_NEUTRAL_LIGHT, np.float32) * (1 - k) + light * k], -1)
+
+
+@dataclass(frozen=True)
+class InkColours:
+    """An element's bitmap at 1/_FIELD_DOWN on the shared field grid: how
+    much ink each cell holds and in which colour. Hashable — part of the
+    shadow's cache key — so a colour change in the bitmap retints."""
+    x: int          # screen px of cell (0, 0), a multiple of _FIELD_DOWN
+    y: int
+    w: int          # cells
+    h: int
+    data: bytes     # (h, w, 4) uint8 premultiplied BGRA, as cairo stores it
+
+
+def ink_colours(content, rect):
+    """InkColours of a layer bitmap `content` placed at rect (x, y, w, h)."""
+    d = _FIELD_DOWN
+    x, y = math.floor(rect[0] / d) * d, math.floor(rect[1] / d) * d
+    w = int(math.ceil((rect[0] + rect[2] - x) / d))
+    h = int(math.ceil((rect[1] + rect[3] - y) / d))
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+    cr = cairo.Context(surf)
+    cr.scale(1 / d, 1 / d)
+    cr.translate(-x, -y)
+    cr.set_source_surface(content, rect[0], rect[1])
+    cr.get_source().set_filter(cairo.FILTER_GOOD)   # area average, not point samples
+    cr.paint()
+    surf.flush()
+    px = np.ndarray((h, surf.get_stride() // 4, 4), np.uint8, surf.get_data())[:, :w]
+    return InkColours(x, y, w, h, px.tobytes())
+
+
+# How far one item's colour carries: the shadow right around an item takes
+# the colour of the ink nearest it (white ink counts, as neutral), the far
+# cloud the mix of what is near, and beyond all of it it is neutral.
+_TINT_NEAR = 8.0    # sigma, px
+_TINT_FAR = 28.0
+
+
+def _local_tint(spec, x0, y0, w, h, down, style=None):
+    """Straight (h, w, 6) colours over a grid at 1/down with origin (x0, y0):
+    the shadow colour (dark_of) of the ink around each cell, then the rim
+    colour (light_of) of the same ink — so the two always share a hue."""
+    mw, mh = max(1, int(math.ceil(w / down))), max(1, int(math.ceil(h / down)))
+    a = np.zeros((mh, mw), np.float32)
+    rgb = np.zeros((mh, mw, 3), np.float32)
+    ic = spec.ink_colours
+    if ic is not None and down == _FIELD_DOWN:
+        px = np.frombuffer(ic.data, np.uint8).reshape(ic.h, ic.w, 4).astype(np.float32) / 255.0
+        cx, cy = (ic.x - x0) // down, (ic.y - y0) // down
+        sx0, sy0 = max(0, -cx), max(0, -cy)
+        sx1, sy1 = min(ic.w, mw - cx), min(ic.h, mh - cy)
+        if sx1 > sx0 and sy1 > sy0:
+            src = px[sy0:sy1, sx0:sx1]
+            ca = src[..., 3]
+            a[cy + sy0:cy + sy1, cx + sx0:cx + sx1] = ca
+            rgb[cy + sy0:cy + sy1, cx + sx0:cx + sx1] = (
+                src[..., [2, 1, 0]] / np.maximum(ca, 1e-6)[..., None])
+    else:
+        # No bitmap to read: each text box in its legend's colour.
+        for box, colour in zip(spec.text_boxes, spec.text_colours or (None,) * len(spec.text_boxes)):
+            m = _mask(GroupShadowSpec(text_boxes=(box,)), x0, y0, w, h, down, 0, 0, 0)
+            a = np.maximum(a, m)
+            rgb[m > 0] = colour if colour is not None else (1.0, 1.0, 1.0)
+    neutral = np.asarray(_NEUTRAL_DARK + _NEUTRAL_LIGHT, np.float32)
+    out = np.empty((mh, mw, 6), np.float32)
+    out[...] = neutral
+    inked = a > 0
+    if not inked.any():
+        return out
+    # Only the window the ink can reach is mixed; beyond it, neutral.
+    rows, cols = np.nonzero(inked.any(1))[0], np.nonzero(inked.any(0))[0]
+    m = 2 * _blur_support(_TINT_FAR / down / 2) + 4
+    r0, r1 = max(0, rows[0] - m), min(mh, rows[-1] + 1 + m)
+    c0, c1 = max(0, cols[0] - m), min(mw, cols[-1] + 1 + m)
+    a, rgb, inked = a[r0:r1, c0:c1], rgb[r0:r1, c0:c1], inked[r0:r1, c0:c1]
+    wh, ww = a.shape
+    # Weight and weighted colour blurred together (axes 0, 1 of one stack).
+    stack = np.zeros((wh, ww, 7), np.float32)
+    stack[..., 0] = a
+    stack[inked, 1:] = a[inked, None] * _tint_colours(np.clip(rgb[inked], 0, 1), style)
+    # The far mix is smooth: blurred at half the grid's resolution.
+    ph, pw = wh + wh % 2, ww + ww % 2
+    half = np.pad(stack, ((0, ph - wh), (0, pw - ww), (0, 0)))
+    half = half.reshape(ph // 2, 2, pw // 2, 2, 7).mean(axis=(1, 3))
+    far = _blur(half, _TINT_FAR / down / 2).repeat(2, 0).repeat(2, 1)
+    far = _box_blur(_box_blur(far, 1, 0), 1, 1)[:wh, :ww]
+    mixed = _blur(stack, _TINT_NEAR / down) + 0.05 * far
+    out[r0:r1, c0:c1] = (mixed[..., 1:] + 1e-4 * neutral) / (mixed[..., :1] + 1e-4)
+    return out
 
 
 def element_colour(spec):
@@ -462,7 +593,11 @@ def group_shadow(spec, style):
                   style.legend_padx + 4, style.legend_pady + 3, radius=style.plate_radius)
     field = _blur(field, style.bleed_blur / _FIELD_DOWN)
 
-    tint = _tint_map(spec, x0, y0, w, h, _FIELD_DOWN, style) if style.tint else None
+    # Shadow and rim colours, local to each item; the rim takes the light
+    # side of the local hue even when the shadow itself stays untinted.
+    colours = (_local_tint(spec, x0, y0, w, h, _FIELD_DOWN, style)
+               if style.tint or style.rim_alpha > 0 else None)
+    tint = colours[..., :3] if style.tint else None
     plain = None
     if tint is None and tuple(style.shadow_rgb) != (0.0, 0.0, 0.0):
         plain = np.empty(field.shape + (3,), np.float32)
@@ -471,7 +606,8 @@ def group_shadow(spec, style):
                      core_rect, _alpha_surface(core),
                      _alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
                      if tint is not None else None,
-                     _rim(spec, style), field)
+                     _rim(spec, style, (colours[..., 3:], x0, y0) if colours is not None else None),
+                     field)
     if len(_group_cache) > 160:
         _group_cache.clear()
     _group_cache[key] = gs
@@ -641,34 +777,17 @@ def _sdf_group_shadow(spec, style):
 
 
 def _tint_map(spec, x0, y0, w, h, down, style=None):
-    """Straight (h, w, 3) shadow colour over an element's grid: near a legend
-    line its own dark colour, elsewhere the element's (see dark_of)."""
-    mw, mh = max(1, int(math.ceil(w / down))), max(1, int(math.ceil(h / down)))
-    base = dark_of(element_colour(spec), style)
-    num = np.empty((mh, mw, 3), np.float32)
-    num[...] = base
-    num *= 1e-3
-    den = np.full((mh, mw), 1e-3, np.float32)
-    shapes = _mask(GroupShadowSpec(spec.parts, spec.rrects), x0, y0, w, h, down, 0, 0, 0)
-    if shapes.any():
-        f = _blur(shapes, 40 / down)
-        num += f[..., None] * base
-        den += f
-    # Lines of one colour share one mask and one blur.
-    by_colour = {}
-    for box, colour in zip(spec.text_boxes, spec.text_colours or (None,) * len(spec.text_boxes)):
-        by_colour.setdefault(dark_of(colour, style), []).append(box)
-    for dark, boxes in by_colour.items():
-        m = _mask(GroupShadowSpec(text_boxes=tuple(boxes)), x0, y0, w, h, down, 0, 0, 0)
-        f = _blur(m, 10 / down) * 6
-        num += f[..., None] * dark
-        den += f
-    return num / den[..., None]
+    """Straight (h, w, 3) shadow colour over an element's grid: around each
+    item the dark counterpart of its own colour, neutral around white and
+    grey ones (see _local_tint)."""
+    return _local_tint(spec, x0, y0, w, h, down, style)[..., :3]
 
 
-def _rim(spec, style):
+def _rim(spec, style, tint=None):
     """The quiet light line just outside an element's shapes, at 1 px per
-    screen px — (surface, x, y) or None."""
+    screen px — (surface, x, y) or None. Its colour is the light side of the
+    shadow's own hue right there: `tint`, (rgb, x, y) of the field-grid rim
+    colours from _local_tint, or neutral."""
     if style.rim_alpha <= 0 or not (spec.parts or spec.rrects):
         return None
     b = _spec_bounds(GroupShadowSpec(spec.parts, spec.rrects))
@@ -676,9 +795,18 @@ def _rim(spec, style):
     w, h = math.ceil(b[2]) + 6 - x0, math.ceil(b[3]) + 6 - y0
     sil = _mask(GroupShadowSpec(spec.parts, spec.rrects), x0, y0, w, h, 1, 0, 0, 0)
     ring = np.clip(_blur(sil, 1.2) * 2.0, 0, 1) * (1 - sil) * style.rim_alpha
-    rgb = np.empty(ring.shape + (3,), np.float32)
-    rgb[...] = light_of(element_colour(spec), style)
-    return _alpha_surface(ring, rgb), x0, y0
+    if tint is None:
+        rgb = np.empty(ring.shape + (3,), np.float32)
+        rgb[...] = _NEUTRAL_LIGHT
+        return _alpha_surface(ring, rgb), x0, y0
+    rgb, tx, ty = tint
+    light = _alpha_surface(np.ones(rgb.shape[:2], np.float32), rgb)
+    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+    cr = cairo.Context(out)
+    cr.translate(-x0, -y0)
+    cr.set_source(_placed(light, tx, ty, _FIELD_DOWN))
+    cr.mask_surface(_alpha_surface(ring), x0, y0)
+    return out, x0, y0
 
 
 def _placed(surf, x, y, down):
