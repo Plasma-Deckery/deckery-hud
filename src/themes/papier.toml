@@ -35,15 +35,14 @@ weight = "Medium"
 dim = 0                         # alle Legenden in voller Stärke
 
 [pill]
-# Dunkle Etiketten auf dem Papier: eckiger als Glas, wie aufgeklebte
-# Marken, das Plus in mittlerem Grau, lesbar auf hellem wie dunklem Bild.
+# Dunkle Etiketten auf dem Papier, rund wie überall, das Plus in mittlerem
+# Grau, lesbar auf hellem wie dunklem Bild.
 top = "#1d2129e6"
 bottom = "#1d2129d9"
 sheen = 0
 fg = "#ffffff"
 icon = "#ffffffcc"
 weight = "Semi-Bold"
-radius = 5
 sep = "#7a808ce6"
 shadow = 0.6
 
