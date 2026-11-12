@@ -219,27 +219,94 @@ def _txt_size(cr, text, size=12, bold=False):
     return lo.get_pixel_size()
 
 
+# Stand-ins for KDE's own Breeze icons (B-17). A label writes the Unicode
+# stand-in ("▦⮞ Next Desktop"); wherever _txt_icon draws it, the Breeze icon
+# takes its place, so desktop, activity and window read apart at a glance as
+# they do in System Settings. Anywhere else the stand-in still reads as a
+# symbol. Unthemed icons draw exactly as before.
+THEMED_ICONS = {"▦": "virtual-desktops-symbolic",
+                "✣": "activities-symbolic",
+                "🗔": "window"}
+_THEMED_PAD = 1.5    # Breeze draws a 16 px motif on a 24 px canvas
+
+
+def _icon_pieces(cr, icon, size):
+    """An icon head as [(piece, width, themed)], plus the gap between pieces.
+    A themed stand-in is its motif, a square of round(size * 1.1) px;
+    anything else gets a cell of at least round(size * 1.2), so heads of
+    the same make (▦⮝, ▦⮜) come out the same width and a column of their
+    labels stays flush. None when the head has no themed stand-in."""
+    if not any(c in THEMED_ICONS for c in icon):
+        return None
+    px, cell = round(size * 1.1), round(size * 1.2)
+    pieces = [(c, px, True) if c in THEMED_ICONS else (c, max(_txt_size(cr, c, size)[0], cell), False)
+              for c in icon]
+    return pieces, round(size * 0.15)
+
+
+def _icon_width(cr, icon, size):
+    """What `icon` takes up drawn as a label icon."""
+    cut = _icon_pieces(cr, icon, size)
+    if cut is None:
+        return _txt_size(cr, icon, size)[0]
+    pieces, gap = cut
+    return sum(w for _p, w, _t in pieces) + gap * (len(pieces) - 1)
+
+
+def _draw_icon_head(cr, x, y, icon, size, va, bold=False):
+    """Draw `icon` with its left edge at x. Themed stand-ins become their
+    Breeze icon in the current source colour — noted as a text box, so the
+    legend shadow covers them like a glyph — the rest stay text."""
+    cut = _icon_pieces(cr, icon, size)
+    if cut is None:
+        _txt(cr, x, y, icon, size, bold=bold, va=va)
+        return
+    pieces, gap = cut
+    h = _txt_size(cr, icon, size, bold)[1]
+    cy = y + h / 2 if va == "top" else y - h / 2 if va == "bottom" else y
+    src = cr.get_source()
+    rgba = src.get_rgba() if isinstance(src, cairo.SolidPattern) else (1, 1, 1, 1)
+    import icons    # Rsvg; only once a themed icon is actually drawn
+    for piece, w, themed in pieces:
+        if themed and icons.draw_icon(cr, THEMED_ICONS[piece], x + w / 2, cy, w * _THEMED_PAD, rgba):
+            _note_box(cr, x, cy - w / 2, w, w, piece)
+        else:
+            _txt(cr, x + w / 2, y, piece, size, bold=bold, ha="center", va=va)
+        x += w + gap
+
+
 def _icon_slot(cr, icon, size):
     """(slot width, gap) for a label icon — fixed per size so the text of a
     column of labels stays flush whatever each glyph's own width."""
-    return max(_txt_size(cr, icon, size)[0], round(size * 1.5)), round(size * 0.4)
+    return max(_icon_width(cr, icon, size), round(size * 1.5)), round(size * 0.4)
 
 
-def _txt_icon(cr, x, y, text, size=12, ha="left", va="top"):
+def _txt_icon(cr, x, y, text, size=12, ha="left", va="top", bold=False):
     """_txt for a label that may carry a leading icon ("☀ Brightness Up",
     B-17). The icon sits at the anchor end — the side x is on, which in the
     split renderer is always the button's side — centred in a fixed slot,
     the text after it. So the icon reads left of the text on the left half
     and right of it on the right half, mirrored like the layout. Plain
-    labels and ha="center" draw exactly as _txt."""
+    labels draw exactly as _txt, and so does ha="center" unless the icon
+    has a themed stand-in (a toast): then icon and text centre as one."""
     icon, rest = split_icon(text)
-    if icon is None or ha == "center":
-        _txt(cr, x, y, text, size, ha=ha, va=va)
+    themed = icon is not None and _icon_pieces(cr, icon, size) is not None
+    if icon is None or (ha == "center" and not themed):
+        _txt(cr, x, y, text, size, bold=bold, ha=ha, va=va)
+        return
+    if ha == "center":
+        w, gap = _icon_width(cr, icon, size), round(size * 0.4)
+        left = x - (w + gap + _txt_size(cr, rest, size, bold)[0]) / 2
+        _draw_icon_head(cr, left, y, icon, size, va, bold)
+        _txt(cr, left + w + gap, y, rest, size, bold=bold, va=va)
         return
     slot, gap = _icon_slot(cr, icon, size)
     sign = 1 if ha == "left" else -1
-    _txt(cr, x + sign * slot / 2, y, icon, size, ha="center", va=va)
-    _txt(cr, x + sign * (slot + gap), y, rest, size, ha=ha, va=va)
+    if themed:
+        _draw_icon_head(cr, x + sign * slot / 2 - _icon_width(cr, icon, size) / 2, y, icon, size, va)
+    else:
+        _txt(cr, x + sign * slot / 2, y, icon, size, ha="center", va=va)
+    _txt(cr, x + sign * (slot + gap), y, rest, size, bold=bold, ha=ha, va=va)
 
 
 def _icon_indent(cr, text, size=12):

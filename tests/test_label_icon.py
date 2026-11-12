@@ -96,3 +96,67 @@ def test_note_lines_up_with_the_text_not_the_icon():
     e.show_name, e.note = False, "halten"
     drawn = dict(_texts_drawn(_callouts, [e], "right", 100, size=13, icons=True))
     assert abs(drawn["halten"][0] - drawn["Play / Pause"][0]) < 0.5
+
+
+# ── Themed stand-ins: ▦ desktop, ✣ activity, 🗔 window drawn as Breeze icons ──
+
+
+def _fake_breeze(monkeypatch, found=True):
+    import icons
+    drawn = []
+
+    def draw_icon(cr, name, cx, cy, size_px, color):
+        drawn.append(name)
+        return found
+    monkeypatch.setattr(icons, "draw_icon", draw_icon)
+    return drawn
+
+
+def test_stand_ins_split_off_as_one_icon_head():
+    assert split_icon("🗔▦⮝ Window to Previous Desktop") == ("🗔▦⮝", "Window to Previous Desktop")
+    assert split_icon("✣⮜ Previous Activity") == ("✣⮜", "Previous Activity")
+
+
+def test_stand_ins_draw_as_their_breeze_icons(monkeypatch):
+    from helpers import _txt_icon
+    drawn = _fake_breeze(monkeypatch)
+    boxes = _texts_drawn(_txt_icon, 50, 50, "🗔▦⮝ Window to Previous Desktop", size=13, ha="left", va="mid")
+    assert drawn == ["window", "virtual-desktops-symbolic"]
+    # The icons are noted like glyphs (the legend shadow covers them), in
+    # reading order, the arrow stays text.
+    assert [t for t, _ in boxes] == ["🗔", "▦", "⮝", "Window to Previous Desktop"]
+    xs = [b[0] for _t, b in boxes]
+    assert xs == sorted(xs)
+
+
+def test_stand_in_falls_back_to_its_glyph_without_breeze(monkeypatch):
+    from helpers import _txt_icon
+    _fake_breeze(monkeypatch, found=False)
+    boxes = _texts_drawn(_txt_icon, 50, 50, "✣⮞ Next Activity", size=13, ha="left", va="mid")
+    assert [t for t, _ in boxes] == ["✣", "⮞", "Next Activity"]
+
+
+def test_heads_of_the_same_make_keep_text_flush(monkeypatch):
+    from helpers import _txt_icon
+    _fake_breeze(monkeypatch)
+    for heads in (("▦⮝", "▦⮜", "✣⮞", "✣⮟"), ("🗔▦⮝", "🗔✣⮜", "🗔▦⮟")):
+        for ha, x in (("left", 50), ("right", 350)):
+            ends = []
+            for h in heads:
+                _t, box = _texts_drawn(_txt_icon, x, 50, f"{h} Label", size=13, ha=ha, va="mid")[-1]
+                ends.append(box[0] if ha == "left" else box[0] + box[2])
+            assert max(ends) - min(ends) < 0.5, (heads, ha)
+
+
+def test_toast_centres_icon_and_text_as_one(monkeypatch):
+    from helpers import _txt_icon
+    _fake_breeze(monkeypatch)
+    boxes = _texts_drawn(_txt_icon, 200, 50, "▦⮞ Next Desktop", size=11, ha="center", va="mid", bold=True)
+    assert [t for t, _ in boxes] == ["▦", "⮞", "Next Desktop"]
+    left, right = boxes[0][1][0], boxes[-1][1][0] + boxes[-1][1][2]
+    assert abs((left + right) / 2 - 200) < 1
+
+
+def test_unthemed_toast_draws_as_before():
+    from helpers import _txt_icon
+    assert [t for t, _ in _texts_drawn(_txt_icon, 200, 50, "☀ Brightness Up", ha="center")] == ["☀ Brightness Up"]
