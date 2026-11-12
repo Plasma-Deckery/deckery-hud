@@ -785,12 +785,7 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
     # No full-screen fill here, deliberately: this spans the whole screen,
     # and an opaque background would black out the desktop/game underneath.
     if state.get("unreadable"):
-        cr.set_source_rgba(0.93, 0.93, 0.96, 0.92)
-        _txt(cr, sw / 2, sh / 2 - 16, "No state from makima",
-             size=16, bold=True, ha="center", va="center")
-        cr.set_source_rgba(0.93, 0.93, 0.96, 0.55)
-        _txt(cr, sw / 2, sh / 2 + 10, f"Cannot read {state['unreadable']}",
-             size=12, ha="center", va="center")
+        _draw_unreadable(cr, sw, sh, state["unreadable"])
         return
 
     if groups is None:
@@ -851,6 +846,27 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
     if (t2 - t0) * 1000 > 5.0:
         dbg(f"draw_hud_split: layers+{(t1 - t0) * 1000:.1f}ms "
             f"paint+{(t2 - t1) * 1000:.1f}ms")
+
+
+def _draw_unreadable(cr, sw, sh, path):
+    """No state from makima: the classic HUD's three lines, on a dark plate
+    of their own — this overlay has no background, and bare white text is
+    lost on a light page."""
+    t = theme.current()
+    lines = (("No state from makima", 16, True, 0.92), (f"Cannot read {path}", 12, False, 0.6),
+             ("Is makima.service running?", 12, False, 0.6))
+    w = max(_txt_size(cr, text, size, bold)[0] for text, size, bold, _a in lines) + 64
+    h = 100
+    x, y = (sw - w) / 2, (sh - h) / 2
+    cr.set_source_rgba(0.04, 0.04, 0.06, 0.82)
+    _rrect(cr, x, y, w, h, 18)
+    cr.fill_preserve()
+    cr.set_source_rgba(*t.ink, 0.18)
+    cr.set_line_width(1.0)
+    cr.stroke()
+    for (text, size, bold, alpha), ly in zip(lines, (y + 30, y + 58, y + 78)):
+        cr.set_source_rgba(*t.ink, alpha)
+        _txt(cr, sw / 2, ly, text, size=size, bold=bold, ha="center", va="mid")
 
 
 def _avail_mod_color(vm):

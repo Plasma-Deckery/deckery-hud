@@ -426,3 +426,24 @@ def test_a_press_that_changes_the_legend_traces_a_new_shadow():
     assert _layers(base, {"QAM": FULL})["QAM"].shadow == rest.shadow
     again = _layers(base, {"QAM": FULL}, press_t={"BTN_BASE": 1.0})["QAM"]
     assert again.shadow == rest.shadow
+
+
+# ── Release 2.0.0: no state from makima, in the split design ─────────────
+
+def test_split_says_why_it_has_no_state_legibly():
+    """The classic HUD's three lines (main, aa803c7), on a dark plate: the
+    split overlay has no background of its own, and white text alone was
+    unreadable on a light page."""
+    import cairo
+    import numpy as np
+    from helpers import capture_text_boxes
+    from renderer_split import draw_hud_split
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, SW, SH)
+    with capture_text_boxes() as cap:
+        draw_hud_split(cairo.Context(surf), None, None, SAMPLES["unreadable"], SW, SH)
+    assert cap.texts == ["No state from makima", f"Cannot read {SAMPLES['unreadable']['unreadable']}",
+                         "Is makima.service running?"]
+    surf.flush()
+    px = np.ndarray((SH, surf.get_stride() // 4, 4), np.uint8, surf.get_data())
+    bx, by, bw, bh = cap.boxes[0]
+    assert px[int(by) - 6, SW // 2, 3] > 180   # a plate above the first line, not bare text
