@@ -416,7 +416,7 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
               bg=(1, 1, 1, 0.10), fg=(1, 1, 1, 0.9),
               border=None, sep_rgba=(0.55, 0.55, 0.55, 0.7),
               ha="center", styles=None, icons=None, prefix_icons=None, icon_size=None,
-              glass=None):
+              glass=None, optical=False):
     """
     Draw a horizontal row of pill-shaped labels joined by a separator glyph.
 
@@ -453,6 +453,12 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
                  mismatch. Defaults to the text-driven box from before.
     glass      — optional dict (see _glass_pill) that replaces the flat `bg`
                  fill with a faked glass material; `border` still applies.
+    optical    — centre everything in a pill on one line, the text's cap
+                 height (B-17's _cap_mid), instead of each layout box: a
+                 label's leading symbol ("⇧ Shift", split_icon) by its ink,
+                 as _txt_icon does, the text by its capitals. Symbols from
+                 a fallback font bring their own ascent and line height,
+                 so their layout boxes sit high or low.
     """
     if not labels:
         return
@@ -482,7 +488,21 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         if s:
             sep_cache[s] = _lo(s, sep_font)
 
-    # Measure all pill labels up front
+    # Measure all pill labels up front. Optical: a leading symbol is drawn
+    # on its own (heads[i], with its width and the gap after it).
+    heads = [None] * len(labels)
+    if optical:
+        heads = [split_icon(lbl)[0] for lbl in labels]
+        labels = [split_icon(lbl)[1] if h else lbl for lbl, h in zip(labels, heads)]
+    head_gap = round(size * 0.4)
+
+    def _head_w(h):
+        # A plain symbol by its ink: a fallback font's advance can be far
+        # wider than what it draws, which reads as a gap before the text.
+        if _icon_pieces(cr, h, size) is None:
+            return _layout(cr, h, size, True).get_pixel_extents()[0].width
+        return _icon_width(cr, h, size)
+    head_w = [_head_w(h) + head_gap if h else 0 for h in heads]
     pill_los = [_lo(lbl, font_str) for lbl in labels]
 
     # Pill height is uniform (driven by the shared font size, or by
@@ -497,8 +517,8 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         if icons[i]:
             return icon_w
         if prefix_icons[i]:
-            return icon_w + PREFIX_GAP + pw
-        return pw
+            return icon_w + PREFIX_GAP + head_w[i] + pw
+        return head_w[i] + pw
 
     # Total row width
     total_w = sum(_content_w(i, pw) + 2 * PX
@@ -549,12 +569,22 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         cr.set_source_rgba(*p_fg)
         if icon:
             icon(cr, x + pill_w / 2, cy)
-        elif prefix:
-            prefix(cr, x + PX, cy)
-            cr.move_to(x + PX + icon_w + PREFIX_GAP, cy - ph_lbl / 2)
-            PangoCairo.show_layout(cr, lo_lbl)
         else:
-            cr.move_to(x + PX, cy - ph_lbl / 2)
+            tx = x + PX
+            if prefix:
+                prefix(cr, tx, cy)
+                tx += icon_w + PREFIX_GAP
+            if heads[i]:
+                with _unnoted():   # inside the pill, which is noted already
+                    if _icon_pieces(cr, heads[i], size) is None:
+                        _glyph(cr, tx + (head_w[i] - head_gap) / 2, cy, heads[i], size, bold=True)
+                    else:
+                        _draw_icon_head(cr, tx, cy, heads[i], size, bold=True)
+                tx += head_w[i]
+            # Optical: the capitals' middle on cy, not the layout box's.
+            ty = (cy - _cap_mid(cr, 0, labels[i], size, "top", bold=True) if optical
+                  else cy - ph_lbl / 2)
+            cr.move_to(tx, ty)
             PangoCairo.show_layout(cr, lo_lbl)
         x += pill_w
 

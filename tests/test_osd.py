@@ -171,3 +171,34 @@ def test_theme_sets_the_pill_size():
     vals = {}
     theme._osd({"pill_size": 13}, vals, "t.toml")
     assert vals["osd_pill_size"] == 13.0
+
+
+@pytest.mark.parametrize("theme_name", ["neon", "glas", "kontrast"])
+@pytest.mark.parametrize("size", [11, 15.4])
+def test_pill_symbol_and_text_share_one_centre_line(theme_name, size, monkeypatch):
+    """⌃ comes from a fallback font with its own ascent; in the pill its ink
+    centres on the text's cap height, like a B-17 label icon, not high up."""
+    import dataclasses
+    import numpy as np
+    import osd_look
+    import theme
+    # Without the pill's contour (kontrast has one), the glyphs stand alone.
+    monkeypatch.setattr(theme, "_active",
+                        dataclasses.replace(theme.load(theme_name), pill_border=None))
+    rec, _cap = osd_look._record(lambda cr: osd_look.draw_output_pills(cr, ["KEY_LEFTCTRL"], size))
+    surf, _rect = osd_look._raster(rec, 4.0)   # 4x for sub-pixel precision
+    surf.flush()
+    w, h = surf.get_width(), surf.get_height()
+    px = np.ndarray((h, surf.get_stride() // 4, 4), np.uint8, surf.get_data())[:, :w]
+    fg = np.array(theme.load(theme_name).pill_fg[:3]) * 255
+    ink = (np.abs(px[..., [2, 1, 0]].astype(float) - fg).sum(axis=2) < 120) & (px[..., 3] > 200)
+    cols = np.flatnonzero(ink.any(axis=0))
+    # Glyph clusters left to right: the first is ⌃, the next is "C".
+    breaks = np.flatnonzero(np.diff(cols) > 2)
+    sym = cols[:breaks[0] + 1]
+    c = cols[breaks[0] + 1:breaks[1] + 1]
+
+    def mid(span):
+        rows = np.flatnonzero(ink[:, span].any(axis=1))
+        return (rows[0] + rows[-1]) / 2
+    assert abs(mid(sym) - mid(c)) <= 4 * 1.0   # within one logical px

@@ -249,7 +249,7 @@ def draw_output_pills(cr, keys, size):
               sep_rgba=(0.5, 0.5, 0.52, 0.9), ha="center",
               icons=[click(k) if k in _CLICKS else None for k in keys],
               prefix_icons=[None if k in _CLICKS or k in _MOD_LABEL else kbd for k in keys],
-              icon_size=icon)
+              icon_size=icon, optical=True)
 
 
 def pills_sprite(keys, style, dev_scale=1.0, size=None):
