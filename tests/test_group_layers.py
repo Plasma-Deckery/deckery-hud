@@ -315,13 +315,60 @@ def test_reference_path_draws_the_connector_at_rest_and_mid_slide():
 
 
 
+def _crumb_texts(state, content):
+    """The breadcrumb pills' labels the centre layer draws."""
+    import renderer_split
+    renderer_split._center_cache.clear()
+    seen = []
+    real = renderer_split._pill_row
+
+    def spy(cr, x, y, labels, *a, **kw):
+        seen.extend(labels)
+        return real(cr, x, y, labels, *a, **kw)
+    renderer_split._pill_row = spy
+    try:
+        _layers(state, {"center": content})
+    finally:
+        renderer_split._pill_row = real
+    return seen
+
+
+def _in_claude(*held):
+    st = copy.deepcopy(SAMPLES["base_only"])
+    st["context"]["config_stack"] = ["Steam Deck Base", "Claude Desktop"]
+    st["context"]["held_modifiers"] = list(held)
+    return st
+
+
 def test_breadcrumbs_alone_are_a_slice_of_the_centre():
-    from reveal import CRUMBS
-    full = _layers(SAMPLES["base_only"], {"center": FULL})["center"]
-    crumbs = _layers(SAMPLES["base_only"], {"center": CRUMBS})["center"]
+    from reveal import crumbs
+    st = _in_claude("BTN_TL")
+    full = _layers(st, {"center": FULL})["center"]
+    part = _layers(st, {"center": crumbs({"Claude Desktop"})})["center"]
     fx, fy, fw, fh = full.rect
-    x, y, w, h = crumbs.rect
+    x, y, w, h = part.rect
     assert fx <= x and fy <= y and x + w <= fx + fw and y + h <= fy + fh
     assert h < fh / 2
-    assert crumbs.look != full.look
-    assert crumbs.shadow is not None
+    assert part.look != full.look
+    assert part.shadow is not None
+
+
+def test_breadcrumbs_show_only_the_relevant_layers():
+    from reveal import crumbs
+    st = _in_claude("BTN_TL", "BTN_TR")
+    texts = _crumb_texts(st, crumbs(()))
+    assert "Claude Desktop" not in texts and "Steam Deck Base" not in texts
+    assert {"L1", "R1"} <= set(texts)
+    assert "Claude Desktop" in _crumb_texts(st, crumbs({"Claude Desktop"}))
+
+
+def test_the_base_is_hidden_in_the_full_hud_too():
+    texts = _crumb_texts(_in_claude(), FULL)
+    assert "Claude Desktop" in texts and "Steam Deck Base" not in texts
+
+
+def test_the_base_can_be_shown(monkeypatch):
+    import dataclasses
+    import theme
+    monkeypatch.setattr(theme, "_active", dataclasses.replace(theme.Theme(), crumbs_base=True))
+    assert "Steam Deck Base" in _crumb_texts(_in_claude(), FULL)

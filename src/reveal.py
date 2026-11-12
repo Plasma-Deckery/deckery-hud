@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from elements import ELEMENTS, ELEMENT_IDS
 import settings
+import theme
 
 
 @dataclass(frozen=True)
@@ -25,10 +26,19 @@ class Content:
 
 
 FULL = Content(None)
-# The centre column's breadcrumb row alone ("Steam Deck Base › Claude
-# Desktop" and the held modifiers' pills), shown along with a partial
-# reveal: which application, and what the colours mean.
-CRUMBS = Content(frozenset({"crumbs"}))
+# The centre column's breadcrumb row alone, shown along with a partial
+# reveal: which application, and what the colours mean. Only the config
+# layers named here, then the held modifiers' pills.
+_CRUMBS = "\0crumbs"
+
+
+def crumbs(names):
+    return Content(frozenset({_CRUMBS, *names}))
+
+
+def crumb_names(content):
+    """The config layers a breadcrumb content shows; None = all (FULL)."""
+    return None if content.legends is None else content.legends - {_CRUMBS}
 
 # Every element, in draw order. Named GROUPS for the window, which treats
 # them all alike.
@@ -198,8 +208,10 @@ class Reveal:
                 want("RPad", FULL)
             for name, content in self._modifier_reveal(state, ctx, now).items():
                 want(name, content)
-            if found and s.breadcrumbs:
-                want("center", CRUMBS)
+            if s.breadcrumbs:
+                trail = self._crumbs(state, ctx, any(fired.values()) and not gesture)
+                if trail is not None:
+                    want("center", trail)
 
         wants = {name: Want(content, "detector") for name, content in found.items()}
         if self.full:
@@ -231,6 +243,27 @@ class Reveal:
             if own:
                 contents[el.id] = Content(frozenset(own)) if el.kind == "dpad" else FULL
         return contents
+
+    def _crumbs(self, state, ctx, pad_shown):
+        """The breadcrumb row for what is revealed, or None: only the config
+        layers that bind something shown, and the held modifiers. A pad's
+        mode always comes from the base config (makima's trackpad is
+        device-level); a gesture binds nothing of its own; a modifier layer
+        shows its combos, each from its own config."""
+        stack = list(ctx.get("config_stack") or ())
+        names = set()
+        if pad_shown and stack:
+            names.add(stack[0])
+        held = ctx.get("held_modifiers") or ()
+        if self._mod_shown:
+            names |= {b.get("origin") for b in (state.get("modifier_active") or {}).values()
+                      if isinstance(b, dict)}
+        names &= set(stack)
+        if stack and not theme.current().crumbs_base:
+            names.discard(stack[0])
+        if names or (self._mod_shown and held):
+            return crumbs(names)
+        return None
 
     def _activity(self, state, ctx, held):
         """A button newly pressed or an action newly fired since the last
