@@ -145,6 +145,8 @@ class Reveal:
         self._mod_shown = False      # the modifier reveal is on screen
         self._pressed = None         # buttons down at the last update
         self._action_ts = _UNSEEN    # last_action.ts at the last update
+        self._app = _UNSEEN          # context.active_app at the last update
+        self._app_until = None       # the app-focus preview shows until then
         self._now = 0.0
 
     def _holds(self):
@@ -170,12 +172,16 @@ class Reveal:
             found[name] = found[name].union(content) if name in found else content
 
         ctx = state.get("context") or {}
+        app = ctx.get("active_app")
+        focused = self._app is not _UNSEEN and app != self._app
+        self._app = app
         if not s.enabled or state.get("unreadable") or ctx.get("gaming_mode"):
             # Partial reveals are off in gaming mode: makima's bindings
             # aren't active there, so the legends would be wrong.
             for h in self._holds():
                 h.reset()
             self._gesture_raw = self._gesture_shown = self._mod_shown = False
+            self._app_until = None
         else:
             pads = state.get("trackpads") or {}
             gesture = bool((pads.get("gesture") or {}).get("touching")) and s.gesture_enabled
@@ -206,10 +212,15 @@ class Reveal:
             if self._gesture_shown:
                 want("LPad", FULL)
                 want("RPad", FULL)
-            for name, content in self._modifier_reveal(state, ctx, now).items():
+            held = list(ctx.get("held_modifiers") or ())
+            active = self._activity(state, ctx, held)
+            for name, content in self._modifier_reveal(state, ctx, held, active, now).items():
+                want(name, content)
+            app_layers, app_shown = self._app_focus(state, ctx, focused, active, now)
+            for name, content in app_shown.items():
                 want(name, content)
             if s.breadcrumbs:
-                trail = self._crumbs(state, ctx, any(fired.values()) and not gesture)
+                trail = self._crumbs(state, ctx, any(fired.values()) and not gesture, app_layers)
                 if trail is not None:
                     want("center", trail)
 
@@ -218,17 +229,52 @@ class Reveal:
             wants = {name: Want(FULL, "full") for name in GROUPS}
         return wants
 
-    def _modifier_reveal(self, state, ctx, now):
+    def _app_focus(self, state, ctx, focused, active, now):
+        """The preview of an application's own commands, for app_focus_ms
+        after it got focus (B-33): (its config layers, {element: content}).
+        Its own base-level bindings — those whose origin is its config, not
+        the base — and the modifiers with its combos, which keep their
+        modifier outline. An app without commands of its own shows nothing;
+        nor does the full HUD, which shows everything anyway. A keystroke
+        or a fired action ends it: they know what to do. One in the same
+        state write as the focus change doesn't — the click that focused
+        the window."""
+        if self.full or not self.settings.app_focus:
+            self._app_until = None
+        elif focused:
+            self._app_until = now + self.settings.app_focus_ms / 1000
+        elif active:
+            self._app_until = None
+        if self._app_until is not None and now >= self._app_until:
+            self._app_until = None
+        if self._app_until is None:
+            return set(), {}
+        layers = set((ctx.get("config_stack") or ())[1:])
+        bindings = state.get("bindings") or {}
+        own = {k for k, b in bindings.items()
+               if "-" not in k and isinstance(b, dict) and b.get("origin") in layers}
+        mods = {k for k, m in (ctx.get("available_modifiers") or {}).items()
+                if isinstance(m, dict) and m.get("has_app_combos")}
+        if not own and not mods:
+            self._app_until = None
+            return set(), {}
+        contents = {}
+        for el in ELEMENTS.values():
+            keys = (own | mods) & set(el.buttons)
+            if keys:
+                contents[el.id] = Content(frozenset(keys)) if el.kind == "dpad" else FULL
+        return layers, contents
+
+    def _modifier_reveal(self, state, ctx, held, active, now):
         """Elements for the held modifier layer — exactly the buttons that
         layer is about: its combos, the held modifier itself, and the
         modifiers that could be added next (they keep their amber outline).
         Triggered by held_modifiers or by combos alone (virtual hint modifiers never appear in
         held_modifiers). The clock runs from the first modifier held, so a
         layer change once shown takes effect at once."""
-        held = list(ctx.get("held_modifiers") or ())
         combos = list((state.get("modifier_active") or {}).keys())
         raw = bool(held or combos) and self.settings.modifier_enabled
-        if self._activity(state, ctx, held) and not self._mod_shown:
+        if active and not self._mod_shown:
             # The reveal is for a hold left idle — someone unsure what to
             # press. A keystroke or a fired action (L1+A Copy) means they
             # know: the hold starts over. Once shown, it stays.
@@ -244,14 +290,15 @@ class Reveal:
                 contents[el.id] = Content(frozenset(own)) if el.kind == "dpad" else FULL
         return contents
 
-    def _crumbs(self, state, ctx, pad_shown):
+    def _crumbs(self, state, ctx, pad_shown, app_layers=()):
         """The breadcrumb row for what is revealed, or None: only the config
         layers that bind something shown, and the held modifiers. A pad's
         mode always comes from the base config (makima's trackpad is
         device-level); a gesture binds nothing of its own; a modifier layer
-        shows its combos, each from its own config."""
+        shows its combos, each from its own config; an app-focus preview,
+        the app's own layers."""
         stack = list(ctx.get("config_stack") or ())
-        names = set()
+        names = set(app_layers)
         if pad_shown and stack:
             names.add(stack[0])
         held = ctx.get("held_modifiers") or ()
@@ -279,6 +326,8 @@ class Reveal:
     def next_deadline(self):
         """Next time update() would change its answer with no new state."""
         times = [t for t in (h.next_change(self._now) for h in self._holds()) if t is not None]
+        if self._app_until is not None:
+            times.append(self._app_until)
         return min(times) if times else None
 
 

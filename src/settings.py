@@ -97,6 +97,12 @@ class RevealSettings:
     breadcrumbs: bool = field(default=True, metadata=_meta(
         "Mit jedem einzeln eingeblendeten Element auch die Brotkrumen-Zeile der "
         "Mitte zeigen: in welcher Anwendung du bist, und was die Farben heißen."))
+    app_focus: bool = field(default=True, metadata=_meta(
+        "Bekommt eine Anwendung mit eigenen Befehlen den Fokus, kurz zeigen, welche "
+        "Tasten dort etwas Eigenes tun und welche Modifier eigene Kombinationen haben."))
+    app_focus_ms: int = field(default=3000, metadata=_meta(
+        "Wie lange diese Vorschau stehen bleibt, bevor sie ausblendet; ein Tastendruck "
+        "blendet sie gleich aus (ms).", minimum=1))
     hold_ms: int = field(default=750, metadata=_meta(
         "Wie lange Pad oder Modifier benutzt werden, bis sie erscheinen (ms).",
         minimum=1))
