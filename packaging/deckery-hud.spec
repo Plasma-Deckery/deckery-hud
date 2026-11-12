@@ -1,5 +1,5 @@
 Name:           deckery-hud
-Version:        0.5.0
+Version:        2.0.0~beta1
 Release:        1%{?dist}
 Summary:        Steam Deck button-layout HUD overlay for KDE Plasma desktop
 
@@ -19,6 +19,8 @@ Requires:       python3
 Requires:       python3-gobject
 # cairo / PangoCairo drawing (gi.repository → cairo Python bindings)
 Requires:       python3-cairo
+# Shape-following shadows, glow and pill shadows (shadow.py, pill_shadow.py)
+Requires:       python3-numpy
 # Writes settings.toml keeping the user's comments (settings.remember)
 Requires:       python3-tomlkit
 # GTK4 runtime + typelib (gi.repository.Gtk 4.0)
@@ -39,11 +41,22 @@ Requires:       urw-base35-gothic-fonts
 Requires:       google-noto-sans-fonts
 
 Recommends:     deckery-tray
+# The default theme's font (Neon); without it Pango falls back to another sans
+Recommends:     adwaita-sans-fonts
+# Action-label icons (B-17); without them the labels go without
+Recommends:     breeze-icon-theme
 
 %description
 deckery-hud is a persistent Wayland layer-shell overlay that renders the
 Steam Deck button layout, trackpad state, and active remappings. It reads
-/tmp/makima-state.json via inotify and redraws on every state change.
+makima's state from $XDG_RUNTIME_DIR/makima-state.json via inotify and
+redraws on every state change.
+
+The split design lays the controller out along both screen edges, one
+element per button, and can show single elements on their own: a trackpad
+in use, both pads during a gesture, or the layer of a held modifier. Its
+look comes from themes (TOML, built in and user-defined), switchable in the
+HUD itself. The classic design remains available.
 
 The HUD is controlled via D-Bus (de.plasma_deckery.hud) — the deckery-tray
 applet sends Toggle calls to show/hide the overlay.
@@ -92,6 +105,27 @@ install -Dm644 packaging/deckery-hud.service \
 %{_userunitdir}/deckery-hud.service
 
 %changelog
+* Thu Nov 12 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 2.0.0~beta1-1
+- New split design, now the default: the controller laid out along both screen
+  edges, one element per button, composited on the GPU; classic stays one
+  click away and can be switched at runtime
+- Single elements reveal on their own: a trackpad in use (its dot follows the
+  finger), both pads during a gesture (joined by a connector line), or the
+  combos of a modifier held idle; a short grace window brings them back at
+  once, and a breadcrumb row shows the relevant app layer and modifiers
+- Fade-outs keep their last look, changes in place crossfade, and transitions
+  keep their speed under CPU load
+- Shape-following backdrop shadows with merging clouds and colour tint
+- Themes: seven built-in (Neon, Glas, Papier, Wireframe, Arcade, Terminal,
+  Kontrast) plus user themes in ~/.config/deckery-hud/themes/, previewed and
+  picked in an in-HUD theme mode (deckery-hud-theme or the Theme pill)
+- Icons on action labels, a hand-drawn keyboard glyph, frosted glass pills
+  for active outputs, the L3/R3 label following the stick
+- Neon OSD with pop animations, also over the open HUD
+- Its own settings file, ~/.config/deckery-hud/settings.toml, reloaded live
+- Says why when makima's state cannot be read, in both designs
+- Released in lockstep with makima-deckery and deckery 2.0.0~beta1
+
 * Sun Nov 08 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.5.0-1
 - Version aligned with makima-deckery and deckery 0.5.0; no functional changes
 
@@ -100,10 +134,10 @@ install -Dm644 packaging/deckery-hud.service \
 - Says so on screen when there is no state file to read instead of looking broken
 - Reads the state file from $XDG_RUNTIME_DIR; needs makima-deckery and deckery 0.4.1
 
-* Thu Sep 11 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.4.0-1
+* Fri Sep 11 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.4.0-1
 - Minor version bump to 0.4.0
 
-* Sat Aug 16 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.3.0-1
+* Sun Aug 16 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 0.3.0-1
 - Initial RPM packaging
 - Wayland layer-shell HUD overlay via GTK4 + gtk4-layer-shell GI bindings
 - Reads /tmp/makima-state.json via inotify, redraws on state change
