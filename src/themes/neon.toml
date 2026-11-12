@@ -19,3 +19,10 @@ preset = "aura"
 tint = true
 tint_value = 0.17
 tint_saturation = 0.85
+# Alles Helle leuchtet: farbige Linien und Legenden in ihrer Farbe, weiße
+# in Weiß; die dunkle Kante darüber hält die Buchstaben scharf.
+glow_alpha = 0.75
+glow_radius = 4
+glow_neutral = 1.0
+glow_text = true
+glow_text_alpha = 0.9

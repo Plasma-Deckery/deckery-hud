@@ -91,3 +91,39 @@ def test_every_builtin_theme_builds_its_shadow():
             assert a is not None and b is not None
     finally:
         theme.activate(theme.DEFAULT)
+
+
+def _glow_of(rgba, **kw):
+    import cairo
+    content = cairo.ImageSurface(cairo.FORMAT_ARGB32, 40, 20)
+    cr = cairo.Context(content)
+    cr.set_source_rgba(*rgba)
+    cr.rectangle(10, 8, 20, 4)
+    cr.fill()
+    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, 80, 60)
+    style = dataclasses.replace(AURA, glow_alpha=1.0, glow_radius=3, **kw)
+    shadow.draw_glow(cairo.Context(out), content, 20, 20, style)
+    return _at(out, 40, 34)          # 4 px below the bar
+
+
+def test_white_ink_glows_only_with_glow_neutral():
+    assert _glow_of((1, 1, 1, 1)) == 0
+    assert _glow_of((1, 1, 1, 1), glow_neutral=1.0) > 0.2
+    assert _glow_of((0.1, 0.1, 0.1, 1), glow_neutral=1.0) == 0      # dark ink never
+    assert _glow_of((0.1, 0.9, 0.8, 1)) > 0.2                       # colour always
+
+
+def test_text_glow_scales_inside_text_boxes():
+    import cairo
+    content = cairo.ImageSurface(cairo.FORMAT_ARGB32, 40, 20)
+    cr = cairo.Context(content)
+    cr.set_source_rgba(0.1, 0.9, 0.8, 1)
+    cr.rectangle(10, 8, 20, 4)
+    cr.fill()
+    style = dataclasses.replace(AURA, glow_alpha=1.0, glow_radius=3)
+    vals = []
+    for text in (0.0, 0.5, 1.0):
+        out = cairo.ImageSurface(cairo.FORMAT_ARGB32, 80, 60)
+        shadow.draw_glow(cairo.Context(out), content, 20, 20, style, ((28, 26, 24, 8),), text)
+        vals.append(_at(out, 40, 34))
+    assert vals[0] == 0 and 0 < vals[1] < vals[2]

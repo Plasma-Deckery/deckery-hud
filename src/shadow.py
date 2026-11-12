@@ -78,6 +78,8 @@ class ShadowStyle:
     glow_alpha: float = 0.0
     glow_radius: float = 6.0
     glow_text: bool = False      # the glow around text too (blurs small letters)
+    glow_text_alpha: float = 1.0  # with glow_text: its strength around text, × glow_alpha
+    glow_neutral: float = 0.0    # white/light-grey ink glows too, in white: 0..1
     # Shape of the shadow (B-20 themes):
     offset_x: float = 0.0        # px — a drop shadow: plate, edge and cloud move,
     offset_y: float = 0.0        #      the rim and glow stay on their shapes
@@ -854,8 +856,8 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
     if content is not None:
         if style.glow_alpha > 0:
             draw_glow(cr, content, content_rect[0] - ox, content_rect[1] - oy, style,
-                      () if style.glow_text else
-                      tuple((bx - ox, by - oy, bw, bh) for bx, by, bw, bh in spec.text_boxes))
+                      tuple((bx - ox, by - oy, bw, bh) for bx, by, bw, bh in spec.text_boxes),
+                      style.glow_text_alpha if style.glow_text else 0.0)
         draw_edge_shadow(cr, content, content_rect[0], content_rect[1], style, spec.text_boxes)
     if gs.rim is not None:
         rim, rx, ry = gs.rim
@@ -998,12 +1000,14 @@ def draw_edge_shadow(cr, content, x, y, style, text_boxes=()):
 _GLOW_DOWN = 2
 
 
-def draw_glow(cr, content, x, y, style, text_boxes=()):
+def draw_glow(cr, content, x, y, style, text_boxes=(), text=0.0):
     """Soft halo in the content's own colour around its coloured strokes —
-    outlines, callout lines, dots: the neon tubes. Text casts none (a halo
-    fills the gaps between letters and blurs them) and neither does white
-    or grey ink. `content` is a cached layer's ARGB surface placed at
-    (x, y); the halo is computed at 1/_GLOW_DOWN of its device pixels."""
+    outlines, callout lines, dots: the neon tubes. Ink inside text_boxes
+    glows at `text` × that strength (0 by default: a halo fills the gaps
+    between letters and blurs them). White and light-grey ink glows white
+    at style.glow_neutral × the strength; dark ink never. `content` is a
+    cached layer's ARGB surface placed at (x, y); the halo is computed at
+    1/_GLOW_DOWN of its device pixels."""
     content.flush()
     sx = content.get_device_scale()[0]
     w, h = content.get_width(), content.get_height()
@@ -1011,13 +1015,17 @@ def draw_glow(cr, content, x, y, style, text_boxes=()):
                     content.get_data())[:h:_GLOW_DOWN, :w:_GLOW_DOWN].astype(np.float32) / 255.0
     a = px[..., 3]
     rgb = px[..., [2, 1, 0]] / np.maximum(a, 1e-6)[..., None]
-    k = np.clip((rgb.max(axis=2) - rgb.min(axis=2) - 0.12) / 0.25, 0.0, 1.0) * a
+    k = np.clip((rgb.max(axis=2) - rgb.min(axis=2) - 0.12) / 0.25, 0.0, 1.0)
+    if style.glow_neutral > 0:
+        light = np.clip((rgb.max(axis=2) - 0.55) / 0.3, 0.0, 1.0)
+        k = np.maximum(k, (1.0 - k) * light * style.glow_neutral)
+    k *= a
     for bx, by, bw, bh in text_boxes:
         # text boxes are in the same logical px as (x, y)
         f = sx / _GLOW_DOWN
         c0, r0 = max(0, int((bx - x) * f) - 1), max(0, int((by - y) * f) - 1)
         c1, r1 = int((bx + bw - x) * f) + 2, int((by + bh - y) * f) + 2
-        k[r0:r1, c0:c1] = 0
+        k[r0:r1, c0:c1] *= text
     if not k.any():
         return
     sigma = style.glow_radius * sx / _GLOW_DOWN

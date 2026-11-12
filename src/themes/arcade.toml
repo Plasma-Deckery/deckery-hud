@@ -63,6 +63,7 @@ bleed_curve = 8
 glow_alpha = 0.7
 glow_radius = 5
 glow_text = true
+glow_neutral = 1.0
 
 [connector]
 color = "#ffe600"
