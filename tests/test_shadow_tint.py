@@ -96,9 +96,14 @@ def _centre_tint(paused, monkeypatch):
     """Shadow colour of the live centre column at its title and its first
     breadcrumb, with the status badge paused or active — under a tinted
     style (the themes may not use one)."""
+    import dataclasses
     import renderer_split as rs
     import shadow
+    import theme
     monkeypatch.setattr(rs, "shadow_style", _style)
+    # The base config's pill is the neutral (white) breadcrumb; the themes
+    # hide it by default (B-12), so show it for this.
+    monkeypatch.setattr(theme, "_active", dataclasses.replace(theme.current(), crumbs_base=True))
     # The layer caches are keyed on the theme, not on the style patched in.
     for cache in ("_shadow_layer_cache", "_group_cache"):
         monkeypatch.setattr(rs, cache, {})
