@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import cairo
 import numpy as np
 
-from helpers import _pill_row, _txt, capture_text_boxes
+from helpers import _pill_row, _txt_icon, capture_text_boxes
 import theme
 import pill_shadow
 from shadow import (GroupShadowSpec, group_shadow_layers, neutral_rgb, _alpha_surface,
@@ -127,7 +127,7 @@ def _classic_toast(label, col, dev_scale):
 def _neon_toast(label, col, style, dev_scale):
     def draw(cr):
         cr.set_source_rgb(*col)
-        _txt(cr, 0, 0, label, size=TOAST_SIZE, bold=True, ha="center", va="mid")
+        _txt_icon(cr, 0, 0, label, size=TOAST_SIZE, ha="center", va="mid", bold=True)
     rec, cap = _record(draw)
     content, rect = _raster(rec, dev_scale)
     spec = GroupShadowSpec(text_boxes=tuple(tuple(round(v) for v in b) for b in cap.boxes),
