@@ -323,3 +323,10 @@ def test_pill_radius_shapes_the_corners(user_themes, radius, corner_filled):
     stride = surf.get_stride()
     alpha = surf.get_data()[int(y + 1 - sy) * stride + int(x + 1 - sx) * 4 + 3]
     assert (alpha > 128) is corner_filled
+
+
+def test_pills_are_round_except_in_terminal():
+    """The design language is round and colourful; only Terminal's square
+    character cells are the deliberate exception."""
+    for n in theme.names()[:7]:
+        assert (theme.load(n).pill_radius < 0) is (n != "terminal"), n
