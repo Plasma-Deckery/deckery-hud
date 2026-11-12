@@ -61,6 +61,9 @@ bleed_reach = 16
 bleed_curve = 6
 glow_alpha = 0.75
 glow_radius = 4
+glow_neutral = 0.8
+glow_text = true
+glow_text_alpha = 0.6
 
 [connector]
 color = "#00e5ff"

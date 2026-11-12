@@ -33,7 +33,9 @@ def test_default_is_the_old_constants():
     assert t.glass == helpers.GLASS_PILL
     assert t.pill_fg == helpers.GLASS_PILL_FG
     assert t.shadow_style() == dataclasses.replace(
-        shadow.PRESETS["aura"], tint=True, tint_value=0.17, tint_saturation=0.85)
+        shadow.PRESETS["aura"], tint=True, tint_value=0.17, tint_saturation=0.85,
+        glow_alpha=0.75, glow_radius=4, glow_neutral=1.0, glow_text=True,
+        glow_text_alpha=0.9)
     assert theme.Theme().shadow_style() == shadow.style_from_env()
 
 
