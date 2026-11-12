@@ -28,7 +28,7 @@ from clusters import CLUSTERS, CLUSTER_BUTTONS, LEFT_STACK, RIGHT_STACK
 from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
                           center_theme_rect, theme_panel_rect)
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, stroke_outline, idle_fill
-from shadow import (GroupShadowSpec, group_shadow_layers, paint_bleed, paint_scaled,
+from shadow import (GroupShadowSpec, group_shadow_layers, ink_colours, paint_bleed, paint_scaled,
                     style_from_env)
 import icons
 import theme
@@ -294,6 +294,10 @@ def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False):
         # rather than letting the legend's shadow blink out for the press.
         return hit[1]
     spec = _element_shadow_spec(element, tx, cap.boxes, rect, cap.colours)
+    style = shadow_style()
+    if style.tint or style.rim_alpha > 0:
+        # The tint follows the colours actually drawn (see shadow._local_dark).
+        spec = replace(spec, ink_colours=ink_colours(surf, rect))
     key = (spec, tuple(cap.texts), shadow_style(), dev_scale)
     if hit is not None and hit[0] == key:
         return hit[1]
