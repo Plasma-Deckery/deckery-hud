@@ -285,15 +285,21 @@ def _element_shadow_spec(element, tx, text_boxes, ink, text_colours=(), shapes=(
 _shadow_layer_cache = {}
 
 
-def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False):
-    """(shadow, bleed) slots of a GroupLayer — see shadow.group_shadow_layers."""
+def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False, words=()):
+    """(shadow, bleed) slots of a GroupLayer — see shadow.group_shadow_layers.
+    words: what the element's legends say, to tell whether a press changed it."""
     hit = _shadow_layer_cache.get(element.id)
-    if pressing and hit is not None:
+    if pressing and hit is not None and hit[2] == words:
         # A mid-press button is drawn live, not into this bitmap — its label
         # and adjacent text are missing from it. Keep the at-rest shadow
-        # rather than letting the legend's shadow blink out for the press.
+        # rather than letting the legend's shadow blink out for the press —
+        # unless the press changed what the legends say (··· held as a
+        # modifier drops its Gaming Mode line): that shadow is of text gone.
         return hit[1]
-    spec = _element_shadow_spec(element, tx, cap.boxes, rect, cap.colours, cap.shapes)
+    # An empty bitmap (everything drawn live) has a 1-px rect at the origin,
+    # not ink: counted, it stretched the shadow from the screen's corner.
+    ink = rect if surf.get_width() > 1 or surf.get_height() > 1 else ()
+    spec = _element_shadow_spec(element, tx, cap.boxes, ink, cap.colours, cap.shapes)
     style = shadow_style()
     if style.tint or style.rim_alpha > 0:
         # The tint follows the colours actually drawn (see shadow._local_dark).
@@ -302,8 +308,14 @@ def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False):
     if hit is not None and hit[0] == key:
         return hit[1]
     layers = group_shadow_layers(spec, shadow_style(), surf, rect, dev_scale)
-    _shadow_layer_cache[element.id] = (key, layers)
+    _shadow_layer_cache[element.id] = (key, layers, words)
     return layers
+
+
+def _legend_words(element, vms):
+    """The text an element's buttons put in their legends."""
+    return tuple((k, vms[k].action, vms[k].sub_label, vms[k].note)
+                 for k in element.buttons if k in vms)
 
 
 def _side_slide_offset(side, sw, open_t):
@@ -447,7 +459,8 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
         surf, rect = _render_cropped(draw, sw, sh, dev_scale)
     _t1 = time.perf_counter()
     shadow, bleed = _element_shadows(element, tx, cap, surf, rect, dev_scale,
-                                     pressing=bool(set(element.buttons) & active_press))
+                                     pressing=bool(set(element.buttons) & active_press),
+                                     words=_legend_words(element, gvms))
     dbg(f"{name} element surface REBUILT: "
         f"{(_t1 - _t0) * 1000:.1f}ms + shadow {(time.perf_counter() - _t1) * 1000:.1f}ms "
         f"({sw}x{sh}@{dev_scale:.3g})")

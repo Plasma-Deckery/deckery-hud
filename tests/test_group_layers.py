@@ -395,3 +395,34 @@ def test_filled_buttons_cast_one_shadow():
             inside = bx <= x + w / 2 <= bx + bw and by <= y + h / 2 <= by + bh
             assert not inside, cap.texts
     assert "Deckery HUD" in cap.texts
+
+
+def _shadow_alpha_left_of(layer, x_max, y0, y1):
+    """Summed shadow alpha in a band of the screen, logical px."""
+    import numpy as np
+    surf, sx, sy, sw, sh = layer.shadow
+    a = np.ndarray((surf.get_height(), surf.get_stride() // 4, 4), np.uint8,
+                   surf.get_data())[:, :surf.get_width(), 3]
+    fx, fy = surf.get_width() / sw, surf.get_height() / sh
+    cols = slice(0, max(0, int((x_max - sx) * fx)))
+    rows = slice(max(0, int((y0 - sy) * fy)), max(0, int((y1 - sy) * fy)))
+    return int(a[rows, cols].sum())
+
+
+def test_a_press_that_changes_the_legend_traces_a_new_shadow():
+    """··· held as a modifier drops its Gaming Mode line (B-18). The at-rest
+    shadow a press normally keeps would still shadow that line."""
+    from renderer_split import element_box
+    base = SAMPLES["base_only"]
+    rest = _layers(base, {"QAM": FULL})["QAM"]
+    held = copy.deepcopy(base)
+    held["context"]["held_modifiers"] = held["context"]["active_buttons"] = ["BTN_BASE"]
+    pressed = _layers(held, {"QAM": FULL}, press_t={"BTN_BASE": 1.0})["QAM"]
+    bx, by, bw, bh = element_box(ELEMENTS["QAM"], rest.tx)
+    band = (bx - 80, by - 10, by + bh + 10)   # past the pill's own falloff
+    assert _shadow_alpha_left_of(rest, *band) > 0, "the line cast no shadow at rest"
+    assert _shadow_alpha_left_of(pressed, *band) == 0
+    # A press that leaves the legends alone still keeps the at-rest shadow.
+    assert _layers(base, {"QAM": FULL})["QAM"].shadow == rest.shadow
+    again = _layers(base, {"QAM": FULL}, press_t={"BTN_BASE": 1.0})["QAM"]
+    assert again.shadow == rest.shadow
