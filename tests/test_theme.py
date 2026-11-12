@@ -17,15 +17,16 @@ def user_themes(tmp_path, monkeypatch):
     d = tmp_path / "deckery-hud" / "themes"
     d.mkdir(parents=True)
     yield d
-    theme.activate(theme.DEFAULT)
+    theme.activate(theme.BASE)
 
 
-def test_default_is_the_old_constants():
-    # Neon keeps every token the drawing code had as a constant; only its
-    # shadow is its own (the design pass: "aura").
-    t = theme.load(theme.DEFAULT)
-    assert t == dataclasses.replace(theme.Theme(), label="Neon", shadow="aura",
+def test_base_is_the_old_constants():
+    # Neon, which every theme builds on, keeps every token the drawing code
+    # had as a constant; only its shadow and its gesture glow are its own.
+    t = theme.load(theme.BASE)
+    assert t == dataclasses.replace(theme.Theme(), label="Neon", order=5, shadow="aura",
                                     text=(1.0, 1.0, 1.0), text_dim=0.0,
+                                    connector_glow=0.55, connector_glow_radius=5.0,
                                     shadow_tweaks=t.shadow_tweaks)
     assert t.modifier == helpers.C_MOD
     assert t.layer == helpers.C_LAYER
@@ -33,15 +34,14 @@ def test_default_is_the_old_constants():
     assert t.glass == helpers.GLASS_PILL
     assert t.pill_fg == helpers.GLASS_PILL_FG
     assert t.shadow_style() == dataclasses.replace(
-        shadow.PRESETS["aura"], tint=True, tint_value=0.17, tint_saturation=0.85,
-        glow_alpha=0.75, glow_radius=4, glow_neutral=1.0, glow_text=True,
-        glow_text_alpha=0.9)
+        shadow.PRESETS["aura"], tint=True, tint_value=0.12, tint_saturation=0.5,
+        glow_alpha=0.35, glow_radius=3.5)
     assert theme.Theme().shadow_style() == shadow.style_from_env()
 
 
 def test_builtins_in_order():
     names = theme.names()
-    assert names[:7] == ["neon", "glass", "paper", "wireframe", "arcade", "terminal", "contrast"]
+    assert names[:7] == ["wireframe", "neon", "glass", "paper", "arcade", "terminal", "contrast"]
     for n in names:
         assert theme.load(n) is not None
 
@@ -95,7 +95,7 @@ def test_bad_values_cost_only_their_key(user_themes, capsys):
     assert t.modifier == theme.Theme().modifier
     assert t.layer == pytest.approx((0x10 / 255, 0x20 / 255, 0x30 / 255))
     assert t.modifiers == ()
-    assert t.shadow_style() == theme.load(theme.DEFAULT).shadow_style()
+    assert t.shadow_style() == theme.load(theme.BASE).shadow_style()
     err = capsys.readouterr().err
     assert "modifier" in err and "nope" in err and "ZZ" in err and "gibtsnicht" in err
 
@@ -121,7 +121,7 @@ def test_classic_draws_with_the_builtin_tokens():
     theme.activate("glass")
     assert theme.activate(None)
     assert theme.current() == theme.Theme()
-    theme.activate(theme.DEFAULT)
+    theme.activate(theme.BASE)
 
 
 def test_emphasis():
@@ -131,8 +131,23 @@ def test_emphasis():
     assert full.emph(0.4) == 1.0 and full.emph(0.9) == 1.0
 
 
+def test_default_is_wireframe():
+    # A user without a `theme` setting gets Wireframe, first in the theme mode.
+    assert theme.DEFAULT == "wireframe" == theme.names()[0]
+    assert settings.Settings().layout.theme == theme.DEFAULT
+    assert theme.load(theme.DEFAULT).label == "Wireframe"
+
+
+def test_neon_is_calm():
+    # Neon glows only around coloured lines, faintly: no halo around text
+    # (it blurs small letters) or around white (it dazzles).
+    st = theme.load("neon").shadow_style()
+    assert not st.glow_text and st.glow_neutral == 0
+    assert st.glow_alpha <= 0.4 and st.glow_radius <= 4
+    assert theme.load("neon").connector_glow < theme.Theme().connector_glow
+
+
 def test_setting():
-    assert settings.Settings().layout.theme == "neon"
     assert "theme = " in settings.template()
 
 
@@ -245,7 +260,7 @@ def test_text_tokens():
         assert helpers._case("abc") == "ABC"
         assert h1 > h0 and w1 > w0
     finally:
-        theme.activate(theme.DEFAULT)
+        theme.activate(theme.BASE)
 
 
 # ── The gesture connector (B-12) ──────────────────────────────────────────

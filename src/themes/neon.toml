@@ -1,9 +1,10 @@
 # Neon: leuchtende Linien und Farbcodes auf Rauchglas-Plättchen, die jeder
-# Form und Legendenzeile eng folgen und den Farbton dessen annehmen, was
-# auf ihnen leuchtet; ein kurzer Schleier verbindet nahe Nachbarn. Sonst die
-# Standardwerte aller Tokens.
+# Form und Legendenzeile eng folgen und einen Hauch des Farbtons dessen
+# annehmen, was auf ihnen liegt; ein kurzer Schleier verbindet nahe
+# Nachbarn. Ruhig gehalten: nur die farbigen Linien leuchten, und das
+# leise — Schrift und alles Weiße bleiben scharf und ohne Schein.
 label = "Neon"
-order = 0
+order = 5
 
 [colors]
 text = "#ffffff"                # gebundene Legenden so hell wie die Beschriftungen
@@ -13,16 +14,16 @@ dim = 0                         # alle Legenden in voller Stärke
 
 [shadow]
 preset = "aura"
-# Die Platte nimmt dort, wo eine farbige Linie oder Legende liegt, einen
-# sehr tiefen Ton derselben Farbe an — der Schleier leuchtet darin mit;
-# um weiße Legenden bleibt sie neutral.
+# Unter einer farbigen Linie oder Legende ein sehr tiefer, kaum gesättigter
+# Ton derselben Farbe; um weiße Legenden bleibt die Platte neutral.
 tint = true
-tint_value = 0.17
-tint_saturation = 0.85
-# Alles Helle leuchtet: farbige Linien und Legenden in ihrer Farbe, weiße
-# in Weiß; die dunkle Kante darüber hält die Buchstaben scharf.
-glow_alpha = 0.75
-glow_radius = 4
-glow_neutral = 1.0
-glow_text = true
-glow_text_alpha = 0.9
+tint_value = 0.12
+tint_saturation = 0.5
+# Ein schmaler, schwacher Schein um farbige Linien — keiner um Schrift
+# (er überstrahlt kleine Buchstaben) und keiner um Weißes (er blendet).
+glow_alpha = 0.35
+glow_radius = 3.5
+
+[connector]
+glow = 0.55                     # die Gestenlinie leuchtet, aber blendet nicht
+glow_radius = 5

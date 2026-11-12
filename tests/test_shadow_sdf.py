@@ -90,7 +90,7 @@ def test_every_builtin_theme_builds_its_shadow():
             a, b = shadow.group_shadow_layers(SPEC, st, None, None)
             assert a is not None and b is not None
     finally:
-        theme.activate(theme.DEFAULT)
+        theme.activate(theme.BASE)
 
 
 def _glow_of(rgba, **kw):

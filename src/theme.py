@@ -12,10 +12,11 @@ emphasis (active vs idle), which is design, not theme.
 Themes are TOML files. The built-in ones ship in src/themes/; a file of the
 same name in ~/.config/deckery-hud/themes/ replaces one, any other name adds
 one. A theme names another with `extends` and changes only what it lists.
-The default, "neon", is the HUD as it was before themes existed: every
-default below is the constant that used to sit in the drawing code, so
-its renders are pixel-identical — except the gesture connector, which
-became an amber power line with glow and shadow (B-12).
+Without `extends` a theme builds on "neon" (BASE). Every token default
+below is the constant that used to sit in the drawing code — the HUD as it
+was before themes existed, except the gesture connector, which became an
+amber power line with glow and shadow (B-12). A user without a `theme`
+setting gets "wireframe" (DEFAULT).
 
     label = "Neon kräftig"          # shown in the theme mode
     extends = "neon"
@@ -60,7 +61,7 @@ became an amber power line with glow and shadow (B-12).
     animation = "bubble-soft"       # used while [osd] animation = "auto"
     toast_keys = "#b88cff"          # toast colours: keys, command, error
 
-The classic design always draws with the default theme (App pins it).
+The classic design always draws with the built-in tokens alone (App pins it).
 
 Pure Python, no GTK.
 """
@@ -73,7 +74,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-DEFAULT = "neon"
+# The theme a user without a `theme` setting gets, and the fallback for one
+# that can't be loaded.
+DEFAULT = "wireframe"
+# The root every theme extends unless it names another: the built-in tokens
+# below with neon.toml on top. Theme() alone is what classic draws with.
+BASE = "neon"
 # Built-in themes that had German ids until 2.0.0~beta1: a setting or an
 # `extends` naming the old id still finds the theme (App rewrites the setting).
 RENAMED = {"glas": "glass", "papier": "paper", "kontrast": "contrast"}
@@ -92,7 +98,7 @@ def _warn(msg):
 
 @dataclass(frozen=True)
 class Theme:
-    name: str = DEFAULT
+    name: str = BASE
     label: str = "Neon"
     order: int = 0
 
@@ -310,7 +316,7 @@ def load(name, _seen=()):
     """The Theme called `name`, or None if there is no such file or it does
     not parse. A bad value only costs its own key."""
     name = resolve(name)
-    if name == DEFAULT and DEFAULT not in _files():
+    if name == BASE and BASE not in _files():
         return Theme()
     path = _files().get(name)
     if path is None or name in _seen:
@@ -318,7 +324,7 @@ def load(name, _seen=()):
     data = _read(path)
     if data is None:
         return None
-    parent = data.get("extends", DEFAULT if name != DEFAULT else None)
+    parent = data.get("extends", BASE if name != BASE else None)
     base = Theme()
     if parent:
         base = load(parent, _seen + (name,))

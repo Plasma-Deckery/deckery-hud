@@ -34,14 +34,14 @@ Requires:       librsvg2
 Requires:       pango
 # Toggle script uses gdbus from glib2-devel / glib2 tools
 Requires:       glib2
-# Fonts of the built-in themes (B-20): Glas, Terminal, Arcade, Wireframe/Papier
+# Fonts of the built-in themes (B-20): Glass, Terminal, Arcade, Wireframe/Paper
 Requires:       lato-fonts
 Requires:       fira-code-fonts
 Requires:       urw-base35-gothic-fonts
 Requires:       google-noto-sans-fonts
 
 Recommends:     deckery-tray
-# The default theme's font (Neon); without it Pango falls back to another sans
+# Neon's and the classic design's font; without it Pango falls back to another sans
 Recommends:     adwaita-sans-fonts
 # Action-label icons (B-17); without them the labels go without
 Recommends:     breeze-icon-theme

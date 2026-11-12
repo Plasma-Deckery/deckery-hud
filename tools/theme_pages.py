@@ -57,7 +57,7 @@ def _render(bg, state):
 
 
 def _label(cr, x, y, text, name):
-    theme.activate(theme.DEFAULT)      # captions in one font
+    theme.activate(theme.BASE)      # captions in one font
     cr.set_source_rgb(1, 1, 1)
     helpers._txt(cr, x, y, text, size=13, bold=True)
     theme.activate(name)
@@ -115,7 +115,7 @@ def main():
         path = os.path.join(out_dir, f"{i + 1:02d}_{name}.png")
         page(name, state, bgs, bg_names).write_to_png(path)
         print(path)
-    theme.activate(theme.DEFAULT)
+    theme.activate(theme.BASE)
 
 
 if __name__ == "__main__":
