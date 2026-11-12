@@ -36,11 +36,17 @@ scale = 1.12
 dim = 0                         # alle Legenden in voller Stärke
 
 [pill]
+# Maximal lesbar: dicker schwarzer Rand, schwarze Symbole, gelbes Plus.
 top = "#ffd600"
 bottom = "#ffd600"
 sheen = 0
 fg = "#000000"
+icon = "#000000"
+weight = "Heavy"
 border = "#000000"
+border_width = 2
+gap = 5
+sep = "#ffd600"
 shadow = 0.8
 
 [shadow]

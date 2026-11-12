@@ -38,11 +38,18 @@ spacing = 1.2
 scale = 0.95
 
 [pill]
+# Nur Kontur: fast eckige Rahmen in Cyan, Symbole in der Linienfarbe.
 top = "#00e5ff26"
 bottom = "#00e5ff14"
 sheen = 0
 fg = "#d8fbff"
+icon = "#00e5ff"
+weight = "Medium"
+radius = 2
 border = "#00e5ffcc"
+border_width = 1.2
+gap = 5
+sep = "#00e5ffb3"
 shadow = 0
 
 [shadow]

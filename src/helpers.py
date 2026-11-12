@@ -102,11 +102,11 @@ def _filled_button(cr, x, y, w, h, r, fill, draw_label):
         draw_label()
 
 
-def _font(size, bold=False):
+def _font(size, bold=False, weight=None):
     """The theme's font at `size` (scaled by text_scale), bold or in the
-    theme's text_weight (B-20)."""
+    theme's text_weight (B-20); `weight` (a Pango weight) overrides both."""
     t = theme.current()
-    weight = t.text_bold if bold else t.text_weight
+    weight = weight or (t.text_bold if bold else t.text_weight)
     if t.text_scale != 1.0:
         size = size * t.text_scale
     return Pango.FontDescription.from_string(f"{t.font} {weight} {size}")
@@ -274,30 +274,30 @@ def _breeze_icon(cr, name, cx, cy, motif, rgba, text=None):
     return True
 
 
-def _layout(cr, text, size, bold=False):
+def _layout(cr, text, size, bold=False, weight=None):
     lo = PangoCairo.create_layout(cr)
-    lo.set_font_description(_font(size, bold))
+    lo.set_font_description(_font(size, bold, weight))
     _set_text(lo, text)
     return lo
 
 
-def _cap_mid(cr, y, text, size, va, bold=False):
+def _cap_mid(cr, y, text, size, va, bold=False, weight=None):
     """The y halfway up the capitals of `text` as _txt draws it at (y, va):
     where a label icon centres, so it sits in the middle of the line the
     eye reads rather than wherever its own font's metrics put it."""
-    lo = _layout(cr, text, size, bold)
+    lo = _layout(cr, text, size, bold, weight)
     ph = lo.get_pixel_size()[1]
     ty = y - (ph if va == "bottom" else ph / 2 if va == "mid" else 0)
-    cap = _layout(cr, "H", size, bold).get_pixel_extents()[0].height
+    cap = _layout(cr, "H", size, bold, weight).get_pixel_extents()[0].height
     return ty + lo.get_baseline() / Pango.SCALE - cap / 2
 
 
-def _glyph(cr, cx, cy, glyph, size, bold=False):
+def _glyph(cr, cx, cy, glyph, size, bold=False, weight=None):
     """Draw `glyph` with its ink box centred on (cx, cy). A symbol from a
     fallback font brings that font's ascent and line height along, so
     centring its layout box (as _txt does) puts it high or low; its ink is
     what the eye centres."""
-    lo = _layout(cr, glyph, size, bold)
+    lo = _layout(cr, glyph, size, bold, weight)
     ink = lo.get_pixel_extents()[0]
     tx, ty = cx - ink.x - ink.width / 2, cy - ink.y - ink.height / 2
     _note_box(cr, tx + ink.x, ty + ink.y, ink.width, ink.height, glyph)
@@ -416,7 +416,8 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
               bg=(1, 1, 1, 0.10), fg=(1, 1, 1, 0.9),
               border=None, sep_rgba=(0.55, 0.55, 0.55, 0.7),
               ha="center", styles=None, icons=None, prefix_icons=None, icon_size=None,
-              glass=None, optical=False):
+              glass=None, optical=False, radius=None, border_width=0.8,
+              padx=7, gap=4, weight=None, icon_fg=None):
     """
     Draw a horizontal row of pill-shaped labels joined by a separator glyph.
 
@@ -459,16 +460,22 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
                  as _txt_icon does, the text by its capitals. Symbols from
                  a fallback font bring their own ascent and line height,
                  so their layout boxes sit high or low.
+    radius     — corner radius in px; None = fully round (half the height).
+    border_width — line width of `border`.
+    padx       — horizontal padding inside a pill, px.
+    gap        — space on each side of a separator glyph, px.
+    weight     — Pango weight of the pill text; None = the theme's bold.
+    icon_fg    — RGBA of an optical label's leading symbol; None = its text's.
     """
     if not labels:
         return
     icons = icons or [None] * len(labels)
     prefix_icons = prefix_icons or [None] * len(labels)
 
-    PX, PY    = 7, 2   # horizontal / vertical padding inside pill
-    SEP_GAP   = 4      # space on each side of a separator glyph
-    PILL_GAP  = 5      # gap between adjacent pills when sep is empty string
-    font_str  = _font(size, True)
+    PX, PY    = padx, 2   # horizontal / vertical padding inside pill
+    SEP_GAP   = gap       # space on each side of a separator glyph
+    PILL_GAP  = 5         # gap between adjacent pills when sep is empty string
+    font_str  = _font(size, True, weight)
     sep_font  = _font(size)
 
     def _lo(text, markup_font):
@@ -500,7 +507,7 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         # A plain symbol by its ink: a fallback font's advance can be far
         # wider than what it draws, which reads as a gap before the text.
         if _icon_pieces(cr, h, size) is None:
-            return _layout(cr, h, size, True).get_pixel_extents()[0].width
+            return _layout(cr, h, size, True, weight).get_pixel_extents()[0].width
         return _icon_width(cr, h, size)
     head_w = [_head_w(h) + head_gap if h else 0 for h in heads]
     pill_los = [_lo(lbl, font_str) for lbl in labels]
@@ -509,7 +516,7 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
     # icon_size when that needs more room than the text does).
     _, (_, txt_h) = pill_los[0]
     ph = max(txt_h + 2 * PY, (icon_size + 2 * PY) if icon_size else 0)
-    r  = ph / 2
+    r  = ph / 2 if radius is None else min(radius, ph / 2)
     icon_w = icon_size if icon_size is not None else max(ph - 4, 10)
     PREFIX_GAP = 4             # gap between a prefix icon and its pill's own text
 
@@ -560,7 +567,7 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
         # Border
         if border is not None:
             cr.set_source_rgba(*border)
-            cr.set_line_width(0.8)
+            cr.set_line_width(border_width)
             _rrect(cr, x, pill_y, pill_w, ph, r)
             cr.stroke()
 
@@ -576,14 +583,18 @@ def _pill_row(cr, cx, cy, labels, sep="›", size=9,
                 tx += icon_w + PREFIX_GAP
             if heads[i]:
                 with _unnoted():   # inside the pill, which is noted already
+                    if icon_fg is not None:
+                        cr.set_source_rgba(*icon_fg)
                     if _icon_pieces(cr, heads[i], size) is None:
-                        _glyph(cr, tx + (head_w[i] - head_gap) / 2, cy, heads[i], size, bold=True)
+                        _glyph(cr, tx + (head_w[i] - head_gap) / 2, cy, heads[i], size,
+                               bold=True, weight=weight)
                     else:
                         _draw_icon_head(cr, tx, cy, heads[i], size, bold=True)
+                    cr.set_source_rgba(*p_fg)
                 tx += head_w[i]
             # Optical: the capitals' middle on cy, not the layout box's.
-            ty = (cy - _cap_mid(cr, 0, labels[i], size, "top", bold=True) if optical
-                  else cy - ph_lbl / 2)
+            ty = (cy - _cap_mid(cr, 0, labels[i], size, "top", bold=True, weight=weight)
+                  if optical else cy - ph_lbl / 2)
             cr.move_to(tx, ty)
             PangoCairo.show_layout(cr, lo_lbl)
         x += pill_w

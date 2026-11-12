@@ -279,3 +279,47 @@ def test_neon_connector_is_an_amber_power_line():
     assert t.connector_line_rgb() == t.modifier
     assert t.connector_glow > 0 and t.connector_shadow
     assert t.connector_label_rgb() == t.modifier
+
+
+# ── Output pill tokens (B-26) ───────────────────────────────────────────────
+
+_PILL_FIELDS = ("pill_top", "pill_bottom", "pill_sheen", "pill_fg", "pill_icon", "pill_weight",
+                "pill_radius", "pill_border", "pill_border_width", "pill_padx", "pill_gap",
+                "pill_sep", "pill_shadow", "pill_shadow_color")
+
+
+def test_pill_tokens(user_themes, capsys):
+    (user_themes / "p.toml").write_text(
+        '[pill]\nicon = "#ff0000"\nweight = "Heavy"\nradius = 3\nborder_width = 2\n'
+        'padx = 9\ngap = 6\nsep = "#00ff0080"\nshadow_color = "#0000ff"\nwackel = 1\n'
+        'gap_x = "breit"\n')
+    t = theme.load("p")
+    assert t.pill_icon == (1.0, 0.0, 0.0, 1.0)
+    assert (t.pill_weight, t.pill_radius, t.pill_border_width) == ("Heavy", 3.0, 2.0)
+    assert (t.pill_padx, t.pill_gap) == (9.0, 6.0)
+    assert t.pill_sep[3] == pytest.approx(0x80 / 255)
+    assert t.pill_shadow_color == (0.0, 0.0, 1.0)      # a tint: rgb
+    err = capsys.readouterr().err
+    assert "wackel" in err and "gap_x" in err
+
+
+def test_every_builtin_has_its_own_pill_look():
+    looks = {n: tuple(getattr(theme.load(n), f) for f in _PILL_FIELDS) for n in theme.names()[:7]}
+    assert len(set(looks.values())) == 7
+    # Neon keeps the pills the user signed off on: every pill token at its default.
+    assert looks["neon"] == tuple(getattr(theme.Theme(), f) for f in _PILL_FIELDS)
+
+
+@pytest.mark.parametrize("radius,corner_filled", [(-1, False), (0, True)])
+def test_pill_radius_shapes_the_corners(user_themes, radius, corner_filled):
+    import osd_look
+    (user_themes / "r.toml").write_text(f'[pill]\nradius = {radius}\ntop = "#ffffff"\nbottom = "#ffffff"\n')
+    theme.activate("r")
+    _rec, cap = osd_look._record(lambda cr: osd_look.draw_output_pills(cr, ["KEY_C"], 11))
+    x, y, w, h = cap.glass_boxes[0]
+    rec, _cap = osd_look._record(lambda cr: osd_look.draw_output_pills(cr, ["KEY_C"], 11))
+    surf, (sx, sy, _w, _h) = osd_look._raster(rec, 1.0)
+    surf.flush()
+    stride = surf.get_stride()
+    alpha = surf.get_data()[int(y + 1 - sy) * stride + int(x + 1 - sx) * 4 + 3]
+    assert (alpha > 128) is corner_filled

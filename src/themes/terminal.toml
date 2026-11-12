@@ -35,12 +35,19 @@ transform = "lower"
 scale = 0.95
 
 [pill]
+# Eckige Felder wie Zeichenzellen, grüner Phosphor-Schein drumherum.
 top = "#000000f2"
 bottom = "#000000f2"
 sheen = 0
 fg = "#33ff66"
+icon = "#33ff66"
+weight = "Regular"
+radius = 0
 border = "#33ff66b3"
-shadow = 0
+border_width = 1
+sep = "#33ff6699"
+shadow = 0.7
+shadow_color = "#33ff66"
 
 [shadow]
 preset = "aura"

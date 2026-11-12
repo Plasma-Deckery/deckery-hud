@@ -38,9 +38,15 @@ font = "Lato"
 weight = "Medium"
 
 [pill]
+# Milchglas wie die Platten, luftig: etwas mehr Rand, Symbole in kühlem
+# Schiefergrau, das Plus in hellem Grau, lesbar auf hellem wie dunklem Bild.
 top = "#ffffffd9"
 bottom = "#eef2f8c7"
 sheen = 0.18
+weight = "Bold"
+icon = "#3a4558"
+padx = 9
+sep = "#a9b2c2e6"
 
 [shadow]
 preset = "aura"

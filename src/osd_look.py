@@ -237,19 +237,23 @@ def draw_output_pills(cr, keys, size):
     from renderer_split import _draw_click_icon   # Breeze mouse glyphs (B-16)
     t = theme.current()
     icon = round(size * ICON_RATIO)
+    ink = t.pill_icon or t.pill_fg   # symbols and glyphs
 
     def click(k):
-        return lambda cr, cx, cy: _draw_click_icon(cr, k, cx, cy, "center", t.pill_fg, size=icon)
+        return lambda cr, cx, cy: _draw_click_icon(cr, k, cx, cy, "center", ink, size=icon)
 
     def kbd(cr, x, y):
-        _draw_kbd_icon(cr, x, y, t.pill_fg, icon)
+        _draw_kbd_icon(cr, x, y, ink, icon)
 
     _pill_row(cr, 0, 0, [output_label(k) for k in keys], sep="+", size=size,
               glass=t.glass, fg=t.pill_fg, border=t.pill_border,
-              sep_rgba=(0.5, 0.5, 0.52, 0.9), ha="center",
+              sep_rgba=t.pill_sep, ha="center",
               icons=[click(k) if k in _CLICKS else None for k in keys],
               prefix_icons=[None if k in _CLICKS or k in _MOD_LABEL else kbd for k in keys],
-              icon_size=icon, optical=True)
+              icon_size=icon, optical=True,
+              radius=None if t.pill_radius < 0 else t.pill_radius,
+              border_width=t.pill_border_width, padx=t.pill_padx, gap=t.pill_gap,
+              weight=t.pill_weight or None, icon_fg=t.pill_icon)
 
 
 def pills_sprite(keys, style, dev_scale=1.0, size=None):
@@ -262,7 +266,8 @@ def pills_sprite(keys, style, dev_scale=1.0, size=None):
         rec, cap = _record(lambda cr: draw_output_pills(cr, list(keys), size))
 
         def compose(cr):
-            pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(style), strength=t.pill_shadow)
+            pill_shadow.paint(cr, cap.glass_boxes, rgb=t.pill_shadow_color or neutral_rgb(style),
+                              strength=t.pill_shadow)
             cr.set_source_surface(rec, 0, 0)
             cr.paint()
         return _sprite(compose, dev_scale)

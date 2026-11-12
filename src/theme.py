@@ -41,9 +41,10 @@ became an amber power line with glow and shadow (B-12).
                                     # label_glow = true/false
     [text]                          # font, weight, bold, scale, spacing, dim, transform = "upper"|"lower"
 
-    [pill]
-    top = "#ffffffb8"
-    border = "#ffffffcc"
+    [pill]                          # the OSD's output pills: top, bottom (fill gradient),
+    top = "#ffffffb8"               # sheen, fg, icon (symbols and glyphs), weight,
+    border = "#ffffffcc"            # radius (-1 = round), border, border_width, padx,
+    radius = 4                      # gap, sep (the "+"), shadow, shadow_color
 
     [shadow]                        # preset + any shadow.ShadowStyle field
     preset = "hauch-dicht"
@@ -146,13 +147,21 @@ class Theme:
     text_spacing: float = 0.0             # extra px between letters
     text_dim: float = 1.0                 # how far resting legends are dimmed; 0 = all full
 
-    # ── Glass pill (active outputs, OSD) ──
+    # ── Output pills (the OSD's held keys) ──
     pill_top: tuple = (1, 1, 1, 0.72)
     pill_bottom: tuple = (0.955, 0.96, 0.975, 0.61)
     pill_sheen: float = 0.13
     pill_fg: tuple = (0.08, 0.08, 0.10, 0.92)
-    pill_shadow: float = 1.0       # strength of the pill's own shadow
+    pill_icon: tuple = None        # rgba of symbols and glyphs (⇧, keyboard, mouse); None = fg
+    pill_weight: str = ""          # Pango weight of the text; "" = text_bold
+    pill_radius: float = -1.0      # corner radius, px; below 0 = fully round
     pill_border: tuple = None      # rgba of a contour around the pill, or None
+    pill_border_width: float = 0.8
+    pill_padx: float = 7.0         # padding left and right inside a pill, px
+    pill_gap: float = 4.0          # space either side of the "+" between pills, px
+    pill_sep: tuple = (0.5, 0.5, 0.52, 0.9)   # rgba of that "+"
+    pill_shadow: float = 1.0       # strength of the pill's own shadow
+    pill_shadow_color: tuple = None   # its tint; None = the shadow preset's neutral one
 
     # ── Shadow ──
     shadow: str = ""               # shadow.PRESETS name; "" = the default preset
@@ -304,8 +313,14 @@ def load(name, _seen=()):
 _COLOR_KEYS = {"modifier", "layer", "game", "ink", "text", "unbound", "stick",
                "status_active", "status_paused", "outline", "active_fill"}
 _PILL_KEYS = {"top": "pill_top", "bottom": "pill_bottom", "sheen": "pill_sheen",
-              "fg": "pill_fg", "shadow": "pill_shadow", "border": "pill_border"}
+              "fg": "pill_fg", "icon": "pill_icon", "weight": "pill_weight",
+              "radius": "pill_radius", "border": "pill_border",
+              "border_width": "pill_border_width", "padx": "pill_padx", "gap": "pill_gap",
+              "sep": "pill_sep", "shadow": "pill_shadow", "shadow_color": "pill_shadow_color"}
+_PILL_NUM = {"pill_sheen", "pill_shadow", "pill_radius", "pill_border_width", "pill_padx",
+             "pill_gap"}
 _RGBA = {"outline", "active_fill", "pill_top", "pill_bottom", "pill_fg", "pill_border",
+         "pill_icon", "pill_sep",
          "shape_fill", "stick_ring", "stick_cap", "stick_cap_border"}
 
 # The per-component sections: [section] key -> (Theme field, kind). Kinds:
@@ -366,10 +381,15 @@ def _apply(data, vals, where, base):
                 f = _PILL_KEYS.get(k)
                 if f is None:
                     _warn(f"{where}: unbekannter Schlüssel pill.{k}, ignoriert")
-                elif f in ("pill_sheen", "pill_shadow"):
+                elif f in _PILL_NUM:
                     _num(vals, f, v, where)
+                elif f == "pill_weight":
+                    if isinstance(v, str):
+                        vals[f] = v.strip()
+                    else:
+                        _warn(f"{where}: pill.{k} braucht Text")
                 else:
-                    _col(vals, f, v, where, True)
+                    _col(vals, f, v, where, f in _RGBA)
         elif key == "shadow" and isinstance(value, dict):
             _shadow(value, vals, where, base)
         elif key in _SECTIONS and isinstance(value, dict):

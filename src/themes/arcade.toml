@@ -38,11 +38,19 @@ transform = "upper"
 spacing = 1.5
 
 [pill]
+# Automatenknöpfe: gelb mit dickem violettem Rand und violettem Schein.
 top = "#ffe600f2"
 bottom = "#ffb800f2"
 sheen = 0.25
 fg = "#1a0533"
-shadow = 0.6
+icon = "#5b1a9e"
+weight = "Bold"
+border = "#1a0533"
+border_width = 2
+padx = 8
+sep = "#ffe600"
+shadow = 0.9
+shadow_color = "#5b1a9e"
 
 [shadow]
 preset = "aura"

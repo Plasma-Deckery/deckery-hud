@@ -182,9 +182,10 @@ def test_pill_symbol_and_text_share_one_centre_line(theme_name, size, monkeypatc
     import numpy as np
     import osd_look
     import theme
-    # Without the pill's contour (kontrast has one), the glyphs stand alone.
-    monkeypatch.setattr(theme, "_active",
-                        dataclasses.replace(theme.load(theme_name), pill_border=None))
+    # Without the pill's contour (kontrast has one), the glyphs stand alone,
+    # all in the text's colour.
+    monkeypatch.setattr(theme, "_active", dataclasses.replace(
+        theme.load(theme_name), pill_border=None, pill_icon=None))
     rec, _cap = osd_look._record(lambda cr: osd_look.draw_output_pills(cr, ["KEY_LEFTCTRL"], size))
     surf, _rect = osd_look._raster(rec, 4.0)   # 4x for sub-pixel precision
     surf.flush()
