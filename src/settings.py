@@ -72,7 +72,8 @@ class OsdSettings:
 class DisplaySettings:
     """Bildschirm: wohin HUD und Anzeige kommen, und wie groß (B-31)."""
     output: str = field(default="auto", metadata=_meta(
-        'Auf welchem Bildschirm: "auto" (wo das aktive Fenster ist, meist das Spiel), '
+        'Auf welchem Bildschirm: "auto" (KWins aktiver Bildschirm: wohin zuletzt die '
+        'Maus bewegt oder ein Fenster aktiviert wurde, meist das Spiel), '
         '"internal" (immer der Deck-Bildschirm) oder "external" (der zuletzt '
         'angeschlossene externe, ohne einen das Deck).',
         choices=display.OUTPUTS))

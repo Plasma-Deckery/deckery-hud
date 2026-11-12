@@ -8,7 +8,8 @@ Rules:
   user's hands; it goes to the right screen the next time it opens.
 - The OSD goes where the HUD is while the HUD is mapped (its toasts and
   pills are the open HUD's), else to the chosen screen — moved at once.
-- "auto" asks KWin for its active output (the focused window's screen):
+- "auto" asks KWin for its active output (where the pointer last moved or
+  a window was last activated, whichever was later):
   synchronously just before the HUD maps, every _POLL_MS otherwise — and
   only with two or more screens, so a lone Deck never makes the call.
 - The HUD's screen changing while it is closed rebuilds its layers there

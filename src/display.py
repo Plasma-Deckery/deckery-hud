@@ -13,8 +13,9 @@ elements. Textures are still rendered at device scale × zoom, so text and
 lines stay pixel-sharp.
 
 Output: layer-shell surfaces land wherever they are told to; "auto" follows
-KWin's active output (the screen of the focused window — the game), which
-App asks KWin for over D-Bus.
+KWin's active output, which screens.py asks KWin for over D-Bus. In KWin 6
+that is whichever happened last: the pointer moving onto a screen, or a
+window being activated (there is no "follows mouse" option any more).
 """
 
 # The Deck's own logical height — the size the HUD is designed at. 800 px
