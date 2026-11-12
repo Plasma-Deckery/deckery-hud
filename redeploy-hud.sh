@@ -32,6 +32,12 @@ fi
 echo "Copying src/ → $DEST/src/"
 cp -a "$REPO/src/." "$DEST/src/"
 
+# Files deleted from the repo must go from the copy too: a theme TOML left
+# behind still shows up in the theme mode, a module left behind still imports.
+(cd "$DEST/src" && find . -type f ! -path '*/__pycache__/*' | while read -r f; do
+    [ -e "$REPO/src/$f" ] || { echo "Removing stale $f"; rm -f "$f"; }
+done)
+
 # Stale bytecode from the previous version shadows fresh sources often enough
 # to be worth removing outright.
 find "$DEST/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
