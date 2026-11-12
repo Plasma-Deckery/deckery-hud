@@ -29,6 +29,7 @@ from layout_split import (compute_layout, center_badge_rect, center_close_rect, 
                           center_theme_rect, theme_panel_rect)
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, stroke_outline, idle_fill
 from shadow import (GroupShadowSpec, group_shadow_layers, ink_colours, paint_bleed, paint_scaled,
+                    merges_plates, paint_plates, plate_layer,
                     style_from_env)
 import theme
 from reveal import FULL, crumb_names
@@ -286,7 +287,8 @@ _shadow_layer_cache = {}
 
 
 def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False, words=()):
-    """(shadow, bleed) slots of a GroupLayer — see shadow.group_shadow_layers.
+    """(shadow, bleed, plate) slots of a GroupLayer — see shadow.group_shadow_layers
+    and shadow.plate_layer.
     words: what the element's legends say, to tell whether a press changed it."""
     hit = _shadow_layer_cache.get(element.id)
     if pressing and hit is not None and hit[2] == words:
@@ -307,7 +309,9 @@ def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False, wo
     key = (spec, tuple(cap.texts), shadow_style(), dev_scale)
     if hit is not None and hit[0] == key:
         return hit[1]
-    layers = group_shadow_layers(spec, shadow_style(), surf, rect, dev_scale)
+    merged = merges_plates(style)
+    layers = (*group_shadow_layers(spec, style, surf, rect, dev_scale, plate=not merged),
+              plate_layer(spec, style) if merged else None)
     _shadow_layer_cache[element.id] = (key, layers, words)
     return layers
 
@@ -380,6 +384,8 @@ class GroupLayer:
     bleed: tuple         # (surface, x, y, w, h): pre-curve field, merged across elements; or None
     vms: dict            # the ButtonVMs this element draws with (masked)
     look: tuple = None   # what it shows, minus mid-press: equal looks = same picture
+    plate: tuple = None  # (surface, x, y, w, h): its plate's field for the merged
+                         # plate pass (shadow.plate_layer); None: the plate is in `shadow`
 
 
 def _cluster_tx(name, sw, sh):
@@ -458,7 +464,7 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
     with capture_text_boxes() as cap:
         surf, rect = _render_cropped(draw, sw, sh, dev_scale)
     _t1 = time.perf_counter()
-    shadow, bleed = _element_shadows(element, tx, cap, surf, rect, dev_scale,
+    shadow, bleed, plate = _element_shadows(element, tx, cap, surf, rect, dev_scale,
                                      pressing=bool(set(element.buttons) & active_press),
                                      words=_legend_words(element, gvms))
     dbg(f"{name} element surface REBUILT: "
@@ -467,7 +473,8 @@ def _get_group_layer(element, content, vms, pv, anchor_x_val, sw, sh, active_pre
     if c is not None and debug_enabled():
         _diff_vms(name, c["vms"], vms_key)
     layer = GroupLayer(name=name, side=side, surface=surf, rect=rect, tx=tx,
-                       shadow=shadow, bleed=bleed, vms=gvms, look=_look(content, vms_key, pv_key))
+                       shadow=shadow, bleed=bleed, vms=gvms, look=_look(content, vms_key, pv_key),
+                       plate=plate)
     entries.insert(0, {"key": key, "vms": vms_key, "layer": layer,
                        "shadow": _shadow_layer_cache.get(name)})
     del entries[_LOOKS_KEPT:]
@@ -512,9 +519,9 @@ def _get_center_layer(state, center, sw, sh, dev_scale=1.0, content=FULL):
     with capture_text_boxes() as cap:
         surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0, names),
                                      sw, sh, dev_scale)
-    shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap, surf, rect, dev_scale)
+    shadow, bleed, plate = _element_shadows(ELEMENTS["center"], None, cap, surf, rect, dev_scale)
     layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
-                       shadow=shadow, bleed=bleed, vms={}, look=key)
+                       shadow=shadow, bleed=bleed, vms={}, look=key, plate=plate)
     _center_cache.insert(0, (key, layer))
     del _center_cache[_LOOKS_KEPT:]
     return layer
@@ -594,6 +601,8 @@ def warm_all(state, sw, sh, dev_scale=1.0):
             out["shadow_" + name] = layer.shadow[0]
         if layer.bleed is not None:
             out["bleed_" + name] = layer.bleed[0]
+        if layer.plate is not None:
+            out["plate_" + name] = layer.plate[0]
     return out
 
 
@@ -757,18 +766,20 @@ def _get_connector_layer(groups, pv, sw, sh, dev_scale):
         # The halo alone: no plate, edge or rim, and no cloud in the merge.
         style = replace(style, core_alpha=0.0, edge_alpha=0.0, rim_alpha=0.0,
                         legend="line")
-    shadow = bleed = None
+    shadow = bleed = plate = None
     if t.connector_shadow or t.connector_glow > 0:
         spec = GroupShadowSpec(rrects=tuple(tuple(round(v, 1) for v in r) for r in runs),
                                text_boxes=tuple(tuple(round(v) for v in b) for b in cap.boxes),
                                ink=tuple(round(v) for v in rect),
                                text_colours=tuple(c and tuple(round(v, 2) for v in c)
                                                   for c in cap.colours))
-        shadow, bleed = group_shadow_layers(spec, style, surf, rect, dev_scale)
+        merged = merges_plates(style)
+        shadow, bleed = group_shadow_layers(spec, style, surf, rect, dev_scale, plate=not merged)
+        plate = plate_layer(spec, style) if merged else None
         if not t.connector_shadow:
             bleed = None
     layer = GroupLayer(name="connector", side=None, surface=surf, rect=rect, tx=None,
-                       shadow=shadow, bleed=bleed, vms={}, look=key)
+                       shadow=shadow, bleed=bleed, vms={}, look=key, plate=plate)
     _connector_cache.insert(0, (key, layer))
     del _connector_cache[_LOOKS_KEPT:]
     return layer
@@ -813,6 +824,9 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
         shown.insert(0, (conn, 0.0, conn_op))
     paint_bleed(cr, [(layer.bleed, dx, opacity) for layer, dx, opacity in shown if layer.bleed],
                 sw, sh, shadow_style())
+    # Then the plates, merged the same way (themes that merge them).
+    paint_plates(cr, [(layer.plate, dx, opacity) for layer, dx, opacity in shown if layer.plate],
+                 sw, sh, shadow_style())
     for layer, dx, opacity in shown:
         if layer.shadow is None:
             continue

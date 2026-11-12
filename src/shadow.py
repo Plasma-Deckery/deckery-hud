@@ -41,7 +41,7 @@ Needs numpy. No GTK.
 import colorsys
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import cairo
 import numpy as np
@@ -106,6 +106,15 @@ class ShadowStyle:
     bleed_rgb: tuple = ()        # colour of the veil; () = the plate's colour
     bleed_dx: float = 0.0        # px the veil is moved by (an elevation shadow
     bleed_dy: float = 0.0        #    under a light plate)
+    # sdf only — plates merge across elements: every visible element's plate
+    # goes into one pass, like the veil, so neighbouring elements' plates
+    # (the four face buttons' legends) join into one surface the way one
+    # element's own legend lines do, instead of four plates stacked over
+    # each other. px, the merge field's decay: plates that overlap or touch
+    # become one, a gap of up to ~1.4× this grows a neck, and concave
+    # corners round by about as much. Small keeps a contour crisp: in a
+    # half-bridged gap it smears. 0 = each element draws its own plate.
+    plate_merge: float = 0.0
 
     def __post_init__(self):
         if self.profile == "sdf":
@@ -178,7 +187,8 @@ PRESETS = {
                         legend="line", legend_padx=10, legend_pady=4,
                         edge_radius=1.5, edge_alpha=0.55,
                         shadow_rgb=(0.035, 0.04, 0.06), glow_alpha=0.6, glow_radius=5,
-                        profile="sdf", core_soft=7, bleed_reach=26, bleed_curve=9),
+                        profile="sdf", core_soft=7, bleed_reach=26, bleed_curve=9,
+                        plate_merge=1.5),
 }
 DEFAULT_PRESET = "hauch-kurz"
 
@@ -529,6 +539,8 @@ class GroupShadow:
     tint_surface: object = None  # opaque shadow colour at 1/_FIELD_DOWN over (x, y), or None
     rim: tuple = None           # (surface, x, y) in screen px, or None
     field: np.ndarray = None    # the pre-curve field itself (pill_shadow.py maps it)
+    plate: tuple = None         # merges_plates: (field surface at 1/_CORE_DOWN, x, y, w, h)
+    lines: tuple = None         # merges_plates: the rim slot without the plate's contour
 
 
 _group_cache = {}
@@ -741,10 +753,16 @@ def _sdf_group_shadow(spec, style):
     pad = max(style.legend_padx, style.legend_pady, style.core_grow)
     shift = max(abs(style.bleed_dx), abs(style.bleed_dy))
     x0, y0, w, h = _grid(b, pad + style.bleed_reach + shift + 4 * _FIELD_DOWN, _FIELD_DOWN)
-    core_rect = _grid(b, pad + soft + 24, _CORE_DOWN)
+    # A merged plate's field reaches further than the plate's own edge: one
+    # distance field serves both, on a grid that holds the further one.
+    merge = merges_plates(style)
+    reach, inner = soft + 4, soft / 2 + style.plate_border_width + 4
+    if merge:
+        reach = max(reach, _plate_reach(style) + _CORE_DOWN)
+        inner = max(inner, _plate_inset(style) + 2)
+    core_rect = _grid(b, pad + max(soft + 24, reach + _CORE_DOWN), _CORE_DOWN)
 
-    sd = _signed(_sdf_mask(spec, *core_rect, _CORE_DOWN, style), _CORE_DOWN,
-                 soft + 4, soft / 2 + style.plate_border_width + 4)
+    sd = _signed(_sdf_mask(spec, *core_rect, _CORE_DOWN, style), _CORE_DOWN, reach, inner)
     t = np.clip(sd / soft + 0.5, 0.0, 1.0)
     core = (1.0 - t * t * (3.0 - 2.0 * t)) * style.core_alpha
 
@@ -767,15 +785,70 @@ def _sdf_group_shadow(spec, style):
     elif tuple(style.shadow_rgb) != (0.0, 0.0, 0.0):
         veil = np.empty(field.shape + (3,), np.float32)
         veil[...] = style.shadow_rgb
+    tint_surface = (_alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
+                    if tint is not None else None)
     gs = GroupShadow(x0, y0, w, h, _alpha_surface(field, veil),
-                     core_rect, _alpha_surface(core),
-                     _alpha_surface(np.ones(tint.shape[:2], np.float32), tint)
-                     if tint is not None else None,
+                     core_rect, _alpha_surface(core), tint_surface,
                      _plate_overlay(sd, core_rect, style), field)
+    if merge:
+        gs.plate = _plate_field(sd, core_rect, style, (tint_surface, x0, y0))
+        gs.lines = _plate_overlay(sd, core_rect, replace(style, plate_border=(0.0, 0.0, 0.0, 0.0)))
     if len(_group_cache) > 160:
         _group_cache.clear()
     _group_cache[key] = gs
     return gs
+
+
+def merges_plates(style):
+    """Whether `style`'s plates go into the merged plate pass (see
+    ShadowStyle.plate_merge) instead of each element's own shadow slot."""
+    return style.profile == "sdf" and style.plate_merge > 0 and style.core_alpha > 0
+
+
+def _plate_inset(style):
+    """px inside the plate's edge where its merge field reaches 1: past the
+    soft edge and the contour, so both can be read back off the field."""
+    return max(max(style.core_soft, 0.5) / 2, style.plate_border_width + 1.0)
+
+
+def _plate_k(style):
+    """The merge field's decay length: plate_merge, but long enough that the
+    plate's soft edge still lies above 8-bit resolution (field >= 1/50)."""
+    soft = max(style.core_soft, 0.5)
+    return max(style.plate_merge, (_plate_inset(style) + soft / 2) / math.log(50))
+
+
+def _plate_reach(style):
+    """px past the plate's edge where its merge field drops below 8-bit
+    resolution."""
+    return _plate_inset(style) + 7 * _plate_k(style)
+
+
+def _plate_field(d, rect, style, tint):
+    """The plate as a field for the merged pass: exp(-(d + inset) / k)
+    of the signed distance d to the plate, 1 inside. Fields of neighbouring
+    elements combine like the veil's (OVER, ~ adding where both are small),
+    so plates that touch become one and close ones grow a fillet; the
+    curve (plate_transfer) then gives back this plate's own soft edge, and
+    border_transfer its contour. d: the plate's signed distance on the
+    grid `rect` at 1/_CORE_DOWN; returns (surface, x, y, w, h) there,
+    coloured like the plate: tint = (tint surface or None, its x, y)."""
+    k, c, reach = _plate_k(style), _plate_inset(style), _plate_reach(style)
+    x, y, w, h = rect
+    taper = np.clip((reach - d) / _CORE_DOWN, 0.0, 1.0)
+    field = (np.exp(-np.maximum(d + c, 0.0) / k) * taper).astype(np.float32)
+    tint_surface, tx, ty = tint
+    if tint_surface is None:
+        rgb = np.empty(field.shape + (3,), np.float32)
+        rgb[...] = style.shadow_rgb
+        return _alpha_surface(field, rgb), x, y, w, h
+    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, *field.shape[::-1])
+    cr = cairo.Context(out)
+    cr.scale(1 / _CORE_DOWN, 1 / _CORE_DOWN)
+    cr.translate(-x, -y)
+    cr.set_source(_placed(tint_surface, tx, ty, _FIELD_DOWN))
+    cr.mask(_placed(_alpha_surface(field), x, y, _CORE_DOWN))
+    return out, x, y, w, h
 
 
 def _tint_map(spec, x0, y0, w, h, down, style=None):
@@ -823,7 +896,7 @@ def _placed(surf, x, y, down):
 
 # ── per-element layers and the merged bleed ────────────────────────────────
 
-def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
+def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0, plate=True):
     """An element's two shadow layers, each (surface, x, y, w, h) in logical px:
 
     shadow — core plate + tight edge shadow + rim, final alpha: drawn as
@@ -835,7 +908,11 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
 
     content/content_rect: the element's cached layer and where it sits; its
     strokes and glyphs are what the edge shadow traces. (None, None) when
-    the element casts no shadow."""
+    the element casts no shadow.
+
+    plate=False, with a style that merges_plates: the shadow slot leaves
+    out the plate and its contour — they come from plate_layer, drawn in
+    the merged plate pass (paint_plates) instead."""
     gs = group_shadow(spec, style)
     if gs is None:
         return None, None
@@ -845,11 +922,13 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
     surf.set_device_scale(dev_scale, dev_scale)
     cr = cairo.Context(surf)
     cr.translate(-cx, -cy)
-    if gs.tint_surface is not None:
-        cr.set_source(_placed(gs.tint_surface, gs.x, gs.y, _FIELD_DOWN))
-    else:
-        cr.set_source_rgb(*style.shadow_rgb)
-    cr.mask(_placed(gs.core_surface, cx, cy, _CORE_DOWN))
+    merged = not plate and gs.plate is not None
+    if not merged:
+        if gs.tint_surface is not None:
+            cr.set_source(_placed(gs.tint_surface, gs.x, gs.y, _FIELD_DOWN))
+        else:
+            cr.set_source_rgb(*style.shadow_rgb)
+        cr.mask(_placed(gs.core_surface, cx, cy, _CORE_DOWN))
     # The layer is placed offset as a whole (a drop shadow); what has to
     # stay on its shapes is drawn shifted back.
     ox, oy = style.offset_x, style.offset_y
@@ -859,12 +938,24 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0):
                       tuple((bx - ox, by - oy, bw, bh) for bx, by, bw, bh in spec.text_boxes),
                       style.glow_text_alpha if style.glow_text else 0.0)
         draw_edge_shadow(cr, content, content_rect[0], content_rect[1], style, spec.text_boxes)
-    if gs.rim is not None:
-        rim, rx, ry = gs.rim
+    rim = gs.lines if merged else gs.rim
+    if rim is not None:
+        rim, rx, ry = rim
         cr.set_source_surface(rim, rx - ox, ry - oy)
         cr.paint()
     return ((surf, cx + ox, cy + oy, cw, ch),
             (gs.field_surface, gs.x + ox, gs.y + oy, gs.w, gs.h))
+
+
+def plate_layer(spec, style):
+    """An element's slot in the merged plate pass: (field surface, x, y, w, h)
+    in logical px, offset like the shadow slot — or None when the style
+    doesn't merge plates (see merges_plates) or the element has none."""
+    gs = group_shadow(spec, style)
+    if gs is None or gs.plate is None:
+        return None
+    surf, x, y, w, h = gs.plate
+    return surf, x + style.offset_x, y + style.offset_y, w, h
 
 
 def _bleed_curve(style, x):
@@ -884,12 +975,10 @@ def bleed_transfer(style, n=8):
     return 1.0 / span, -style.merge_lo / span, table
 
 
-def paint_bleed(cr, items, sw, sh, style):
-    """Cairo-path equivalent of the GPU bleed pass: items are
-    (bleed, dx, opacity) with bleed = (surface, x, y, w, h). Fields are
-    composited (OVER: they combine like alpha, 1 - Π(1 - f)) on a small
-    canvas, then mapped through the curve and painted stretched."""
-    down = _FIELD_DOWN
+def _merged_fields(items, sw, sh, down):
+    """Fields (surface, x, y, w, h) with (dx, opacity) composited OVER — they
+    combine like alpha, 1 - Π(1 - f) — on a canvas at 1/down of the screen:
+    (alpha, straight rgb) arrays."""
     cw, ch = int(math.ceil(sw / down)), int(math.ceil(sh / down))
     canvas = cairo.ImageSurface(cairo.FORMAT_ARGB32, cw, ch)
     ccr = cairo.Context(canvas)
@@ -906,10 +995,76 @@ def paint_bleed(cr, items, sw, sh, style):
     canvas.flush()
     px = np.ndarray((ch, canvas.get_stride() // 4, 4), np.uint8, canvas.get_data())[:, :cw]
     a = px[..., 3].astype(np.float32) / 255.0
+    return a, px[..., [2, 1, 0]].astype(np.float32) / 255.0 / np.maximum(a, 1e-6)[..., None]
+
+
+def paint_bleed(cr, items, sw, sh, style):
+    """Cairo-path equivalent of the GPU bleed pass: items are
+    (bleed, dx, opacity) with bleed = (surface, x, y, w, h). Fields are
+    composited on a small canvas, then mapped through the curve and
+    painted stretched."""
+    a, rgb = _merged_fields(items, sw, sh, _FIELD_DOWN)
     # The curve reshapes alpha only; the colour (unpremultiplied) is kept —
     # as the GPU's component transfer does.
-    rgb = px[..., [2, 1, 0]].astype(np.float32) / 255.0 / np.maximum(a, 1e-6)[..., None]
     paint_scaled(cr, _alpha_surface(_bleed_curve(style, a), rgb), sw, sh)
+
+
+def plate_transfer(style, n=8):
+    """The merged plate field -> plate alpha (see _plate_field), as
+    bleed_transfer's two steps: (ramp m, ramp b, table). Read back as the
+    distance d = -plate_merge·ln(field) - inset, the table is the plate's
+    own edge: core_alpha inside, a smoothstep over core_soft px."""
+    k, c, soft = _plate_k(style), _plate_inset(style), max(style.core_soft, 0.5)
+    lo, hi = math.exp(-(c + soft / 2) / k), math.exp(-(c - soft / 2) / k)
+    d = -k * np.log(np.linspace(lo, hi, n)) - c
+    t = np.clip(d / soft + 0.5, 0.0, 1.0)
+    table = (1.0 - t * t * (3.0 - 2.0 * t)) * style.core_alpha
+    return 1.0 / (hi - lo), -lo / (hi - lo), [float(v) for v in table]
+
+
+def border_transfer(style, n=8):
+    """The merged plate field -> the plate's contour (plate_border, inside
+    its edge, plate_border_width px wide), like plate_transfer: (ramp m,
+    ramp b, table). None without a contour."""
+    if style.plate_border[3] <= 0:
+        return None
+    k, c, bw = _plate_k(style), _plate_inset(style), style.plate_border_width
+    lo, hi = math.exp(-(c + 0.75) / k), math.exp(-(c - bw - 0.75) / k)
+    d = -k * np.log(np.linspace(lo, hi, n)) - c
+    table = np.clip(bw / 2 + 0.5 - np.abs(d + bw / 2), 0.0, 1.0) * style.plate_border[3]
+    return 1.0 / (hi - lo), -lo / (hi - lo), [float(v) for v in table]
+
+
+def _transfer(f, transfer):
+    m, b, table = transfer
+    return np.interp(np.clip(f * m + b, 0.0, 1.0), np.linspace(0.0, 1.0, len(table)), table)
+
+
+def paint_plates(cr, items, sw, sh, style):
+    """Cairo-path equivalent of the GPU plate pass: items are (plate, dx,
+    opacity) with plate = plate_layer(...). Elements at one opacity merge
+    — mapped once, then faded as a whole, so a plate fades instead of
+    shrinking; a group mid-fade next to one at rest stacks for as long as
+    that lasts. The contour stays on the shapes under an offset."""
+    by_opacity = {}
+    for plate, dx, opacity in items:
+        if plate is not None and opacity > 0:
+            by_opacity.setdefault(round(opacity, 3), []).append((plate, dx, 1.0))
+    border = border_transfer(style)
+    w, h = int(math.ceil(sw)), int(math.ceil(sh))
+    for opacity, fields in sorted(by_opacity.items()):
+        a, rgb = _merged_fields(fields, sw, sh, _CORE_DOWN)
+        # Mapped after upsampling, as on the GPU — mapped first, a crisp
+        # edge would come out blurred by the upsampling.
+        a = _upsample(a, _CORE_DOWN, w, h)
+        rgb = np.stack([_upsample(rgb[..., i], _CORE_DOWN, w, h) for i in range(3)], -1)
+        cr.set_source_surface(_alpha_surface(_transfer(a, plate_transfer(style)), rgb), 0, 0)
+        cr.paint_with_alpha(opacity)
+        if border is not None:
+            rgb[...] = style.plate_border[:3]
+            cr.set_source_surface(_alpha_surface(_transfer(a, border), rgb),
+                                  -style.offset_x, -style.offset_y)
+            cr.paint_with_alpha(opacity)
 
 
 def paint_scaled(cr, surf, sw, sh, alpha=1.0):

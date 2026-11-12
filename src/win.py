@@ -39,7 +39,7 @@ if _LAYOUT_MODE == "split":
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
                                 draw_gesture_connector_live, shadow_style, warm_all,
                                 CENTER_BUTTONS, center_button, draw_center_hover)
-    from shadow import bleed_transfer
+    from shadow import bleed_transfer, border_transfer, plate_transfer
     from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
                               center_theme_rect)
     from renderer_split import theme_panel
@@ -60,6 +60,8 @@ class _Ghost:
     vms: dict           # the d-pad's, for its 3D cross; None otherwise
     conn_shadow: tuple = None   # (texture, rect): the connector's shadow and glow
     conn_bleed: tuple = None    # (texture, rect): its cloud
+    plate: tuple = None         # (texture, rect): its plate's field, merged pass
+    conn_plate: tuple = None    # (texture, rect): the connector's
 
 
 class _HudArea(Gtk.Widget):
@@ -466,10 +468,11 @@ class Win(Gtk.ApplicationWindow):
             rect = live_rect(g, layers, sw, sh)
             live = (self._render_frozen(rect, scale, lambda cr: draw_group_live(
                 cr, g, state, layers, 0.0, press_t, draw_dpad=False)), rect)
-        conn = conn_shadow = conn_bleed = None
+        conn = conn_shadow = conn_bleed = conn_plate = None
         if connector and drew_connector and g in ("LPad", "RPad") and drew_connector["tex"]:
             # At rest it is a cached layer like an element's: its textures go along.
-            conn, conn_shadow, conn_bleed = (drew_connector[k] for k in ("tex", "shadow", "bleed"))
+            conn, conn_shadow, conn_bleed, conn_plate = (
+                drew_connector[k] for k in ("tex", "shadow", "bleed", "plate"))
         elif connector and drew_connector and g in ("LPad", "RPad"):
             # Drawn live mid-slide; frozen only where it has ink — a
             # full-screen bitmap took ~8ms to make and upload.
@@ -482,7 +485,7 @@ class Win(Gtk.ApplicationWindow):
                     cr.set_source_surface(rec, 0, 0), cr.paint())), rect)
         ghost = _Ghost(GroupAnim(self._settings), f["look"], f["tex"], f["rect"],
                        f["shadow"], f["bleed"], live, conn, f["vms"] if g == "DPad" else None,
-                       conn_shadow, conn_bleed)
+                       conn_shadow, conn_bleed, f["plate"], conn_plate)
         ghost.anim.jump(anim.value, True)
         ghost.anim.set_target(False, "detector", now)
         anim.jump(0.0, False)
@@ -795,6 +798,23 @@ class Win(Gtk.ApplicationWindow):
                                       Gsk.ComponentTransfer.new_table(table)))
         return self._bleed_ct[1]
 
+    def _plate_transfer(self):
+        """((ramp, curve), border) for the merged plate pass — see
+        shadow.plate_transfer; border is None or (ramp, curve, (r, g, b)):
+        the contour, its colour set by the same transfer."""
+        style = shadow_style()
+        if getattr(self, "_plate_ct", None) is None or self._plate_ct[0] != style:
+            m, b, table = plate_transfer(style)
+            plate = (Gsk.ComponentTransfer.new_linear(m, b), Gsk.ComponentTransfer.new_table(table))
+            border = border_transfer(style)
+            if border is not None:
+                m, b, table = border
+                border = (Gsk.ComponentTransfer.new_linear(m, b), Gsk.ComponentTransfer.new_table(table),
+                          tuple(Gsk.ComponentTransfer.new_linear(0.0, c)
+                                for c in style.plate_border[:3]))
+            self._plate_ct = (style, (plate, border))
+        return self._plate_ct[1]
+
     def _snapshot_split(self, snapshot, sw, sh):
         """Split mode as GPU layers instead of one full-screen cairo node.
 
@@ -852,7 +872,8 @@ class Win(Gtk.ApplicationWindow):
             snapshot.append_texture(tex, rect(*r))
             snapshot.pop()
 
-        frame = {g: {"look": groups[g].look, "vms": groups[g].vms, "shadow": None, "bleed": None}
+        frame = {g: {"look": groups[g].look, "vms": groups[g].vms, "shadow": None, "bleed": None,
+                     "plate": None}
                  for g in shown}
 
         # Two pads touching at once connect across screen centre (see
@@ -863,7 +884,7 @@ class Win(Gtk.ApplicationWindow):
         conn_frame = None
         if conn is not None:
             conn_op = min(opacity["LPad"], opacity["RPad"])
-            conn_frame = {"tex": None, "shadow": None, "bleed": None}
+            conn_frame = {"tex": None, "shadow": None, "bleed": None, "plate": None}
             if dx["LPad"] or dx["RPad"]:
                 conn = None
 
@@ -882,10 +903,10 @@ class Win(Gtk.ApplicationWindow):
         # its own slide/fade, all in one pass that is only then mapped to
         # alpha — so neighbouring clouds fuse into one shape instead of
         # stacking (see shadow.py). Then each element's own core/edge shadow.
+        ident = Gsk.ComponentTransfer.new_identity()
         bleeds = [g for g in shown if groups[g].bleed is not None]
         conn_bleed = conn is not None and conn.bleed is not None
         if bleeds or conn_bleed or any(gh.bleed or gh.conn_bleed for _g, gh in ghosts):
-            ident = Gsk.ComponentTransfer.new_identity()
             ramp, curve = self._bleed_transfer()
             snapshot.push_component_transfer(ident, ident, ident, curve)
             snapshot.push_component_transfer(ident, ident, ident, ramp)
@@ -902,6 +923,9 @@ class Win(Gtk.ApplicationWindow):
                     tex, Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
             snapshot.pop()
             snapshot.pop()
+        self._snapshot_plates(snapshot, ident, groups, shown, ghosts, opacity, dx, frame,
+                              conn if conn is not None and conn.plate is not None else None,
+                              conn_op if conn is not None else 0.0, conn_frame)
         # The connector's under the pads': it runs into them, under their plate.
         for _g, gh in ghosts:
             faded(gh, gh.conn_shadow)
@@ -1001,6 +1025,68 @@ class Win(Gtk.ApplicationWindow):
             vals = " ".join(f"{g}={opacity[g]:.2f}" for g in shown)
             dbg(f"snapshot_split: {(time.perf_counter() - t0) * 1000:.1f}ms "
                 f"({vals}, screen={sw}x{sh}@{scale:.3g})")
+
+    def _snapshot_plates(self, snapshot, ident, groups, shown, ghosts, opacity, dx, frame,
+                         conn, conn_op, conn_frame):
+        """The merged plate pass (themes whose plates merge, see
+        shadow.paint_plates — its cairo twin): every plate field at one
+        opacity in one pass, mapped to the plate (and its contour) only
+        then — so neighbouring elements' plates join instead of stacking —
+        and faded as a whole."""
+        by_opacity = {}
+
+        def add(o, tex, r, shift=0.0):
+            if o <= 0:
+                return
+            def append():
+                snapshot.save()
+                snapshot.translate(Graphene.Point().init(shift, 0))
+                snapshot.append_scaled_texture(tex, Gsk.ScalingFilter.LINEAR,
+                                               Graphene.Rect().init(*r))
+                snapshot.restore()
+            by_opacity.setdefault(round(o, 3), []).append(append)
+
+        for _g, gh in ghosts:
+            for slot in (gh.plate, gh.conn_plate):
+                if slot is not None:
+                    add(gh.anim.value, *slot)
+        if conn is not None:
+            surf, *r = conn.plate
+            tex = self._texture("plate_connector", surf)
+            conn_frame["plate"] = (tex, tuple(r))
+            add(conn_op, tex, r)
+        for g in shown:
+            if groups[g].plate is None:
+                continue
+            surf, *r = groups[g].plate
+            tex = self._texture("plate_" + g, surf)
+            frame[g]["plate"] = (tex, tuple(r))
+            add(opacity[g], tex, r, dx[g])
+        if not by_opacity:
+            return
+        style = shadow_style()
+        (ramp, curve), border = self._plate_transfer()
+        for o, draws in sorted(by_opacity.items()):
+            snapshot.push_opacity(o)
+            snapshot.push_component_transfer(ident, ident, ident, curve)
+            snapshot.push_component_transfer(ident, ident, ident, ramp)
+            for draw in draws:
+                draw()
+            snapshot.pop()
+            snapshot.pop()
+            if border is not None:
+                # The contour stays on the shapes under a drop offset.
+                bramp, bcurve, (r, g, b) = border
+                snapshot.save()
+                snapshot.translate(Graphene.Point().init(-style.offset_x, -style.offset_y))
+                snapshot.push_component_transfer(r, g, b, bcurve)
+                snapshot.push_component_transfer(ident, ident, ident, bramp)
+                for draw in draws:
+                    draw()
+                snapshot.pop()
+                snapshot.pop()
+                snapshot.restore()
+            snapshot.pop()
 
     def _draw_inner_split(self, cr, sw, sh):
         self._set_split_input_region()

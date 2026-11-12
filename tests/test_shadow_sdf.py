@@ -127,3 +127,78 @@ def test_text_glow_scales_inside_text_boxes():
         shadow.draw_glow(cairo.Context(out), content, 20, 20, style, ((28, 26, 24, 8),), text)
         vals.append(_at(out, 40, 34))
     assert vals[0] == 0 and 0 < vals[1] < vals[2]
+
+
+# ── plates merged across elements ───────────────────────────────────────────
+
+def _row(y):
+    """One element: a legend line at y, like one face button's."""
+    return shadow.GroupShadowSpec(text_boxes=((200, y, 80, 14),), ink=(200, y, 80, 14),
+                                  text_colours=((1, 1, 1),))
+
+
+def _plates(style, specs, opacity=1.0):
+    import cairo
+    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, 480, 320)
+    shadow.paint_plates(cairo.Context(out), [(shadow.plate_layer(s, style), 0.0, opacity)
+                                             for s in specs], 480, 320, style)
+    return out
+
+
+def test_merged_plates_dont_stack_where_they_overlap():
+    """Two face buttons' legend plates overlap; drawn in one pass they are
+    one plate of the plate's own strength, not a darker band where both are."""
+    style = dataclasses.replace(AURA, core_soft=2)
+    a, b = _row(100), _row(120)
+    both = _plates(style, (a, b))
+    assert abs(_at(both, 240, 117) - style.core_alpha) < 0.02   # in the overlap
+    assert abs(_at(both, 240, 107) - style.core_alpha) < 0.02   # in one plate only
+
+
+def test_a_merged_plate_alone_is_its_own_plate():
+    """A single revealed element looks as it would with its own plate."""
+    style = dataclasses.replace(AURA, core_soft=2)
+    spec = _row(100)
+    alone = _plates(style, (spec,))
+    gs = shadow.group_shadow(spec, style)
+    cx, cy, _w, _h = gs.core_rect
+    d = shadow._CORE_DOWN
+    # Inside and outside, 2 px off its edges (the own plate is sampled on
+    # its half-resolution grid).
+    left, top = 200 - style.legend_padx, 100 - style.legend_pady
+    for x, y in ((240, 107), (left + 2, 107), (left - 2, 107), (240, top + 2), (240, top - 3),
+                 (240, 80)):
+        own = _at(gs.core_surface, (x - cx) / d, (y - cy) / d)
+        assert abs(_at(alone, x, y) - own) < 0.12, (x, y)
+
+
+def test_merged_plates_fade_instead_of_shrinking():
+    style = dataclasses.replace(AURA, core_soft=2)
+    half = _plates(style, (_row(100), _row(120)), 0.5)
+    assert abs(_at(half, 240, 117) - style.core_alpha / 2) < 0.02
+
+
+def test_merged_contour_runs_round_the_union_not_through_it():
+    style = dataclasses.replace(AURA, core_soft=1, plate_border=(1.0, 1.0, 1.0, 1.0),
+                                plate_border_width=1.5)
+    both = _plates(style, (_row(100), _row(120)))
+    inner = 120 - style.legend_pady     # where the lower plate's own top edge was
+    assert _at(both, 240, inner) - style.core_alpha < 0.05
+    top = 100 - style.legend_pady
+    assert max(_at(both, 240, top + dy) for dy in (-1, 0, 1)) > 0.9
+
+
+def test_merging_leaves_the_plate_out_of_the_element_shadow():
+    spec = _row(100)
+    merged, _ = shadow.group_shadow_layers(spec, AURA, None, None, plate=False)
+    own, _ = shadow.group_shadow_layers(spec, AURA, None, None)
+    gs = shadow.group_shadow(spec, AURA)
+    x, y = (240 - merged[1]), (107 - merged[2])
+    assert _at(merged[0], x, y) == 0 and _at(own[0], x, y) > 0.5
+    assert shadow.plate_layer(spec, dataclasses.replace(AURA, plate_merge=0)) is None
+    assert gs.plate is not None
+
+
+def test_classic_presets_dont_merge_plates():
+    for name, style in shadow.PRESETS.items():
+        assert shadow.merges_plates(style) == (name == "aura"), name
