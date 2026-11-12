@@ -32,6 +32,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import display
 import osd_anim
 
 
@@ -65,6 +66,20 @@ class OsdSettings:
     pill_scale: float = field(default=1.0, metadata=_meta(
         "Größe der Ausgabe-Pillen unten (gehaltene Tasten): 1.0 = Standard des Themes, "
         "1.2 = ein Fünftel größer.", minimum=0.5))
+
+
+@dataclass(frozen=True)
+class DisplaySettings:
+    """Bildschirm: wohin HUD und Anzeige kommen, und wie groß (B-31)."""
+    output: str = field(default="auto", metadata=_meta(
+        'Auf welchem Bildschirm: "auto" (wo das aktive Fenster ist, meist das Spiel), '
+        '"internal" (immer der Deck-Bildschirm) oder "external" (der zuletzt '
+        'angeschlossene externe, ohne einen das Deck).',
+        choices=display.OUTPUTS))
+    size: float = field(default=1.0, metadata=_meta(
+        "Größe von HUD und Anzeige, relativ zur Bildschirmhöhe: 1.0 = so groß wie auf "
+        "dem Deck, auf jedem Bildschirm gleich hoch; 1.2 = ein Fünftel größer.",
+        minimum=0.5))
 
 
 @dataclass(frozen=True)
@@ -115,6 +130,7 @@ class DebugSettings:
 class Settings:
     layout: LayoutSettings = LayoutSettings()
     osd: OsdSettings = OsdSettings()
+    display: DisplaySettings = DisplaySettings()
     reveal: RevealSettings = RevealSettings()
     debug: DebugSettings = DebugSettings()
 

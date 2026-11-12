@@ -122,6 +122,7 @@ class App(Gtk.Application):
         self._win      = win.Win(application=self, settings=self._settings.reveal)
         self._osd_win = OsdWin(application=self)
         self._configure_osd()
+        self._configure_display()
         self._osd_win.on_state(self._state)
         if self._osd_enabled:
             self._osd_win.present()
@@ -255,6 +256,8 @@ class App(Gtk.Application):
             self._configure_osd()
         if "debug.enabled" in changed:
             settings._set_debug(new.debug.enabled)
+        if any(k.startswith("display.") for k in changed):
+            self._configure_display()
         if "layout.design" in changed and hasattr(self, "switch_layout"):
             # B-05: switches in process; persist=False because the file already says so.
             self.switch_layout(new.layout.design, persist=False)
@@ -395,6 +398,12 @@ class App(Gtk.Application):
         osd = self._settings.osd
         self._osd_win.configure(osd.animation, _split_mode(), osd.pill_scale)
 
+    def _configure_display(self):
+        """`[display]`: how large HUD and OSD are (B-31)."""
+        size = self._settings.display.size
+        self._win.set_size(size)
+        self._osd_win.set_size(size)
+
     def _sync_osd(self):
         """Show or hide the OSD window. With the HUD closed it is up while
         the OSD and remapping are on. Over the open split HUD it is always
@@ -463,6 +472,7 @@ class App(Gtk.Application):
                 importlib.reload(win)
             self._apply_theme(redraw=False)
             self._win = win.Win(application=self, settings=self._settings.reveal)
+            self._configure_display()
             old.retire()
             self._win.on_state(self._state)
             self._configure_osd()

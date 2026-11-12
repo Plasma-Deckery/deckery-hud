@@ -896,6 +896,26 @@ def _placed(surf, x, y, down):
 
 # ── per-element layers and the merged bleed ────────────────────────────────
 
+# Device px per logical px a shadow layer is built at, at most. Above the
+# Deck's 1.1 only: there it changes nothing.
+SHADOW_MAX_SCALE = 1.5
+
+
+def _resampled(surf, scale):
+    """`surf` (ARGB32 with a device scale) redrawn at device scale `scale`."""
+    s0 = surf.get_device_scale()[0]
+    lw, lh = surf.get_width() / s0, surf.get_height() / s0
+    out = cairo.ImageSurface(cairo.FORMAT_ARGB32, max(1, int(math.ceil(lw * scale))),
+                             max(1, int(math.ceil(lh * scale))))
+    out.set_device_scale(scale, scale)
+    cr = cairo.Context(out)
+    pat = cairo.SurfacePattern(surf)
+    pat.set_filter(cairo.FILTER_GOOD)
+    cr.set_source(pat)
+    cr.paint()
+    return out
+
+
 def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0, plate=True):
     """An element's two shadow layers, each (surface, x, y, w, h) in logical px:
 
@@ -916,6 +936,13 @@ def group_shadow_layers(spec, style, content, content_rect, dev_scale=1.0, plate
     gs = group_shadow(spec, style)
     if gs is None:
         return None, None
+    if dev_scale > SHADOW_MAX_SCALE:
+        # A 4K screen's zoom (B-31): the edge shadow and glow are traced from
+        # a resampled copy, and the layer is built at the cap and stretched
+        # by the GPU — soft anyway, at a quarter of the pixels and time.
+        if content is not None:
+            content = _resampled(content, SHADOW_MAX_SCALE)
+        dev_scale = SHADOW_MAX_SCALE
     cx, cy, cw, ch = gs.core_rect
     surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(math.ceil(cw * dev_scale)),
                               int(math.ceil(ch * dev_scale)))

@@ -26,6 +26,7 @@ from toast import draw_toast
 from anim import HoverAnim
 from reveal import GROUPS, GroupAnim, RevealSettings, Crossfade, stall_skip
 from settings import dbg, debug_enabled
+import display
 import layout_choice
 import theme
 
@@ -40,7 +41,7 @@ if _LAYOUT_MODE == "split":
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
                                 draw_gesture_connector_live, shadow_style, warm_all,
                                 CENTER_BUTTONS, center_button, draw_center_hover,
-                                backdrop_stops, _BACKDROP_R)
+                                backdrop_stops, _BACKDROP_R, drop_caches)
     from shadow import bleed_transfer, border_transfer, plate_transfer
     from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
                               center_theme_rect)
@@ -186,6 +187,8 @@ class Win(Gtk.ApplicationWindow):
         self._map_ticks      = None   # see _need_surface / _on_group_tick
         self._warm_state     = None   # see prewarm: set while its frame is pending
         self._warm_ticks     = 0
+        self._size           = 1.0    # [display] size, see display.zoom
+        self._geom           = None   # (view w, view h, texture scale) the last frame drew at
 
         # ── Drawing area ──────────────────────────────────────────────────
         da = _HudArea(self._snapshot)
@@ -234,6 +237,31 @@ class Win(Gtk.ApplicationWindow):
 
     # ── Hit-rect helpers ──────────────────────────────────────────────────
 
+    def _view(self):
+        """(view w, view h, zoom): the Deck px everything is laid out and
+        hit-tested in, and the factor to window px (display.view)."""
+        return display.view(self._da.get_width(), self._da.get_height(), self._size)
+
+    def _tex_scale(self, k):
+        """Device px per view px: what cached layers are rendered at."""
+        surface = self.get_surface()
+        return (surface.get_scale() if surface is not None else 1.0) * k
+
+    def set_size(self, size):
+        """`[display] size` changed: the next frame lays out anew."""
+        if size != self._size:
+            self._size = size
+            self._da.queue_draw()
+
+    def _input_region(self, rects, k):
+        """An input region from view-px rects, in window px."""
+        region = cairo.Region()
+        for x, y, w, h in rects:
+            x0, y0 = math.floor(x * k), math.floor(y * k)
+            region.union(cairo.Region(cairo.RectangleInt(
+                x0, y0, math.ceil((x + w) * k) - x0, math.ceil((y + h) * k) - y0)))
+        return region
+
 
     def set_settings(self, settings):
         """New reveal durations from the settings file. Running animations
@@ -249,7 +277,7 @@ class Win(Gtk.ApplicationWindow):
                 yield gh.anim
 
     def _badge_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         hx = (sw - HUD_W) / 2
         hy = (sh - HUD_H) / 2
         return hx + _PAUSE_X, hy + _PAUSE_Y, _PAUSE_W, _PAUSE_H
@@ -257,7 +285,7 @@ class Win(Gtk.ApplicationWindow):
     # ── Input handlers ────────────────────────────────────────────────────
 
     def _osd_btn_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         hx = (sw - HUD_W) / 2
         hy = (sh - HUD_H) / 2
         bw, bh = 48, 20
@@ -266,7 +294,7 @@ class Win(Gtk.ApplicationWindow):
         return bx, by, bw, bh
 
     def _remap_btn_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         hx = (sw - HUD_W) / 2
         hy = (sh - HUD_H) / 2
         bw, bh = 48, 20
@@ -276,28 +304,30 @@ class Win(Gtk.ApplicationWindow):
         return bx, by, bw, bh
 
     def _auth_btn_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         hx, hy = (sw - HUD_W) / 2, (sh - HUD_H) / 2
         return hx + _SHOW_X, hy + _AUTH_Y, _AUTH_W, _AUTH_H
 
     def _change_btn_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         hx, hy = (sw - HUD_W) / 2, (sh - HUD_H) / 2
         return hx + _CHG_X, hy + _AUTH_Y, _AUTH_W, _AUTH_H
 
     def _split_btn_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         hx, hy = (sw - HUD_W) / 2, (sh - HUD_H) / 2
         bh = 20
         return hx + _SPLIT_BTN_X, hy + (_TITLE_H - bh) / 2, _OSD_BTN_W, bh
 
     def _close_btn_screen_rect(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         hx = (sw - HUD_W) / 2
         hy = (sh - HUD_H) / 2
         return hx + HUD_W - 44, hy, 44, _TITLE_H
 
     def _on_click(self, _gesture, _n, x, y):
+        k = self._view()[2]
+        x, y = x / k, y / k
         if _LAYOUT_MODE == "split":
             self._on_click_split(x, y)
             return
@@ -334,8 +364,10 @@ class Win(Gtk.ApplicationWindow):
         # else: dead zone — ignore
 
     def _on_motion(self, _ctrl, x, y):
+        k = self._view()[2]
+        x, y = x / k, y / k
         if _LAYOUT_MODE == "split":
-            center = compute_layout(self._da.get_width(), self._da.get_height())[2]
+            center = compute_layout(*self._view()[:2])[2]
             for name, anim in self._hover.items():
                 bx, by, bw, bh, _r, _rgb = center_button(self._state, center, name)
                 anim.set(self._full and bx <= x <= bx + bw and by <= y <= by + bh)
@@ -353,7 +385,7 @@ class Win(Gtk.ApplicationWindow):
     # so there's nothing else to hit-test.
 
     def _split_rects(self):
-        sw, sh = self._da.get_width(), self._da.get_height()
+        sw, sh, _k = self._view()
         _clusters, _anchor_x, center = compute_layout(sw, sh)
         return (center_badge_rect(center), center_close_rect(center), center_classic_rect(center),
                 center_theme_rect(center))
@@ -569,8 +601,9 @@ class Win(Gtk.ApplicationWindow):
         self._warm_ticks += 1
         if self._warm_ticks < 2:
             return GLib.SOURCE_CONTINUE
-        sw, sh = self._da.get_width(), self._da.get_height()
-        scale = self.get_surface().get_scale()
+        sw, sh, k = self._view()
+        scale = self._tex_scale(k)
+        self._new_geometry((sw, sh, scale))
         t0 = time.perf_counter()
         for name, surf in warm_all(self._warm_state, sw, sh, dev_scale=scale).items():
             self._texture(name, surf)
@@ -688,11 +721,23 @@ class Win(Gtk.ApplicationWindow):
 
     # ── Drawing ───────────────────────────────────────────────────────────
 
-    def _snapshot(self, _widget, snapshot, sw, sh):
+    def _snapshot(self, _widget, snapshot, ww, wh):
+        # Everything below draws in view px (display.view): the Deck's own
+        # logical px, scaled up to the window as a whole.
+        sw, sh, k = display.view(ww, wh, self._size)
+        snapshot.save()
+        if k != 1.0:
+            snapshot.scale(k, k)
+        try:
+            self._snapshot_view(snapshot, sw, sh, k)
+        finally:
+            snapshot.restore()
+
+    def _snapshot_view(self, snapshot, sw, sh, k):
         if _LAYOUT_MODE == "split" and not self._state.get("unreadable"):
             t0 = time.perf_counter()
             try:
-                self._snapshot_split(snapshot, sw, sh)
+                self._snapshot_split(snapshot, sw, sh, self._tex_scale(k))
             except Exception:
                 import traceback
                 traceback.print_exc()
@@ -719,34 +764,15 @@ class Win(Gtk.ApplicationWindow):
         # correct even if the surface is recreated by the layer shell after
         # present(), or if the first draw fires before the compositor has
         # sized the window to full screen.
-        hx = (sw - HUD_W) // 2
-        hy = (sh - HUD_H) // 2
-        close_btn  = cairo.RectangleInt(hx + HUD_W - 44, hy, 44, _TITLE_H)
-        badge      = cairo.RectangleInt(
-            int(hx + _PAUSE_X), int(hy + _PAUSE_Y),
-            int(_PAUSE_W), int(_PAUSE_H))
-        mx, my, mw, mh = self._osd_btn_screen_rect()
-        rx, ry, rw, rh = self._remap_btn_screen_rect()
-        osd_btn   = cairo.RectangleInt(int(mx), int(my), int(mw), int(mh))
-        remap_btn = cairo.RectangleInt(int(rx), int(ry), int(rw), int(rh))
-        region = cairo.Region(close_btn)
-        region.union(cairo.Region(badge))
-        region.union(cairo.Region(osd_btn))
-        region.union(cairo.Region(remap_btn))
-        sx, sy, sw_, sh_ = self._split_btn_screen_rect()
-        region.union(cairo.Region(
-            cairo.RectangleInt(int(sx), int(sy), int(sw_), int(sh_))))
+        rects = [self._close_btn_screen_rect(), self._badge_screen_rect(),
+                 self._osd_btn_screen_rect(), self._remap_btn_screen_rect(),
+                 self._split_btn_screen_rect()]
         # Without these two the auth pills draw but cannot be clicked at all:
         # a Wayland surface receives no pointer events outside its input
         # region, so the handler is never even consulted.
         if self.get_application()._auth_available:
-            ax, ay, aw, ah = self._auth_btn_screen_rect()
-            gx, gy, gw, gh = self._change_btn_screen_rect()
-            region.union(cairo.Region(
-                cairo.RectangleInt(int(ax), int(ay), int(aw), int(ah))))
-            region.union(cairo.Region(
-                cairo.RectangleInt(int(gx), int(gy), int(gw), int(gh))))
-        self.get_surface().set_input_region(region)
+            rects += [self._auth_btn_screen_rect(), self._change_btn_screen_rect()]
+        self.get_surface().set_input_region(self._input_region(rects, self._view()[2]))
 
         cr.set_operator(cairo.Operator.CLEAR)
         cr.paint()
@@ -775,10 +801,25 @@ class Win(Gtk.ApplicationWindow):
             # underneath, and makima keeps running.
             self.get_surface().set_input_region(cairo.Region())
             return
-        region = cairo.Region()
-        for x, y, w, h in self._split_rects():
-            region.union(cairo.Region(cairo.RectangleInt(int(x), int(y), int(w), int(h))))
-        self.get_surface().set_input_region(region)
+        self.get_surface().set_input_region(self._input_region(self._split_rects(), self._view()[2]))
+
+    def _new_geometry(self, geom):
+        """geom: (view w, view h, texture scale) of the frame about to be
+        drawn. Unlike the last one (another screen, a resolution or scale
+        change, `[display] size`), what the last frame drew no longer fits —
+        no crossfade or frozen copy from it — and no cached layer can hit
+        again: dropped, not left to age out of the look caches (B-31)."""
+        if geom == self._geom:
+            return
+        if self._geom is not None:
+            dbg(f"geometry {self._geom} -> {geom}: caches dropped")
+            self._frame = {}
+            self._frame_ctx = None
+            self._xfade = {}
+            self._ghosts = {}
+            self._tex_cache.clear()
+            drop_caches()
+        self._geom = geom
 
     def _texture(self, name, surf):
         """The Gdk.Texture for a cached cairo layer, re-uploaded only when
@@ -825,7 +866,7 @@ class Win(Gtk.ApplicationWindow):
             self._plate_ct = (style, (plate, border))
         return self._plate_ct[1]
 
-    def _snapshot_split(self, snapshot, sw, sh):
+    def _snapshot_split(self, snapshot, sw, sh, scale=None):
         """Split mode as GPU layers instead of one full-screen cairo node.
 
         Drawing everything through a single full-screen append_cairo() meant
@@ -842,6 +883,9 @@ class Win(Gtk.ApplicationWindow):
         mid_anim = any(a.running for a in self._anims.values())
         t0 = time.perf_counter() if mid_anim and debug_enabled() else None
         self._set_split_input_region()
+        if scale is None:
+            scale = self._tex_scale(1.0)
+        self._new_geometry((sw, sh, scale))
 
         shown = [g for g in GROUPS if g in self._contents
                  and (self._anims[g].value > 0 or self._anims[g].target)]
@@ -850,8 +894,6 @@ class Win(Gtk.ApplicationWindow):
             self._frame = {}
             return
         press_t = {k: a.value for k, a in self._press_anims.items()}
-        surface = self.get_surface()
-        scale = surface.get_scale() if surface is not None else 1.0
         layers = group_layers(self._state, sw, sh, {g: self._contents[g] for g in shown},
                               press_t, dev_scale=scale)
         groups = layers["groups"]

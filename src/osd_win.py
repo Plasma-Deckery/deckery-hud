@@ -19,6 +19,7 @@ gi.require_version('Gtk4LayerShell', '1.0')
 from gi.repository import Gtk, Gtk4LayerShell as LayerShell, GLib
 import cairo
 
+import display
 import theme
 from toast import draw_toast
 import osd_anim
@@ -63,6 +64,8 @@ class OsdWin(Gtk.ApplicationWindow):
         self._split          = False
         self._pill_scale     = 1.0
         self._over_hud       = False
+        self._size           = 1.0    # [display] size, see display.zoom
+        self._k              = 1.0    # this frame's zoom
         # Pop mode: the pill row on screen, when it popped in, and — while it
         # bubbles out — when that started and what it showed.
         self._pills          = ()
@@ -87,6 +90,17 @@ class OsdWin(Gtk.ApplicationWindow):
         self._split = split
         self._pill_scale = pill_scale
         self._da.queue_draw()
+
+    def set_size(self, size):
+        """`[display] size`: the OSD grows with the HUD (B-31)."""
+        if size != self._size:
+            self._size = size
+            self._da.queue_draw()
+
+    def _tex_scale(self):
+        """Device px per view px: what sprites are rendered at."""
+        surf = self.get_surface()
+        return (surf.get_scale() if surf is not None else 1.0) * self._k
 
     def set_over_hud(self, over):
         """Whether the open split HUD is underneath. makima is paused while
@@ -195,8 +209,12 @@ class OsdWin(Gtk.ApplicationWindow):
 
     # ── Drawing ───────────────────────────────────────────────────────────
 
-    def _draw(self, _da, cr, sw, sh, _):
+    def _draw(self, _da, cr, ww, wh, _):
+        # In view px (display.view), like the HUD: the same share of the
+        # screen on every screen.
+        sw, sh, self._k = display.view(ww, wh, self._size)
         try:
+            cr.scale(self._k, self._k)
             self._draw_inner(cr, sw, sh)
         except Exception:
             import traceback
@@ -243,8 +261,7 @@ class OsdWin(Gtk.ApplicationWindow):
 
         # ── Active outputs, bottom-center ────────────────────────────────
         if outputs:
-            surf = self.get_surface()
-            scale = surf.get_scale() if surf is not None else 1.0
+            scale = self._tex_scale()
             osd_look.paint(cr, osd_look.pills_sprite(outputs, theme.current().shadow_style(), scale,
                                                      osd_look.pill_size(self._pill_scale)),
                            sw / 2, sh - 28, dev_scale=scale)
@@ -257,8 +274,7 @@ class OsdWin(Gtk.ApplicationWindow):
         """Pop preset: the pill row at its spot, toasts above it, each a
         sprite scaled and faded by osd_anim.envelope."""
         a, now = self._anim, time.time()
-        surf = self.get_surface()
-        scale = surf.get_scale() if surf is not None else 1.0
+        scale = self._tex_scale()
         style = theme.current().shadow_style()
 
         keys = tuple(outputs)

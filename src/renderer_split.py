@@ -592,6 +592,16 @@ def group_layers(state, sw, sh, contents, press_t=None, dev_scale=1.0):
     }
 
 
+def drop_caches():
+    """Forget every cached layer — for win.py when the screen's size or
+    scale changed (B-31): none of them can hit again, and at 4K a full look
+    set is tens of MB."""
+    _group_cache.clear()
+    _shadow_layer_cache.clear()
+    _center_cache.clear()
+    _connector_cache.clear()
+
+
 def warm_all(state, sw, sh, dev_scale=1.0):
     """Every cached surface the full HUD needs, by the texture name win.py
     gives it — so a prewarm can build them all up front without knowing
