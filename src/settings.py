@@ -44,12 +44,12 @@ def _meta(help, choices=None, minimum=None):
 @dataclass(frozen=True)
 class LayoutSettings:
     """Aussehen des HUD."""
-    design: str = field(default="classic", metadata=_meta(
+    design: str = field(default="split", metadata=_meta(
         'Welches Design: "split" (neu) oder "classic".',
         choices=("classic", "split")))
     theme: str = field(default="neon", metadata=_meta(
-        'Farben und Effekte im Split-Design: "neon", "neon-kraeftig", "ruhig", '
-        '"modifier" oder eigene aus ~/.config/deckery-hud/themes/.'))
+        'Aussehen im Split-Design: "neon", "glas", "papier", "wireframe", "arcade", '
+        '"terminal", "kontrast" oder eigene aus ~/.config/deckery-hud/themes/.'))
 
 
 @dataclass(frozen=True)

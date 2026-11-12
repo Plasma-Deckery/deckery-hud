@@ -30,12 +30,12 @@ def test_layout_choice_reads_only_the_settings_file(monkeypatch, tmp_path):
     import layout_choice
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("DECKERY_HUD_LAYOUT", "split")
+    assert layout_choice.current() == "split"   # 2.0.0: the new design by default
+    assert layout_choice.remember("classic")
     assert layout_choice.current() == "classic"
-    assert layout_choice.remember("split")
-    assert layout_choice.current() == "split"
-    with layout_choice.building("classic"):
-        assert layout_choice.current() == "classic"
-    assert layout_choice.current() == "split"
+    with layout_choice.building("split"):
+        assert layout_choice.current() == "split"
+    assert layout_choice.current() == "classic"
 
 
 def test_analog_export_follows_a_single_pad(monkeypatch):
