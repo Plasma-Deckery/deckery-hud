@@ -964,7 +964,7 @@ class Win(Gtk.ApplicationWindow):
                 # A real dissolve, not new-over-old: two plain alphas would
                 # dim whatever both textures share (the art) mid-way.
                 (old_tex, old_rect) = self._xfade[g].old
-                k = self._xfade[g].progress(now, self._settings)
+                k = self._xfade[g].mix(now, self._settings)
                 def both():
                     snapshot.push_cross_fade(k)
                     snapshot.append_texture(old_tex, rect(*old_rect))

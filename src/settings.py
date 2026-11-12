@@ -97,7 +97,7 @@ class RevealSettings:
         minimum=1))
     fade_in_ms: int = field(default=200, metadata=_meta(
         "Dauer des Einblendens (ms).", minimum=1))
-    fade_out_ms: int = field(default=300, metadata=_meta(
+    fade_out_ms: int = field(default=200, metadata=_meta(
         "Dauer des Ausblendens (ms).", minimum=1))
     crossfade_ms: int = field(default=200, metadata=_meta(
         "Überblenden, wenn eine sichtbare Gruppe ihren Inhalt wechselt (ms).",
