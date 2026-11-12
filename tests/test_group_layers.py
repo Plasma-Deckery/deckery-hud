@@ -325,3 +325,26 @@ def test_breadcrumbs_alone_are_a_slice_of_the_centre():
     assert h < fh / 2
     assert crumbs.look != full.look
     assert crumbs.shadow is not None
+
+
+def test_filled_buttons_cast_one_shadow():
+    """A filled button (the Controls badge, Classic, Theme, the X) is one
+    shape for the shadow: noted as a shape, its label gets no text plate of
+    its own — that plate, narrower than the fill, cut the badge into three
+    (B-04)."""
+    from helpers import capture_text_boxes
+    from layout_split import compute_layout
+    from renderer_split import _draw_center, CENTER_BUTTONS, center_button
+    import cairo
+    center = compute_layout(SW, SH)[2]
+    with capture_text_boxes() as cap:
+        _draw_center(cairo.Context(cairo.RecordingSurface(cairo.CONTENT_COLOR_ALPHA, None)),
+                     SAMPLES["base_only"], center, 1.0)
+    rects = [center_button(SAMPLES["base_only"], center, n)[:4] for n in CENTER_BUTTONS]
+    assert [tuple(round(v) for v in s[:4]) for s in cap.shapes] == \
+        [tuple(round(v) for v in r) for r in rects]
+    for x, y, w, h in cap.boxes:
+        for bx, by, bw, bh in rects:
+            inside = bx <= x + w / 2 <= bx + bw and by <= y + h / 2 <= by + bh
+            assert not inside, cap.texts
+    assert "Deckery HUD" in cap.texts
