@@ -101,11 +101,32 @@ def test_neon_toast_sits_on_a_plate_of_its_own_hue():
 
 # ── output pills (B-26) ─────────────────────────────────────────────────────
 
-def test_silent_outputs_get_pills_too():
+_RAW = ["KEY_LEFTCTRL", {"key": "KEY_C", "silent": True}, {"key": "KEY_V", "silent": False},
+        {"key": "", "silent": False}]
+
+
+def test_silent_outputs_stay_hidden_with_the_hud_closed():
     import osd_look
-    raw = ["KEY_LEFTCTRL", {"key": "KEY_C", "silent": True}, {"key": "", "silent": False}]
-    assert osd_look.output_keys(raw) == ("KEY_LEFTCTRL", "KEY_C")
+    assert osd_look.output_keys(_RAW) == ("KEY_LEFTCTRL", "KEY_V")
     assert osd_look.output_keys(None) == ()
+
+
+def test_silent_outputs_get_pills_over_the_open_hud():
+    import osd_look
+    assert osd_look.output_keys(_RAW, with_silent=True) == ("KEY_LEFTCTRL", "KEY_C", "KEY_V")
+
+
+@pytest.mark.parametrize("over_hud,paused,shown", [
+    (False, False, False),   # HUD closed: silent stays quiet
+    (True, False, True),     # over the open HUD
+    (False, True, True),     # makima paused
+    (True, True, True),
+])
+def test_osd_pill_row_shows_silent_only_with_the_hud_open(over_hud, paused, shown):
+    import osd_look
+    keys = osd_look.pill_keys({"active_outputs": _RAW, "paused": paused}, over_hud)
+    assert ("KEY_C" in keys) is shown
+    assert "KEY_LEFTCTRL" in keys and "KEY_V" in keys
 
 
 def test_pills_say_what_is_held_with_symbols_and_glyphs():

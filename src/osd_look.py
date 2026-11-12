@@ -147,8 +147,7 @@ def _neon_toast(label, col, style, dev_scale):
 
 
 # ── Output pills ────────────────────────────────────────────────────────────
-# One pill per held output key (makima's active_outputs), silent ones
-# included: silent only keeps the toast quiet (B-26). Modifiers read as
+# One pill per held output key (makima's active_outputs). Modifiers read as
 # their symbol and name, a mouse button as the mouse with that side lit,
 # any other key as the keyboard glyph and its name.
 
@@ -161,11 +160,23 @@ _MOD_LABEL = {
 _CLICKS = ("BTN_LEFT", "BTN_RIGHT")
 
 
-def output_keys(active_outputs):
+def output_keys(active_outputs, with_silent=False):
     """The keys to show pills for, from makima's active_outputs: plain
-    strings or {key, silent, ...} dicts. Silent ones too (see above)."""
-    keys = (e.get("key", "") if isinstance(e, dict) else e for e in active_outputs or ())
+    strings or {key, silent, ...} dicts. Silent ones only `with_silent` —
+    while the HUD is open (makima paused), where the row says what a press
+    holds; with it closed silent keeps quiet, as it always did (B-26)."""
+    def silent(e):
+        return isinstance(e, dict) and e.get("silent", False)
+    keys = (e.get("key", "") if isinstance(e, dict) else e
+            for e in active_outputs or () if with_silent or not silent(e))
     return tuple(k for k in keys if k)
+
+
+def pill_keys(ctx, over_hud):
+    """The OSD's pill row for makima's state context: silent outputs too
+    while it sits over the open HUD or makima is paused."""
+    return output_keys(ctx.get("active_outputs"),
+                       with_silent=over_hud or ctx.get("paused", False))
 
 
 def output_label(key):

@@ -224,9 +224,9 @@ class OsdWin(Gtk.ApplicationWindow):
 
         ctx = self._state.get("context", {})
 
-        # Silent outputs get their pills too: silent only keeps the toast
-        # quiet (_schedule_toast), not what is held (B-26).
-        keys = osd_look.output_keys(ctx.get("active_outputs"))
+        # Silent outputs get pills only over the open HUD / while paused
+        # (B-26); their toasts never show (_schedule_toast).
+        keys = osd_look.pill_keys(ctx, self._over_hud)
 
         if self._anim.kind == "pop":
             # The toast pops in above the pills, never over them, so nothing
