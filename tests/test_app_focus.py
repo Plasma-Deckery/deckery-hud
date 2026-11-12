@@ -145,11 +145,44 @@ def test_a_press_arriving_with_the_focus_change_does_not_end_it():
     assert "A" in r.update(_state(pressed=["BTN_TR2"]), 1.0)
 
 
-def test_holding_a_modifier_keeps_it():
-    """L1 held to look at the app's L1 commands: picking a layer, not acting."""
+def _l1(app_combo=True):
+    """L1 held: B is the app's own combo, X the base's."""
+    st = _state(held=["BTN_TL"])
+    st["modifier_active"] = {"BTN_EAST": _b(APP if app_combo else BASE), "BTN_WEST": _b(BASE)}
+    return st
+
+
+def test_a_modifier_hands_over_to_its_whole_layer_at_once():
+    """Konsole's preview, then L1: the full L1 layer at once, not the app's
+    filter until the hold runs out (live feedback on B-33)."""
     r = Reveal(S)
     _focus(r, now=1.0)
-    assert "A" in r.update(_state(held=["BTN_TL"]), 1.5)
+    wants = r.update(_l1(), 1.2)
+    assert {"L1", "B", "X"} <= set(wants)
+    assert "A" not in wants          # the app's base binding: not on this layer
+    assert r.next_deadline() is None
+
+
+def test_after_the_handover_the_modifier_rules_apply():
+    r = Reveal(S)
+    _focus(r, now=1.0)
+    r.update(_l1(), 1.2)
+    assert r.update(_state(), 1.5) == {}           # let go: gone at once
+    assert "X" in r.update(_l1(), 1.6)             # back within the grace
+    assert r.update(_state(), 1.7) == {}
+    assert r.update(_state(), 5.0) == {}           # the preview doesn't return
+
+
+def test_the_handover_waits_for_nothing_on_a_base_only_layer():
+    r = Reveal(S)
+    _focus(r, now=1.0)
+    assert {"L1", "X"} <= set(r.update(_l1(app_combo=False), 1.2))
+
+
+def test_without_the_modifier_reveal_the_preview_stays():
+    r = Reveal(_s(modifier_enabled=False))
+    _focus(r, now=1.0)
+    assert "A" in r.update(_l1(), 1.5)
 
 
 def test_not_while_the_full_hud_is_open():
@@ -191,16 +224,6 @@ def test_can_be_switched_off(off):
 def test_breadcrumbs_off_leaves_out_the_pill():
     r = Reveal(_s(breadcrumbs=False))
     assert "center" not in _focus(r)
-
-
-def test_with_the_modifier_reveal_the_contents_join():
-    r = Reveal(S)
-    _focus(r, now=1.0)
-    st = _state(held=["BTN_TR"])
-    st["modifier_active"] = {"BTN_WEST": _b(BASE)}
-    r.update(st, 1.0)
-    wants = r.update(st, 2.5)
-    assert {"A", "L1", "R1", "X"} <= set(wants)
 
 
 def test_default_is_on():

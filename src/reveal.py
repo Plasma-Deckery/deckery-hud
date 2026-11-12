@@ -214,9 +214,16 @@ class Reveal:
                 want("RPad", FULL)
             held = list(ctx.get("held_modifiers") or ())
             active = self._activity(state, ctx, held)
+            app_layers, app_shown = self._app_focus(state, ctx, focused, active, now)
+            if app_shown and s.modifier_enabled and (held or state.get("modifier_active")):
+                # A modifier during the preview: they're looking already, so
+                # its whole layer at once, unfiltered — the preview hands over
+                # to the modifier reveal, whose release rules apply from here.
+                self._modifier.force(now)
+                self._app_until = None
+                app_layers, app_shown = set(), {}
             for name, content in self._modifier_reveal(state, ctx, held, active, now).items():
                 want(name, content)
-            app_layers, app_shown = self._app_focus(state, ctx, focused, active, now)
             for name, content in app_shown.items():
                 want(name, content)
             if s.breadcrumbs:
