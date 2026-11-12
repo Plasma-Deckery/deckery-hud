@@ -83,7 +83,8 @@ def _osd_after(monkeypatch, split, full, osd=True, remap=True, theme_mode=None):
     import app
     monkeypatch.setattr(app, "_split_mode", lambda: split)
     fake = types.SimpleNamespace(_full=full, _osd_enabled=osd, _remapping_enabled=remap,
-                                 _theme_mode=theme_mode, _state={}, _osd_win=_FakeOsd())
+                                 _theme_mode=theme_mode, _state={}, _osd_win=_FakeOsd(),
+                                 _screens=types.SimpleNamespace(place=lambda: None))
     app.App._sync_osd(fake)
     return fake._osd_win
 

@@ -26,6 +26,7 @@ from elements import PAD_ELEMENTS
 import settings
 from settings import Settings
 import theme
+from screens import Screens
 from theme_mode import ThemeMode
 
 def _split_mode():
@@ -58,6 +59,7 @@ class App(Gtk.Application):
         )
         self._win               = None
         self._osd_win           = None
+        self._screens           = None
         self._osd_enabled       = True
         self._remapping_enabled = True
         # Re-checked every time the HUD opens: deckery-auth may be installed or
@@ -121,9 +123,11 @@ class App(Gtk.Application):
         self._state_stamp = None
         self._win      = win.Win(application=self, settings=self._settings.reveal)
         self._osd_win = OsdWin(application=self)
+        self._screens = Screens(self)
         self._configure_osd()
         self._configure_display()
         self._osd_win.on_state(self._state)
+        self._screens.place()
         if self._osd_enabled:
             self._osd_win.present()
         if _split_mode():
@@ -403,6 +407,7 @@ class App(Gtk.Application):
         size = self._settings.display.size
         self._win.set_size(size)
         self._osd_win.set_size(size)
+        self._screens.set_policy(self._settings.display.output)
 
     def _sync_osd(self):
         """Show or hide the OSD window. With the HUD closed it is up while
@@ -416,6 +421,7 @@ class App(Gtk.Application):
         if over_hud or (not self._full and self._osd_enabled and self._remapping_enabled):
             if not self._osd_win.is_visible():
                 self._osd_win.on_state(self._state)
+            self._screens.place()
             self._osd_win.present()
         else:
             self._osd_win.set_visible(False)

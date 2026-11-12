@@ -247,6 +247,14 @@ class Win(Gtk.ApplicationWindow):
         surface = self.get_surface()
         return (surface.get_scale() if surface is not None else 1.0) * k
 
+    def _present(self):
+        """Map (or raise) the window — on the screen `[display] output`
+        picks now (screens.Screens.before_hud_map, B-31)."""
+        screens = getattr(self.get_application(), "_screens", None)
+        if screens is not None and not self.get_mapped():
+            screens.before_hud_map(self)
+        self.present()
+
     def set_size(self, size):
         """`[display] size` changed: the next frame lays out anew."""
         if size != self._size:
@@ -427,7 +435,7 @@ class Win(Gtk.ApplicationWindow):
 
         on_closed: run once the window is gone."""
         if opening:
-            self.present()
+            self._present()
         else:
             self.set_visible(False)
             if on_closed:
@@ -567,7 +575,7 @@ class Win(Gtk.ApplicationWindow):
             # two frames of it; _on_group_tick restarts their clocks once the
             # first frame is actually on screen instead.
             self._map_ticks = 0
-            self.present()
+            self._present()
         elif needed and self._warm_state is not None and self._map_ticks is None:
             # Opened while prewarm still holds the window for its first
             # frame: the same stall, so the same restart.
@@ -592,7 +600,7 @@ class Win(Gtk.ApplicationWindow):
             return False
         self._warm_state = state
         self._warm_ticks = 0
-        self.present()
+        self._present()
         self._da.add_tick_callback(self._on_prewarm_tick)
         return False   # one shot when run from GLib.idle_add
 

@@ -75,3 +75,14 @@ def test_shadow_layers_are_capped():
     assert drect == brect                       # same place in logical px
     assert ds.get_device_scale()[0] == 1.1      # the Deck: untouched
     assert bs.get_device_scale()[0] == shadow.SHADOW_MAX_SCALE
+
+
+def test_display_settings(tmp_path, capsys):
+    import settings
+    path = tmp_path / "settings.toml"
+    path.write_text('[display]\noutput = "external"\nsize = 1.25\n', encoding="utf-8")
+    s = settings.load(path)
+    assert (s.display.output, s.display.size) == ("external", 1.25)
+    path.write_text('[display]\noutput = "tv"\nsize = 0.1\n', encoding="utf-8")
+    s = settings.load(path)
+    assert (s.display.output, s.display.size) == ("auto", 1.0)   # bad values keep the defaults
