@@ -60,15 +60,15 @@ class LoadTests(_TmpFile):
         self.assertEqual(result, Settings())
         self.assertEqual(err, "")
         text = template()
-        self.assertIn('# design = "classic"', text)
+        self.assertIn('# design = "split"', text)   # 2.0.0: the new design by default
         self.assertIn("# hold_ms = 750", text)
         for header in ("[layout]", "[osd]", "[reveal]", "[debug]"):
             self.assertIn(header, text)
 
     def test_valid_values_apply(self):
-        self.write('[layout]\ndesign = "split"\n[reveal]\nhold_ms = 900\n')
+        self.write('[layout]\ndesign = "classic"\n[reveal]\nhold_ms = 900\n')
         result = load(self.path)
-        self.assertEqual(result.layout.design, "split")
+        self.assertEqual(result.layout.design, "classic")
         self.assertEqual(result.reveal.hold_ms, 900)
         self.assertEqual(result.osd, Settings().osd)
         self.assertEqual(result.reveal.release_ms, 250)
@@ -89,7 +89,7 @@ class LoadTests(_TmpFile):
     def test_unknown_choice(self):
         self.write('[layout]\ndesign = "neu"\n')
         result, err = self.load_capturing()
-        self.assertEqual(result.layout.design, "classic")
+        self.assertEqual(result.layout.design, "split")
         self.assertIn("layout.design", err)
 
     def test_below_minimum(self):
@@ -149,11 +149,11 @@ class RememberTests(_TmpFile):
 
     def test_remember_keeps_comments_and_order(self):
         self.write(template().replace("[osd]\n", "[osd]\n# meine Notiz\n"))
-        self.assertTrue(settings.remember("layout.design", "split", self.path))
-        self.assertEqual(load(self.path).layout.design, "split")
+        self.assertTrue(settings.remember("layout.design", "classic", self.path))
+        self.assertEqual(load(self.path).layout.design, "classic")
         text = self.text()
         self.assertIn("# meine Notiz", text)
-        self.assertIn('# design = "classic"', text)
+        self.assertIn('# design = "split"', text)
         self.assertLess(text.index("[layout]"), text.index("[osd]"))
 
     def test_remember_creates_missing_file_from_template(self):
