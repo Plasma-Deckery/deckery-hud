@@ -553,3 +553,23 @@ def test_breadcrumbs_can_be_switched_off():
     r = Reveal(_s(breadcrumbs=False))
     r.update(_state(lpad=True), 0.0)
     assert "center" not in r.update(_state(lpad=True), 1.5)
+
+
+# ── Live round 3: transitions crawled under CPU load ──────────────────────
+
+def test_a_late_tick_under_load_is_not_taken_out():
+    """A tick that came late because the system is busy (measured under
+    load: p99 138 ms, max 319 ms) is real time passing: the transition
+    keeps to its duration. Taking every late tick out of it made a 200 ms
+    fade take up to ~660 ms."""
+    from reveal import stall_skip
+    assert stall_skip(0.14, 0.004) == 0.0
+
+
+def test_our_own_slow_frame_is_taken_out():
+    """A frame we spent rebuilding (a cold layer: ~110-390 ms) still
+    doesn't eat the transition — only that frame's own time comes out."""
+    from reveal import stall_skip
+    assert abs(stall_skip(0.40, 0.39) - (0.39 - 1 / 90)) < 1e-9
+    assert abs(stall_skip(0.20, 0.39) - (0.20 - 1 / 90)) < 1e-9   # never more than the gap
+    assert stall_skip(0.03, 0.02) == 0.0

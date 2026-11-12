@@ -256,6 +256,24 @@ def deadline_delay_ms(deadline, now):
     return max(1, min(3_600_000, int((deadline - now) * 1000) + 1))
 
 
+# A frame of our own longer than this counts as a stall; one ordinary
+# frame of it is left in.
+STALL_S = 0.05
+FRAME_S = 1 / 90
+
+
+def stall_skip(gap, draw_s):
+    """How much of a `gap` between two animation ticks to take out of the
+    running transitions, given that the last frame took `draw_s` of our own
+    work. Only that work: a cold rebuild (~110-390 ms) shouldn't eat a
+    200 ms fade. A tick merely arriving late — the system is busy, the
+    compositor slow — is real time passing; taking it out too stretched
+    every transition under load, by however late each tick was."""
+    if draw_s <= STALL_S:
+        return 0.0
+    return max(0.0, min(gap, draw_s) - FRAME_S)
+
+
 class GroupAnim:
     """One group's visibility, 0..1, with its transition style.
 

@@ -24,7 +24,7 @@ from layout import (HUD_W, HUD_H, _TITLE_H, _PAUSE_X, _PAUSE_Y, _PAUSE_W, _PAUSE
 from renderer import draw_hud
 from toast import draw_toast
 from anim import HoverAnim
-from reveal import GROUPS, GroupAnim, RevealSettings, Crossfade
+from reveal import GROUPS, GroupAnim, RevealSettings, Crossfade, stall_skip
 from settings import dbg, debug_enabled
 import layout_choice
 
@@ -119,10 +119,6 @@ _PRESS_ANIM_MS = 90
 # dramatic perspective while pulling the angle back down.
 _DPAD_3D_MAX_ANGLE = 24.0
 
-# Group animations: a tick gap longer than _STALL_S counts as a stall and
-# is taken out of the running transitions, minus one ordinary frame.
-_STALL_S = 0.05
-_FRAME_S = 1 / 90
 _DPAD_3D_DEPTH = 260.0
 
 
@@ -169,6 +165,7 @@ class Win(Gtk.ApplicationWindow):
         self._show_anim      = HoverAnim(lambda: self._da.queue_draw())
         self._change_anim    = HoverAnim(lambda: self._da.queue_draw())
         self._last_tick      = None   # see _on_group_tick's timing instrumentation
+        self._draw_s         = 0.0    # time spent drawing since the last tick
         self._tex_cache      = {}     # split mode: layer name -> (cairo surface, Gdk.Texture)
         self._map_ticks      = None   # see _need_surface / _on_group_tick
         self._warm_state     = None   # see prewarm: set while its frame is pending
@@ -572,16 +569,17 @@ class Win(Gtk.ApplicationWindow):
         if self._last_tick is not None:
             gap = now - self._last_tick
             dbg(f"group_anim tick +{gap * 1000:.1f}ms")
-            # A frame that took far longer than a frame (a cold layer build
-            # when the full HUD opens over an already visible group, measured
-            # ~390ms) would otherwise eat the whole slide. Count it as one
-            # ordinary frame instead.
-            if gap > _STALL_S:
-                # Crossfades too: the frame that starts one rebuilds every
-                # changed element (a layer change in the full HUD: ~110ms),
-                # and the new legend would just pop.
+            # A frame of ours that took far longer than a frame (a cold layer
+            # build when the full HUD opens over an already visible group,
+            # measured ~390ms) would otherwise eat the whole slide: its time
+            # comes out of the transitions — crossfades too, or a layer
+            # change's new legend would just pop. A tick that is merely late
+            # (a busy system) is not: see stall_skip.
+            skip = stall_skip(gap, self._draw_s)
+            if skip > 0:
                 for a in (*self._all_anims(), *self._xfade.values()):
-                    a.delay(gap - _FRAME_S)
+                    a.delay(skip)
+        self._draw_s = 0.0
         self._last_tick = now
 
         # Until the second tick after mapping — the first frame has been
@@ -666,11 +664,14 @@ class Win(Gtk.ApplicationWindow):
 
     def _snapshot(self, _widget, snapshot, sw, sh):
         if _LAYOUT_MODE == "split" and not self._state.get("unreadable"):
+            t0 = time.perf_counter()
             try:
                 self._snapshot_split(snapshot, sw, sh)
             except Exception:
                 import traceback
                 traceback.print_exc()
+            # Our own share of the next tick gap (see stall_skip).
+            self._draw_s += time.perf_counter() - t0
             return
         bounds = Graphene.Rect().init(0, 0, sw, sh)
         cr = snapshot.append_cairo(bounds)
