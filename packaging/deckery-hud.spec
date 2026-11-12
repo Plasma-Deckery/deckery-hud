@@ -1,6 +1,6 @@
 Name:           deckery-hud
 Version:        2.0.0~beta1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Steam Deck button-layout HUD overlay for KDE Plasma desktop
 
 License:        GPL-3.0-only
@@ -105,6 +105,21 @@ install -Dm644 packaging/deckery-hud.service \
 %{_userunitdir}/deckery-hud.service
 
 %changelog
+* Thu Nov 12 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 2.0.0~beta1-2
+- Seven themes with English names (Wireframe, the new default; Neon, Glass,
+  Paper, Arcade, Terminal, Contrast), each with its own background dim and
+  pill look; theme mode applies at once, B undoes
+- Output pills show modifier symbols, a keyboard glyph or a mouse pill, are
+  sized by setting, and show silent outputs while the HUD is open
+- An app with its own commands previews them when it gets focus
+  ([reveal] app_focus); holding a modifier hands over to its full layer
+- Scales with the screen height and follows the active screen on external
+  displays ([display] size, [display] output); hotplug rebuilds cleanly
+- Balanced fades: fading out is as quick as fading in, plates and labels
+  leave together; filled buttons cast one shadow and react to hover
+- Fixes: stale badge shadow after pause, gesture label "Scroll · Zoom",
+  icon centring, grace window after a reveal fades
+
 * Thu Nov 12 2026 Philipp Schimmelfennig <philipp@plasma-deckery.dev> - 2.0.0~beta1-1
 - New split design, now the default: the controller laid out along both screen
   edges, one element per button, composited on the GPU; classic stays one
