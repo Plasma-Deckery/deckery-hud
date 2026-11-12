@@ -57,6 +57,8 @@ def test_shadow_layers_fade_out_inside_their_bitmaps(name, monkeypatch):
             assert _border(_alpha(layer.shadow[0])) == 0, (name, el, "shadow")
         if layer.bleed is not None:
             assert _border(_alpha(layer.bleed[0])) == 0, (name, el, "bleed")
+        if layer.plate is not None:
+            assert _border(_alpha(layer.plate[0])) == 0, (name, el, "plate")
 
 
 def _content(fill):
