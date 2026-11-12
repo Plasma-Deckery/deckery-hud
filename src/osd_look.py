@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import cairo
 import numpy as np
 
-from helpers import _pill_row, _txt_icon, capture_text_boxes
+from helpers import _pill_row, _txt_icon, _rrect, _K, capture_text_boxes
 import theme
 import pill_shadow
 from shadow import (GroupShadowSpec, group_shadow_layers, neutral_rgb, _alpha_surface,
@@ -30,7 +30,7 @@ from shadow import (GroupShadowSpec, group_shadow_layers, neutral_rgb, _alpha_su
 from toast import toast_label
 
 TOAST_SIZE = 11     # the neon toast's legend: bold, a touch larger than a HUD callout
-PILL_SIZE = 9
+ICON_RATIO = 2.2    # an output pill's glyph canvas per pt of its text: 24 at 11 pt
 
 
 @dataclass(frozen=True)
@@ -146,23 +146,116 @@ def _neon_toast(label, col, style, dev_scale):
     return _sprite(compose, dev_scale)
 
 
-def pills_sprite(labels, style, dev_scale=1.0):
-    """The active-outputs pill row, centred on (0, 0), with its shadow."""
+# ── Output pills ────────────────────────────────────────────────────────────
+# One pill per held output key (makima's active_outputs), silent ones
+# included: silent only keeps the toast quiet (B-26). Modifiers read as
+# their symbol and name, a mouse button as the mouse with that side lit,
+# any other key as the keyboard glyph and its name.
+
+_MOD_LABEL = {
+    "KEY_LEFTSHIFT": "⇧ Shift", "KEY_RIGHTSHIFT": "⇧ Shift",
+    "KEY_LEFTMETA": "❖ Super",  "KEY_RIGHTMETA": "❖ Super",
+    "KEY_LEFTALT": "⌥ Alt",     "KEY_RIGHTALT": "⌥ AltGr",
+    "KEY_LEFTCTRL": "⌃ Ctrl",   "KEY_RIGHTCTRL": "⌃ Ctrl",
+}
+_CLICKS = ("BTN_LEFT", "BTN_RIGHT")
+
+
+def output_keys(active_outputs):
+    """The keys to show pills for, from makima's active_outputs: plain
+    strings or {key, silent, ...} dicts. Silent ones too (see above)."""
+    keys = (e.get("key", "") if isinstance(e, dict) else e for e in active_outputs or ())
+    return tuple(k for k in keys if k)
+
+
+def output_label(key):
+    """The text an output pill shows for `key` ("" for a mouse button,
+    whose pill is the glyph alone)."""
+    if key in _CLICKS:
+        return ""
+    return _MOD_LABEL.get(key) or _K.get(key, key.replace("KEY_", "").replace("BTN_", ""))
+
+
+def pill_size(scale=1.0):
+    """The output pills' text size in pt: the theme's, times `[osd] pill_scale`."""
+    return theme.current().osd_pill_size * scale
+
+
+def _draw_kbd_icon(cr, x, y, color, size):
+    """Keyboard glyph, hand-drawn rather than themed (B-06): Breeze's
+    input-keyboard-symbolic reads busier and heavier than the mouse beside
+    it. This one shares the mouse's 1px outline: two rows of five 2x2 keys
+    and a spacebar, built in whole *device* pixels so it stays crisp under
+    fractional scaling (the Deck runs at 1.1). x is its left edge, y its
+    vertical centre."""
+    ds = cr.get_target().get_device_scale()[0]
+    m = cr.get_matrix()
+    cx = x + size / 2
+    cr.save()
+    if (m.xx, m.yx, m.xy, m.yy) == (1, 0, 0, 1):
+        # Translation-only CTM: switch to device pixels and snap to them.
+        cx, cy = (cx + m.x0) * ds, (y + m.y0) * ds
+        cr.identity_matrix()
+        cr.scale(1 / ds, 1 / ds)
+        u = size * ds / 26
+    else:
+        cy, u = y, size / 26
+    key, gap, lw = max(1, round(2 * u)), max(1, round(u)), max(1, round(u))
+    hpad, vpad = round(2 * u), max(1, round(u))
+    row_w = 5 * key + 4 * gap
+    space_w = round(8 * u)
+    space_w += (row_w - space_w) % 2  # keep it centred on whole pixels
+    bw = row_w + 2 * (hpad + lw)
+    bh = 3 * key + 2 * gap + 2 * (vpad + lw)
+    bx, by = round(cx - bw / 2), round(cy - bh / 2)
+    cr.set_source_rgba(*color)
+    _rrect(cr, bx + lw / 2, by + lw / 2, bw - lw, bh - lw, 2 * u)
+    cr.set_line_width(lw)
+    cr.stroke()
+    kx, ky = bx + lw + hpad, by + lw + vpad
+    for row in range(2):
+        for i in range(5):
+            cr.rectangle(kx + i * (key + gap), ky + row * (key + gap), key, key)
+    cr.rectangle(kx + (row_w - space_w) // 2, ky + 2 * (key + gap), space_w, key)
+    cr.fill()
+    cr.restore()
+
+
+def draw_output_pills(cr, keys, size):
+    """The output pill row for `keys`, centred on (0, 0)."""
+    from renderer_split import _draw_click_icon   # Breeze mouse glyphs (B-16)
     t = theme.current()
+    icon = round(size * ICON_RATIO)
+
+    def click(k):
+        return lambda cr, cx, cy: _draw_click_icon(cr, k, cx, cy, "center", t.pill_fg, size=icon)
+
+    def kbd(cr, x, y):
+        _draw_kbd_icon(cr, x, y, t.pill_fg, icon)
+
+    _pill_row(cr, 0, 0, [output_label(k) for k in keys], sep="+", size=size,
+              glass=t.glass, fg=t.pill_fg, border=t.pill_border,
+              sep_rgba=(0.5, 0.5, 0.52, 0.9), ha="center",
+              icons=[click(k) if k in _CLICKS else None for k in keys],
+              prefix_icons=[None if k in _CLICKS or k in _MOD_LABEL else kbd for k in keys],
+              icon_size=icon)
+
+
+def pills_sprite(keys, style, dev_scale=1.0, size=None):
+    """The active-outputs pill row for the output keys `keys`, centred on
+    (0, 0), with its shadow."""
+    t = theme.current()
+    size = size or pill_size()
 
     def build():
-        def draw(cr):
-            _pill_row(cr, 0, 0, list(labels), sep="+", size=PILL_SIZE,
-                      glass=t.glass, fg=t.pill_fg, border=t.pill_border,
-                      sep_rgba=(0.5, 0.5, 0.52, 0.9), ha="center")
-        rec, cap = _record(draw)
+        rec, cap = _record(lambda cr: draw_output_pills(cr, list(keys), size))
 
         def compose(cr):
             pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(style), strength=t.pill_shadow)
             cr.set_source_surface(rec, 0, 0)
             cr.paint()
         return _sprite(compose, dev_scale)
-    return _cached(("pills", tuple(labels), style, dev_scale, t), build)
+    return _cached(("pills", tuple(keys), size, style, dev_scale, t), build)
 
 
 def paint(cr, sprite, cx, cy, scale=1.0, alpha=1.0, dev_scale=1.0):

@@ -165,6 +165,7 @@ class Theme:
     toast_command: tuple = (0.55, 0.90, 0.55)   # a command — green
     toast_error: tuple = (1.00, 0.45, 0.42)     # a command that did not run — red
     osd_animation: str = ""        # osd_anim.PRESETS name when [osd] animation is "auto"
+    osd_pill_size: float = 11.0    # the output pills' text, pt (B-26; was 9); [osd] pill_scale on top
 
     # ── derived ──
 
@@ -459,6 +460,8 @@ def _osd(value, vals, where):
                 _warn(f"{where}: OSD-Animation '{v}' unbekannt, ignoriert")
         elif k in ("toast_keys", "toast_command", "toast_error"):
             _col(vals, k, v, where, False)
+        elif k == "pill_size":
+            _num(vals, "osd_pill_size", v, where)
         else:
             _warn(f"{where}: unbekannter Schlüssel osd.{k}, ignoriert")
 

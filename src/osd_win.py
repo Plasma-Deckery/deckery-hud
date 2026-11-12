@@ -19,9 +19,6 @@ gi.require_version('Gtk4LayerShell', '1.0')
 from gi.repository import Gtk, Gtk4LayerShell as LayerShell, GLib
 import cairo
 
-from helpers import _pill_row, _K, capture_text_boxes
-import pill_shadow
-from shadow import neutral_rgb
 import theme
 from toast import draw_toast
 import osd_anim
@@ -64,6 +61,7 @@ class OsdWin(Gtk.ApplicationWindow):
         self._drawn          = None
         self._anim           = osd_anim.PRESETS["slide"]
         self._split          = False
+        self._pill_scale     = 1.0
         self._over_hud       = False
         # Pop mode: the pill row on screen, when it popped in, and — while it
         # bubbles out — when that started and what it showed.
@@ -80,13 +78,14 @@ class OsdWin(Gtk.ApplicationWindow):
 
     # ── Settings (called by App) ─────────────────────────────────────────
 
-    def configure(self, animation, split):
-        """`[osd] animation` and whether the split design is running. "auto"
-        takes the theme's animation when it names one (B-20)."""
+    def configure(self, animation, split, pill_scale=1.0):
+        """`[osd] animation` and `pill_scale`, and whether the split design
+        is running. "auto" takes the theme's animation when it names one (B-20)."""
         if animation == "auto" and split and theme.current().osd_animation:
             animation = theme.current().osd_animation
         self._anim = osd_anim.resolve(animation, split)
         self._split = split
+        self._pill_scale = pill_scale
         self._da.queue_draw()
 
     def set_over_hud(self, over):
@@ -224,52 +223,31 @@ class OsdWin(Gtk.ApplicationWindow):
             return
 
         ctx = self._state.get("context", {})
-        raw = ctx.get("active_outputs", []) or []
 
-        # active_outputs entries are either plain strings or {key, silent, ...} dicts.
-        def _key(e):   return e.get("key", "") if isinstance(e, dict) else e
-        def _silent(e): return e.get("silent", False) if isinstance(e, dict) else False
+        # Silent outputs get their pills too: silent only keeps the toast
+        # quiet (_schedule_toast), not what is held (B-26).
+        keys = osd_look.output_keys(ctx.get("active_outputs"))
 
         if self._anim.kind == "pop":
             # The toast pops in above the pills, never over them, so nothing
             # needs hiding while a toast is up.
-            self._draw_pop(cr, sw, sh, [_key(e) for e in raw if not _silent(e)])
+            self._draw_pop(cr, sw, sh, keys)
             return
 
-        # Filter: drop silent outputs, drop keys shown by a recent toast.
+        # Drop keys shown by a recent toast.
         la     = self._state.get("last_action") or {}
         la_age = time.time() - la.get("ts", 0.0)
         toasted = set(la["value"]) if la_age < _SUPPRESS_S and isinstance(la.get("value"), list) else set()
 
-        outputs = [_key(e) for e in raw if not _silent(e) and _key(e) not in toasted]
+        outputs = tuple(k for k in keys if k not in toasted)
 
-        # ── Active outputs — same as center strip, bottom-center ──────────
+        # ── Active outputs, bottom-center ────────────────────────────────
         if outputs:
-            labels = [_K.get(k, k.replace("KEY_", "").replace("BTN_", ""))
-                      for k in outputs]
-            # The pills' shadow goes underneath, but where they sit is only
-            # known once they're laid out: draw them into a group first.
-            with capture_text_boxes() as cap:
-                cr.push_group()
-                _pill_row(
-                    cr,
-                    sw / 2, sh - 28,
-                    labels,
-                    sep="+", size=9,
-                    glass=theme.current().glass, fg=theme.current().pill_fg,
-                    border=theme.current().pill_border,
-                    sep_rgba=(0.5, 0.5, 0.52, 0.9),
-                    ha="center",
-                )
-                pills = cr.pop_group()
-            cr.save()
-            cr.identity_matrix()   # boxes are in device space
-            t = theme.current()
-            pill_shadow.paint(cr, cap.glass_boxes, rgb=neutral_rgb(t.shadow_style()),
-                              strength=t.pill_shadow)
-            cr.restore()
-            cr.set_source(pills)
-            cr.paint()
+            surf = self.get_surface()
+            scale = surf.get_scale() if surf is not None else 1.0
+            osd_look.paint(cr, osd_look.pills_sprite(outputs, theme.current().shadow_style(), scale,
+                                                     osd_look.pill_size(self._pill_scale)),
+                           sw / 2, sh - 28, dev_scale=scale)
 
         # ── Toast — rises from bottom-center ─────────────────────────────
         if self._active_toasts:
@@ -283,20 +261,21 @@ class OsdWin(Gtk.ApplicationWindow):
         scale = surf.get_scale() if surf is not None else 1.0
         style = theme.current().shadow_style()
 
-        labels = tuple(_K.get(k, k.replace("KEY_", "").replace("BTN_", "")) for k in outputs)
-        if labels != self._pills:
-            if labels and not self._pills:      # pops in (again, if it was leaving)
+        keys = tuple(outputs)
+        if keys != self._pills:
+            if keys and not self._pills:        # pops in (again, if it was leaving)
                 self._pills_in, self._pills_out = now, None
-            elif not labels:                    # bubbles out, still showing what it showed
+            elif not keys:                      # bubbles out, still showing what it showed
                 self._pills_out, self._pills_leaving = now, self._pills
-            self._pills = labels
+            self._pills = keys
             self._kick()
         shown = self._pills or self._pills_leaving
         if shown:
             env = osd_anim.envelope(a, now - self._pills_in,
                                     None if self._pills else now - self._pills_out)
             if env is not None:
-                osd_look.paint(cr, osd_look.pills_sprite(shown, style, scale),
+                osd_look.paint(cr, osd_look.pills_sprite(shown, style, scale,
+                                                         osd_look.pill_size(self._pill_scale)),
                                sw / 2, sh - 28, *env, dev_scale=scale)
             elif not self._pills:
                 self._pills_leaving, self._pills_out = (), None

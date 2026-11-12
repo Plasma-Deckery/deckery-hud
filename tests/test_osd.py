@@ -97,3 +97,56 @@ def test_neon_toast_sits_on_a_plate_of_its_own_hue():
     assert al > 100 and b > g
     c, _cx, _cy = px(False)
     assert c.shape[0] < a.shape[0]   # classic: just the pill, no halo
+
+
+# ── output pills (B-26) ─────────────────────────────────────────────────────
+
+def test_silent_outputs_get_pills_too():
+    import osd_look
+    raw = ["KEY_LEFTCTRL", {"key": "KEY_C", "silent": True}, {"key": "", "silent": False}]
+    assert osd_look.output_keys(raw) == ("KEY_LEFTCTRL", "KEY_C")
+    assert osd_look.output_keys(None) == ()
+
+
+def test_pills_say_what_is_held_with_symbols_and_glyphs():
+    """Modifiers read as symbol and name, a mouse button is its glyph alone,
+    any other key gets the keyboard glyph before its name."""
+    import osd_look
+    keys = ["KEY_LEFTSHIFT", "KEY_LEFTMETA", "KEY_LEFTALT", "KEY_RIGHTCTRL", "BTN_LEFT", "KEY_C"]
+    assert [osd_look.output_label(k) for k in keys] == ["⇧ Shift", "❖ Super", "⌥ Alt", "⌃ Ctrl", "", "C"]
+
+    def pills(keys):
+        _rec, cap = osd_look._record(lambda cr: osd_look.draw_output_pills(cr, keys, 11))
+        return cap
+    cap = pills(keys)
+    assert len(cap.glass_boxes) == len(keys)
+    assert set(cap.texts) <= {"input-mouse-click-left-symbolic", "input-mouse-symbolic"}
+    assert cap.texts                                   # the mouse glyph, not "LClick"
+    # The keyboard glyph sits in the C pill, before its letter.
+    from helpers import _pill_row
+    import theme
+    _rec, bare = osd_look._record(lambda cr: _pill_row(cr, 0, 0, ["C"], size=11, glass=theme.current().glass))
+    assert cap.glass_boxes[-1][2] > bare.glass_boxes[0][2] + 15
+
+
+def test_pill_size_comes_from_theme_and_setting():
+    import dataclasses
+    import osd_look
+    import settings
+    import theme
+    from shadow import style_from_env
+    f = {f.name: f for f in dataclasses.fields(settings.OsdSettings)}["pill_scale"]
+    assert f.default == 1.0 and f.metadata["minimum"] > 0
+    assert theme.current().osd_pill_size > 9          # a bit larger than before B-26
+    assert osd_look.pill_size(1.5) == pytest.approx(theme.current().osd_pill_size * 1.5)
+    style = style_from_env()
+    small = osd_look.pills_sprite(("KEY_C",), style, 1.0, 9)
+    big = osd_look.pills_sprite(("KEY_C",), style, 1.0, 13)
+    assert big.surface.get_height() > small.surface.get_height()
+
+
+def test_theme_sets_the_pill_size():
+    import theme
+    vals = {}
+    theme._osd({"pill_size": 13}, vals, "t.toml")
+    assert vals["osd_pill_size"] == 13.0

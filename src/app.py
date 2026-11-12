@@ -121,7 +121,7 @@ class App(Gtk.Application):
         self._state_stamp = None
         self._win      = win.Win(application=self, settings=self._settings.reveal)
         self._osd_win = OsdWin(application=self)
-        self._osd_win.configure(self._settings.osd.animation, _split_mode())
+        self._configure_osd()
         self._osd_win.on_state(self._state)
         if self._osd_enabled:
             self._osd_win.present()
@@ -251,8 +251,8 @@ class App(Gtk.Application):
         changed = settings.diff(old, new)
         if "osd.enabled" in changed:
             self._set_osd_enabled(new.osd.enabled)
-        if "osd.animation" in changed:
-            self._osd_win.configure(new.osd.animation, _split_mode())
+        if "osd.animation" in changed or "osd.pill_scale" in changed:
+            self._configure_osd()
         if "debug.enabled" in changed:
             settings._set_debug(new.debug.enabled)
         if "layout.design" in changed and hasattr(self, "switch_layout"):
@@ -273,7 +273,7 @@ class App(Gtk.Application):
         if theme.activate(name) and redraw:
             # The renderers' caches key on the theme; a redraw rebuilds them.
             self._win.queue_draw_title()
-            self._osd_win.configure(self._settings.osd.animation, _split_mode())
+            self._configure_osd()
 
     # ── Theme mode (B-20) ─────────────────────────────────────────────────
 
@@ -310,7 +310,7 @@ class App(Gtk.Application):
     def _theme_preview(self, name):
         if theme.activate(name):
             self._win.queue_draw_title()
-            self._osd_win.configure(self._settings.osd.animation, _split_mode())
+            self._configure_osd()
 
     def _theme_leave(self, apply, close=True):
         m, self._theme_mode = self._theme_mode, None
@@ -383,6 +383,10 @@ class App(Gtk.Application):
             makima_resume()
         self._sync_osd()
 
+    def _configure_osd(self):
+        osd = self._settings.osd
+        self._osd_win.configure(osd.animation, _split_mode(), osd.pill_scale)
+
     def _sync_osd(self):
         """Show or hide the OSD window. With the HUD closed it is up while
         the OSD and remapping are on. Over the open split HUD it is always
@@ -453,7 +457,7 @@ class App(Gtk.Application):
             self._win = win.Win(application=self, settings=self._settings.reveal)
             old.retire()
             self._win.on_state(self._state)
-            self._osd_win.configure(self._settings.osd.animation, _split_mode())
+            self._configure_osd()
             self._sync_osd()
             if _split_mode():
                 # Build the layers first, as at startup: without it the

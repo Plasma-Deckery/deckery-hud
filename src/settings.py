@@ -62,6 +62,9 @@ class OsdSettings:
         'in der Mitte auf), "bubble-soft" (weicher, ohne Überschwingen), "slide" '
         '(gleitet nach oben) oder "auto" (pop im Split-Design, slide in Classic).',
         choices=osd_anim.CHOICES))
+    pill_scale: float = field(default=1.0, metadata=_meta(
+        "Größe der Ausgabe-Pillen unten (gehaltene Tasten): 1.0 = Standard des Themes, "
+        "1.2 = ein Fünftel größer.", minimum=0.5))
 
 
 @dataclass(frozen=True)
