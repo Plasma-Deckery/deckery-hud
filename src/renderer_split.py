@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 import cairo
 
 from helpers import (_rrect, _txt, _txt_icon, _icon_indent, _txt_smooth, _txt_size, _pill_row,
-                     capture_text_boxes)
+                     capture_text_boxes, _breeze_icon, _THEMED_PAD)
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
 from trackpads import _draw_pad, _draw_stick, _LPAD, _RPAD, _LSTICK, _RSTICK
@@ -30,7 +30,6 @@ from layout_split import (compute_layout, center_badge_rect, center_close_rect, 
 from parts import draw_part, part_bbox, clip_to_part, part_subpaths, stroke_outline, idle_fill
 from shadow import (GroupShadowSpec, group_shadow_layers, ink_colours, paint_bleed, paint_scaled,
                     style_from_env)
-import icons
 import theme
 from reveal import FULL
 from elements import ELEMENTS, ELEMENT_IDS, side_of
@@ -1551,8 +1550,10 @@ def _icon_cx(x, ha, size):
 
 
 def _draw_mouse_icon(cr, x, y, ha, color, size=_MOUSE_SIZE):
-    """Idle mouse glyph. x, y: anchor point, vertically centred on y."""
-    icons.draw_icon(cr, _MOUSE_ICON_NAME, _icon_cx(x, ha, size), y, size, color)
+    """Idle mouse glyph. x, y: anchor point, vertically centred on y.
+    `size` is the icon's canvas; like a legend's text it gets a shadow
+    plate (helpers._breeze_icon)."""
+    _breeze_icon(cr, _MOUSE_ICON_NAME, _icon_cx(x, ha, size), y, size / _THEMED_PAD, color)
 
 
 def _draw_click_icon(cr, which, x, y, ha, color, size=_CLICK_SIZE):
@@ -1561,8 +1562,8 @@ def _draw_click_icon(cr, which, x, y, ha, color, size=_CLICK_SIZE):
     left/right-click variant isn't available (e.g. outside Breeze)."""
     cx = _icon_cx(x, ha, size)
     name = _CLICK_ICON_NAME.get(which, _MOUSE_ICON_NAME)
-    if not icons.draw_icon(cr, name, cx, y, size, color):
-        icons.draw_icon(cr, _MOUSE_ICON_NAME, cx, y, size, color)
+    if not _breeze_icon(cr, name, cx, y, size / _THEMED_PAD, color):
+        _breeze_icon(cr, _MOUSE_ICON_NAME, cx, y, size / _THEMED_PAD, color)
 
 
 # Pad legend labels with nothing useful to say as text — the shape itself

@@ -157,6 +157,66 @@ def test_toast_centres_icon_and_text_as_one(monkeypatch):
     assert abs((left + right) / 2 - 200) < 1
 
 
-def test_unthemed_toast_draws_as_before():
+def test_toast_sets_any_icon_apart_from_its_text():
     from helpers import _txt_icon
-    assert [t for t, _ in _texts_drawn(_txt_icon, 200, 50, "☀ Brightness Up", ha="center")] == ["☀ Brightness Up"]
+    boxes = _texts_drawn(_txt_icon, 200, 50, "☀ Brightness Up", size=11, ha="center", va="mid")
+    assert [t for t, _ in boxes] == ["☀", "Brightness Up"]
+    left, right = boxes[0][1][0], boxes[-1][1][0] + boxes[-1][1][2]
+    assert abs((left + right) / 2 - 200) < 2
+
+
+# ── Vertical centring: a symbol's ink sits halfway up the capitals ──
+
+
+def _ink_mid(box):
+    return box[1] + box[3] / 2
+
+
+def test_icons_centre_on_the_cap_height_whatever_their_font():
+    # Fallback fonts (Noto Sans Symbols 2 for 🎮) bring their own ascent and
+    # line height; centring the layout box put 🎮 high. The ink is centred.
+    from helpers import _txt_icon, _cap_mid
+    cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 400, 100))
+    for ha in ("left", "right", "center"):
+        mid = _cap_mid(cr, 50, "Toggle HUD", 13, "mid")
+        for g in ("🎮", "⚙", "⇄", "☀", "⏯", "🔇"):
+            (_t, box), _rest = _texts_drawn(_txt_icon, 200, 50, f"{g} Toggle HUD", size=13, ha=ha, va="mid")
+            assert abs(_ink_mid(box) - mid) <= 0.5, (g, ha)
+
+
+def test_cap_mid_is_halfway_up_the_capitals():
+    from helpers import _cap_mid, _txt
+    boxes = _texts_drawn(_txt, 50, 50, "H", size=13, va="mid")
+    cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 400, 100))
+    from helpers import _layout
+    lo = _layout(cr, "H", 13)
+    ink = lo.get_pixel_extents()[0]
+    top = boxes[0][1][1]
+    assert abs(_cap_mid(cr, 50, "H", 13, "mid") - (top + ink.y + ink.height / 2)) <= 0.5
+
+
+# ── Mouse-click glyphs get the legend's shadow plate like any text ──
+
+
+def test_click_icon_is_noted_for_the_shadow(monkeypatch):
+    import renderer_split as R
+    drawn = _fake_breeze(monkeypatch)
+    boxes = _texts_drawn(R._draw_click_icon, "BTN_LEFT", 100, 50, "left", (1, 0.8, 0.2, 1))
+    assert drawn == ["input-mouse-click-left-symbolic"]
+    assert len(boxes) == 1
+    _t, (x, y, w, h) = boxes[0]
+    assert x >= 100 and abs(y + h / 2 - 50) < 0.5 and w == h > 0
+
+
+def test_missing_click_icon_falls_back_to_the_noted_mouse(monkeypatch):
+    import icons
+    import renderer_split as R
+    drawn = []
+
+    def draw_icon(cr, name, cx, cy, size_px, color):
+        drawn.append(name)
+        return name == R._MOUSE_ICON_NAME
+    monkeypatch.setattr(icons, "draw_icon", draw_icon)
+    boxes = _texts_drawn(R._draw_click_icon, "BTN_RIGHT", 100, 50, "right", (1, 1, 1, 1))
+    assert drawn == ["input-mouse-click-right-symbolic", R._MOUSE_ICON_NAME]
+    assert len(boxes) == 1
