@@ -355,8 +355,10 @@ class GroupAnim:
             self._v = to
             self.running = False
             return False
-        # ease-out-cubic in (fast in, soft landing), ease-in-cubic out
-        e = 1 - (1 - p) ** 3 if self.target else p ** 3
+        # A fade eases out both ways: most of the change at once, a soft
+        # landing — an old state leaves as quickly as a new one arrives.
+        # A slide in lands softly too, and closing gathers speed away.
+        e = 1 - (1 - p) ** 3 if self.target or self.style == "fade" else p ** 3
         self._v = self._from + (to - self._from) * e
         return True
 
@@ -407,6 +409,11 @@ class Crossfade:
             return 0.0
         dur = settings.crossfade_ms / 1000
         return min(1.0, max(0.0, (now - self._start) / dur)) if dur > 0 else 1.0
+
+    def mix(self, now, settings):
+        """How far the picture has turned new, eased like a fade: the old
+        picture mostly gone in the first quarter."""
+        return 1 - (1 - self.progress(now, settings)) ** 3
 
     def running(self, now, settings):
         return self.progress(now, settings) < 1.0

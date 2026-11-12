@@ -206,7 +206,7 @@ class Win(Gtk.ApplicationWindow):
         self._frame     = {}      # group -> what the last frame drew of it (_snapshot_split)
         self._frame_ctx = None    # (state, layers, press_t, sw, sh, scale, connector) of that frame;
                                   # connector: None, or its {"tex", "shadow", "bleed"} slots
-        self._xfade     = {}      # group -> reveal.Crossfade, old = (texture, rect) under new content
+        self._xfade     = {}      # group -> reveal.Crossfade, old = its last frame's textures (see _frame)
         self._ghosts    = {}      # group -> [_Ghost]: frozen copies fading out, see _freeze
         self._tick_id   = None
         self._visible   = frozenset()
@@ -888,6 +888,35 @@ class Win(Gtk.ApplicationWindow):
                      "plate": None}
                  for g in shown}
 
+        # Same element, new picture in place (L1 -> R1 rebinds a key, a
+        # gesture moves a pad's row into the connector): it dissolves old
+        # into new as a whole — bitmap, cloud, plate and shadow together,
+        # or the old plate is gone while its label still fades.
+        for g in shown:
+            prev = self._frame.get(g)
+            if prev is not None and prev["look"] != groups[g].look:
+                self._xfade[g] = Crossfade(prev)
+        mix = {g: self._xfade[g].mix(now, self._settings) for g in shown if g in self._xfade}
+
+        def dissolved(g, slot, new, append):
+            # A real dissolve, not new-over-old: two plain alphas would dim
+            # whatever both share (the art) mid-way.
+            old = self._xfade[g].old.get(slot) if g in mix else new
+            if old == new:
+                if new is not None:
+                    append(*new)
+                return
+            snapshot.push_cross_fade(mix[g])
+            if old is not None:
+                append(*old)
+            snapshot.pop()
+            if new is not None:
+                append(*new)
+            snapshot.pop()
+
+        def scaled(tex, r):
+            snapshot.append_scaled_texture(tex, Gsk.ScalingFilter.LINEAR, rect(*r))
+
         # Two pads touching at once connect across screen centre (see
         # draw_gesture_connector_live), as visible as the fainter pad. At
         # rest it is a cached layer with its own shadow, glow and cloud;
@@ -916,7 +945,7 @@ class Win(Gtk.ApplicationWindow):
         # alpha — so neighbouring clouds fuse into one shape instead of
         # stacking (see shadow.py). Then each element's own core/edge shadow.
         ident = Gsk.ComponentTransfer.new_identity()
-        bleeds = [g for g in shown if groups[g].bleed is not None]
+        bleeds = [g for g in shown if groups[g].bleed is not None or g in mix]
         conn_bleed = conn is not None and conn.bleed is not None
         if bleeds or conn_bleed or any(gh.bleed or gh.conn_bleed for _g, gh in ghosts):
             ramp, curve = self._bleed_transfer()
@@ -927,17 +956,17 @@ class Win(Gtk.ApplicationWindow):
                 faded(gh, gh.conn_bleed)
             if conn_bleed:
                 placed_conn("bleed", "bleed_connector", *conn.bleed)
-            for g in bleeds:
-                surf, x, y, w, h = groups[g].bleed
-                tex = self._texture("bleed_" + g, surf)
-                frame[g]["bleed"] = (tex, (x, y, w, h))
-                placed(g, lambda: snapshot.append_scaled_texture(
-                    tex, Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+            for g in shown:
+                if groups[g].bleed is not None:
+                    surf, *r = groups[g].bleed
+                    frame[g]["bleed"] = (self._texture("bleed_" + g, surf), tuple(r))
+                if frame[g]["bleed"] is not None or g in mix:
+                    placed(g, lambda: dissolved(g, "bleed", frame[g]["bleed"], scaled))
             snapshot.pop()
             snapshot.pop()
         self._snapshot_plates(snapshot, ident, groups, shown, ghosts, opacity, dx, frame,
                               conn if conn is not None and conn.plate is not None else None,
-                              conn_op if conn is not None else 0.0, conn_frame)
+                              conn_op if conn is not None else 0.0, conn_frame, mix)
         # The connector's under the pads': it runs into them, under their plate.
         for _g, gh in ghosts:
             faded(gh, gh.conn_shadow)
@@ -946,13 +975,11 @@ class Win(Gtk.ApplicationWindow):
         if conn is not None and conn.shadow is not None:
             placed_conn("shadow", "shadow_connector", *conn.shadow)
         for g in shown:
-            if groups[g].shadow is None:
-                continue
-            surf, x, y, w, h = groups[g].shadow
-            tex = self._texture("shadow_" + g, surf)
-            frame[g]["shadow"] = (tex, (x, y, w, h))
-            placed(g, lambda: snapshot.append_scaled_texture(
-                tex, Gsk.ScalingFilter.LINEAR, rect(x, y, w, h)))
+            if groups[g].shadow is not None:
+                surf, *r = groups[g].shadow
+                frame[g]["shadow"] = (self._texture("shadow_" + g, surf), tuple(r))
+            if frame[g]["shadow"] is not None or g in mix:
+                placed(g, lambda: dissolved(g, "shadow", frame[g]["shadow"], scaled))
         # The frozen copies under everything live: what leaves sits below
         # what arrives in its place.
         for g, gh in ghosts:
@@ -966,27 +993,10 @@ class Win(Gtk.ApplicationWindow):
             faded(gh, gh.connector)   # over both pads, as it is live
         for g in shown:
             layer = groups[g]
-            tex = self._texture(g, layer.surface)
-            prev = self._frame.get(g)
-            if prev is not None and prev["look"] != layer.look:
-                # Same element, new picture in place (L1 -> R1 rebinds a
-                # key, a gesture swaps a pad's label): dissolve old into new.
-                self._xfade[g] = Crossfade((prev["tex"], prev["rect"]))
-            if g in self._xfade:
-                # A real dissolve, not new-over-old: two plain alphas would
-                # dim whatever both textures share (the art) mid-way.
-                (old_tex, old_rect) = self._xfade[g].old
-                k = self._xfade[g].progress(now, self._settings)
-                def both():
-                    snapshot.push_cross_fade(k)
-                    snapshot.append_texture(old_tex, rect(*old_rect))
-                    snapshot.pop()
-                    snapshot.append_texture(tex, rect(*layer.rect))
-                    snapshot.pop()
-                placed(g, both)
-            else:
-                placed(g, lambda: snapshot.append_texture(tex, rect(*layer.rect)))
-            frame[g]["tex"], frame[g]["rect"] = tex, layer.rect
+            frame[g]["tex"], frame[g]["rect"] = self._texture(g, layer.surface), layer.rect
+            frame[g]["layer"] = (frame[g]["tex"], frame[g]["rect"])
+            placed(g, lambda: dissolved(g, "layer", frame[g]["layer"],
+                                        lambda tex, r: snapshot.append_texture(tex, rect(*r))))
         for g in shown:
             if groups[g].tx is None:
                 continue
@@ -1058,66 +1068,86 @@ class Win(Gtk.ApplicationWindow):
         snapshot.pop()
 
     def _snapshot_plates(self, snapshot, ident, groups, shown, ghosts, opacity, dx, frame,
-                         conn, conn_op, conn_frame):
+                         conn, conn_op, conn_frame, mix):
         """The merged plate pass (themes whose plates merge, see
         shadow.paint_plates — its cairo twin): every plate field at one
         opacity in one pass, mapped to the plate (and its contour) only
         then — so neighbouring elements' plates join instead of stacking —
-        and faded as a whole."""
-        by_opacity = {}
+        and faded as a whole.
 
-        def add(o, tex, r, shift=0.0):
-            if o <= 0:
-                return
-            def append():
-                snapshot.save()
-                snapshot.translate(Graphene.Point().init(shift, 0))
-                snapshot.append_scaled_texture(tex, Gsk.ScalingFilter.LINEAR,
-                                               Graphene.Rect().init(*r))
-                snapshot.restore()
-            by_opacity.setdefault(round(o, 3), []).append(append)
-
+        An element crossfading to a different plate (mix: group -> how far)
+        dissolves between the whole pass with its old plate and with its new
+        one — blending the two fields instead would shrink the old plate
+        to nothing rather than fade it."""
+        plates = []   # (group or None, opacity, (texture, rect), shift)
         for _g, gh in ghosts:
             for slot in (gh.plate, gh.conn_plate):
                 if slot is not None:
-                    add(gh.anim.value, *slot)
+                    plates.append((None, gh.anim.value, slot, 0.0))
         if conn is not None:
             surf, *r = conn.plate
-            tex = self._texture("plate_connector", surf)
-            conn_frame["plate"] = (tex, tuple(r))
-            add(conn_op, tex, r)
+            conn_frame["plate"] = (self._texture("plate_connector", surf), tuple(r))
+            plates.append((None, conn_op, conn_frame["plate"], 0.0))
         for g in shown:
-            if groups[g].plate is None:
-                continue
-            surf, *r = groups[g].plate
-            tex = self._texture("plate_" + g, surf)
-            frame[g]["plate"] = (tex, tuple(r))
-            add(opacity[g], tex, r, dx[g])
-        if not by_opacity:
+            if groups[g].plate is not None:
+                surf, *r = groups[g].plate
+                frame[g]["plate"] = (self._texture("plate_" + g, surf), tuple(r))
+            plates.append((g, opacity[g], frame[g]["plate"], dx[g]))
+        # Old plates per crossfading group; a few at once at most in practice.
+        olds = {g: self._xfade[g].old.get("plate") for g in mix}
+        xf = [g for g in mix if olds[g] != frame[g]["plate"]][:3]
+        if not any(slot for _g, _o, slot, _s in plates) and not any(olds[g] for g in xf):
             return
         style = shadow_style()
         (ramp, curve), border = self._plate_transfer()
-        for o, draws in sorted(by_opacity.items()):
-            snapshot.push_opacity(o)
-            snapshot.push_component_transfer(ident, ident, ident, curve)
-            snapshot.push_component_transfer(ident, ident, ident, ramp)
-            for draw in draws:
-                draw()
-            snapshot.pop()
-            snapshot.pop()
-            if border is not None:
-                # The contour stays on the shapes under a drop offset.
-                bramp, bcurve, (r, g, b) = border
-                snapshot.save()
-                snapshot.translate(Graphene.Point().init(-style.offset_x, -style.offset_y))
-                snapshot.push_component_transfer(r, g, b, bcurve)
-                snapshot.push_component_transfer(ident, ident, ident, bramp)
+
+        def append(slot, shift):
+            tex, r = slot
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(shift, 0))
+            snapshot.append_scaled_texture(tex, Gsk.ScalingFilter.LINEAR,
+                                           Graphene.Rect().init(*r))
+            snapshot.restore()
+
+        def passes(old_for):
+            by_opacity = {}
+            for g, o, slot, shift in plates:
+                slot = olds[g] if g in old_for else slot
+                if o > 0 and slot is not None:
+                    by_opacity.setdefault(round(o, 3), []).append((slot, shift))
+            for o, draws in sorted(by_opacity.items()):
+                snapshot.push_opacity(o)
+                snapshot.push_component_transfer(ident, ident, ident, curve)
+                snapshot.push_component_transfer(ident, ident, ident, ramp)
                 for draw in draws:
-                    draw()
+                    append(*draw)
                 snapshot.pop()
                 snapshot.pop()
-                snapshot.restore()
+                if border is not None:
+                    # The contour stays on the shapes under a drop offset.
+                    bramp, bcurve, (r, g, b) = border
+                    snapshot.save()
+                    snapshot.translate(Graphene.Point().init(-style.offset_x, -style.offset_y))
+                    snapshot.push_component_transfer(r, g, b, bcurve)
+                    snapshot.push_component_transfer(ident, ident, ident, bramp)
+                    for draw in draws:
+                        append(*draw)
+                    snapshot.pop()
+                    snapshot.pop()
+                    snapshot.restore()
+                snapshot.pop()
+
+        def dissolve(i, old_for):
+            if i == len(xf):
+                passes(old_for)
+                return
+            snapshot.push_cross_fade(mix[xf[i]])
+            dissolve(i + 1, old_for | {xf[i]})
             snapshot.pop()
+            dissolve(i + 1, old_for)
+            snapshot.pop()
+
+        dissolve(0, frozenset())
 
     def _draw_inner_split(self, cr, sw, sh):
         self._set_split_input_region()

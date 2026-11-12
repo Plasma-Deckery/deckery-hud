@@ -9,7 +9,8 @@ from reveal import (Content, crumbs, FULL, GROUPS, Hold, Reveal, RevealSettings,
 
 # The logic tests below are written against these numbers, not whatever
 # the defaults are at the moment.
-S = RevealSettings(hold_ms=1500, gesture_hold_ms=1500, release_ms=500, breadcrumbs=False)
+S = RevealSettings(hold_ms=1500, gesture_hold_ms=1500, release_ms=500, fade_out_ms=300,
+                   breadcrumbs=False)
 
 
 def _s(**changes):
@@ -217,7 +218,9 @@ def test_anim_reverses_in_place():
     assert a.style == "fade"
     a.tick(0.11)
     assert a.value <= before
-    assert before - a.value < 0.05
+    # No jump: one 10 ms step of a fade-out's quick start, as a fade-in's
+    # own first step is (~0.1), not a cut.
+    assert before - a.value < 0.15
     a.tick(0.2)
     assert a.value < before
 
@@ -613,3 +616,48 @@ def test_our_own_slow_frame_is_taken_out():
     assert abs(stall_skip(0.40, 0.39) - (0.39 - 1 / 90)) < 1e-9
     assert abs(stall_skip(0.20, 0.39) - (0.20 - 1 / 90)) < 1e-9   # never more than the gap
     assert stall_skip(0.03, 0.02) == 0.0
+
+
+# ── Live round 4: fade-out as quick as fade-in ────────────────────────────
+# New states popped in, old ones lingered: the fade-in eased out (most of
+# the change at the start), the fade-out eased in (most of it at the end),
+# and lasted 300 ms against 200 ms.
+
+def test_fade_out_mirrors_fade_in():
+    s = RevealSettings()
+    assert s.fade_out_ms == s.fade_in_ms
+    a, b = GroupAnim(s), GroupAnim(s)
+    a.set_target(True, "detector", 0.0)
+    b.jump(1.0, True)
+    b.set_target(False, "detector", 0.0)
+    for t in (0.02, 0.05, 0.1, 0.15):
+        a.tick(t), b.tick(t)
+        assert abs(a.value - (1.0 - b.value)) < 1e-9
+
+
+def test_fade_out_is_mostly_gone_early():
+    b = GroupAnim(RevealSettings())
+    b.jump(1.0, True)
+    b.set_target(False, "detector", 0.0)
+    b.tick(0.05)            # a quarter of the way
+    assert b.value < 0.5
+
+
+def test_slide_out_keeps_accelerating_away():
+    """The full HUD closing slides off, gathering speed: unchanged."""
+    b = GroupAnim(RevealSettings())
+    b.jump(1.0, True)
+    b.style = "slide"
+    b.target = True
+    b.set_target(False, "full", 0.0)
+    b.tick(0.13)            # half of slide_ms
+    assert b.value > 0.8
+
+
+def test_crossfade_mix_drops_the_old_picture_early():
+    from reveal import Crossfade
+    x = Crossfade("old")
+    x.begin(0.0)
+    assert x.mix(0.0, S) == 0.0
+    assert x.mix(0.05, S) > 0.5     # a quarter of crossfade_ms
+    assert x.mix(0.2, S) == 1.0
