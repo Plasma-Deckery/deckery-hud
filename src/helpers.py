@@ -40,12 +40,13 @@ class capture_text_boxes:
     _glass_pill) go to cap.glass_boxes instead: they get a shadow of their
     own (pill_shadow.py), not a legend plate. Filled buttons (_filled_button)
     go to cap.shapes as (x, y, w, h, r): one shape, shadowed along its
-    outline like a part."""
+    outline like a part — and to cap.looks as (fill, label texts, label
+    colours), what they show with no plate to key a shadow on."""
 
     def __enter__(self):
         global _text_sink
-        self._prev, self.boxes, self.texts, self.colours, self.glass_boxes, self.shapes = \
-            _text_sink, [], [], [], [], []
+        self._prev, self.boxes, self.texts, self.colours, self.glass_boxes, self.shapes, \
+            self.looks = _text_sink, [], [], [], [], [], []
         _text_sink = self
         return self
 
@@ -93,13 +94,20 @@ def _filled_button(cr, x, y, w, h, r, fill, draw_label):
     cr.set_source_rgba(*fill)
     _rrect(cr, x, y, w, h, r)
     cr.fill()
-    if _text_sink is not None:
-        pts = [cr.user_to_device(x + dx, y + dy) for dx in (0, w) for dy in (0, h)]
-        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-        bw, bh = max(xs) - min(xs), max(ys) - min(ys)
-        _text_sink.shapes.append((min(xs), min(ys), bw, bh, r * bh / h if h else r))
-    with _unnoted():
+    sink = _text_sink
+    if sink is None:
         draw_label()
+        return
+    pts = [cr.user_to_device(x + dx, y + dy) for dx in (0, w) for dy in (0, h)]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    bw, bh = max(xs) - min(xs), max(ys) - min(ys)
+    sink.shapes.append((min(xs), min(ys), bw, bh, r * bh / h if h else r))
+    # The label's text and colour still reach the shadow traced from the
+    # bitmap (edge, glow, rim): unkeyed, Paused kept Active's green (B-14).
+    with capture_text_boxes() as label:
+        draw_label()
+    sink.looks.append((tuple(round(v, 3) for v in fill), tuple(label.texts),
+                       tuple(label.colours)))
 
 
 def _font(size, bold=False):
