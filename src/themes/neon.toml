@@ -1,6 +1,7 @@
 # Neon: leuchtende Linien und Farbcodes auf Rauchglas-Plättchen, die jeder
-# Form und Legendenzeile eng folgen; ein kurzer Schleier verbindet nahe
-# Nachbarn. Die Standardwerte aller übrigen Tokens.
+# Form und Legendenzeile eng folgen und den Farbton dessen annehmen, was
+# auf ihnen leuchtet; ein kurzer Schleier verbindet nahe Nachbarn. Sonst die
+# Standardwerte aller Tokens.
 label = "Neon"
 order = 0
 
@@ -12,3 +13,9 @@ dim = 0                         # alle Legenden in voller Stärke
 
 [shadow]
 preset = "aura"
+# Die Platte nimmt dort, wo eine farbige Linie oder Legende liegt, einen
+# sehr tiefen Ton derselben Farbe an — der Schleier leuchtet darin mit;
+# um weiße Legenden bleibt sie neutral.
+tint = true
+tint_value = 0.17
+tint_saturation = 0.85

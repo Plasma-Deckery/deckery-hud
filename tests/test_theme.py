@@ -25,13 +25,15 @@ def test_default_is_the_old_constants():
     # shadow is its own (the design pass: "aura").
     t = theme.load(theme.DEFAULT)
     assert t == dataclasses.replace(theme.Theme(), label="Neon", shadow="aura",
-                                    text=(1.0, 1.0, 1.0), text_dim=0.0)
+                                    text=(1.0, 1.0, 1.0), text_dim=0.0,
+                                    shadow_tweaks=t.shadow_tweaks)
     assert t.modifier == helpers.C_MOD
     assert t.layer == helpers.C_LAYER
     assert t.game == helpers.C_GAME
     assert t.glass == helpers.GLASS_PILL
     assert t.pill_fg == helpers.GLASS_PILL_FG
-    assert t.shadow_style() == shadow.PRESETS["aura"]
+    assert t.shadow_style() == dataclasses.replace(
+        shadow.PRESETS["aura"], tint=True, tint_value=0.17, tint_saturation=0.85)
     assert theme.Theme().shadow_style() == shadow.style_from_env()
 
 
