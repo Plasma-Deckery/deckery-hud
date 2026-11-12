@@ -282,7 +282,10 @@ def _element_shadow_spec(element, tx, text_boxes, ink, text_colours=(), shapes=(
 # the element's bitmap: a press rebuilds the element's layer but leaves its
 # shadow (and its GPU texture) alone; a legend changing colour retints it. The edge shadow is
 # traced from the bitmap of the build that missed — the same strokes and
-# glyphs, since nothing in the key changed.
+# glyphs, since nothing in the key changed. That holds only for what the key
+# sees: a filled button's label has no plate, so its text and fill are keyed
+# as cap.looks (the badge's Paused <-> Active, B-14), and the theme is, for
+# its fonts.
 _shadow_layer_cache = {}
 
 
@@ -304,9 +307,9 @@ def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False, wo
     spec = _element_shadow_spec(element, tx, cap.boxes, ink, cap.colours, cap.shapes)
     style = shadow_style()
     if style.tint or style.rim_alpha > 0:
-        # The tint follows the colours actually drawn (see shadow._local_dark).
+        # The tint follows the colours actually drawn (see shadow._local_tint).
         spec = replace(spec, ink_colours=ink_colours(surf, rect))
-    key = (spec, tuple(cap.texts), shadow_style(), dev_scale)
+    key = (spec, tuple(cap.texts), tuple(cap.looks), theme.current(), shadow_style(), dev_scale)
     if hit is not None and hit[0] == key:
         return hit[1]
     merged = merges_plates(style)

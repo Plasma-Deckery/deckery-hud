@@ -6,6 +6,8 @@ cairo/numpy — run in the `deckery` distrobox."""
 import colorsys
 import copy
 
+import pytest
+
 from render_sample import SAMPLES
 from reveal import FULL
 
@@ -16,6 +18,11 @@ AMBER, GREEN, WHITE = (1.0, 0.72, 0.1), (0.25, 0.85, 0.35), (0.95, 0.95, 0.95)
 def _style():
     from shadow import PRESETS
     return PRESETS["hauch-kurz"]
+
+
+def _theme_styles():
+    import theme
+    return {n: theme.load(n).shadow_style() for n in theme.names()}
 
 
 def _spec(badge_colour):
@@ -133,3 +140,47 @@ def test_status_toggle_leaves_the_title_alone(monkeypatch):
     a, b = _centre_tint(True, monkeypatch), _centre_tint(False, monkeypatch)
     for name in a:
         assert max(abs(x - y) for x, y in zip(a[name], b[name])) < 2 / 255, name
+
+
+
+def _surface_bytes(slot):
+    if slot is None:
+        return None
+    surf = slot[0]
+    surf.flush()
+    return bytes(surf.get_data())
+
+
+@pytest.mark.parametrize("name", sorted(_theme_styles()))
+def test_centre_shadow_always_matches_the_badge(name, monkeypatch):
+    """Paused <-> Active toggles, open/close (the breadcrumb row alone) and
+    a theme switch, through the caches: every shadow equals one built from
+    scratch. The badge's label isn't noted (one filled shape) and an
+    untinted style keys no colours, but the glow, edge and rim are traced
+    from the green or amber bitmap — Paused kept Active's green (B-14)."""
+    import renderer_split as rs
+    import theme
+    from reveal import crumbs
+    style = _theme_styles()[name]
+    monkeypatch.setattr(rs, "shadow_style", lambda: style)
+    monkeypatch.setattr(rs, "_shadow_layer_cache", {})
+    monkeypatch.setattr(rs, "_center_cache", [])
+    monkeypatch.setattr(theme, "_active", theme.current())   # restored afterwards
+    other = "glas" if name != "glas" else "neon"
+
+    def centre(paused, content=FULL):
+        state = copy.deepcopy(SAMPLES["base_only"])
+        state.setdefault("context", {})["paused"] = paused
+        return rs.group_layers(state, SW, SH, {"center": content})["groups"]["center"]
+
+    steps = [(name, False, FULL), (name, True, FULL), (name, True, crumbs({"Steam Deck"})),
+             (name, False, FULL), (name, True, FULL), (other, True, FULL), (name, False, FULL),
+             (name, True, FULL)]
+    for i, (theme_name, paused, content) in enumerate(steps):
+        theme.activate(theme_name)
+        cached = centre(paused, content)
+        saved = rs._shadow_layer_cache, rs._center_cache
+        rs._shadow_layer_cache, rs._center_cache = {}, []
+        fresh = centre(paused, content)
+        rs._shadow_layer_cache, rs._center_cache = saved
+        assert _surface_bytes(cached.shadow) == _surface_bytes(fresh.shadow), (i, theme_name, paused)
