@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 
 import cairo
 
-from helpers import (_rrect, _txt, _txt_icon, _icon_indent, _txt_smooth, _txt_size, _pill_row,
+from helpers import (_rrect, _filled_button, _txt, _txt_icon, _icon_indent, _txt_smooth, _txt_size, _pill_row,
                      capture_text_boxes, _breeze_icon, _THEMED_PAD)
 from viewmodel import classify_all, pad_legend_vm, PadLegendVM
 from callouts import _BTNS, _callouts, _Callout, _btn_short, _SHOW_ALL
@@ -247,8 +247,9 @@ def element_box(element, tx):
     return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
 
 
-def _element_shadow_spec(element, tx, text_boxes, ink, text_colours=()):
-    parts, rrects = [], []
+def _element_shadow_spec(element, tx, text_boxes, ink, text_colours=(), shapes=()):
+    """shapes: filled buttons (cap.shapes), shadowed as the shapes they are."""
+    parts, rrects = [], [tuple(round(v, 1) for v in r) for r in shapes]
     if element.kind != "center":
         ox, oy, scale = tx
         halves = (shoulder_half_polys(element.cluster)
@@ -292,7 +293,7 @@ def _element_shadows(element, tx, cap, surf, rect, dev_scale, pressing=False):
         # and adjacent text are missing from it. Keep the at-rest shadow
         # rather than letting the legend's shadow blink out for the press.
         return hit[1]
-    spec = _element_shadow_spec(element, tx, cap.boxes, rect, cap.colours)
+    spec = _element_shadow_spec(element, tx, cap.boxes, rect, cap.colours, cap.shapes)
     style = shadow_style()
     if style.tint or style.rim_alpha > 0:
         # The tint follows the colours actually drawn (see shadow._local_dark).
@@ -1766,48 +1767,66 @@ def _draw_center(cr, state, center, open_t, crumbs=None):
     _txt(cr, cx, y0 + 28, "Deckery HUD", size=15, bold=True, ha="center", va="mid")
 
     # Pause/Resume badge
-    if paused:
-        r, g, b = t.status_paused
-        label = "⏸  Controls Paused"
-    else:
-        r, g, b = t.status_active
-        label = "⏵  Controls Active"
-    cr.set_source_rgba(r, g, b, 0.14 * alpha)
-    _rrect(cr, bx, by, badge_w, badge_h, 7)
-    cr.fill()
-    cr.set_source_rgba(r, g, b, 0.9 * alpha)
-    _txt(cr, cx, by + badge_h / 2, label, size=11, ha="center", va="mid")
+    label = "⏸  Controls Paused" if paused else "⏵  Controls Active"
+    *_rect, radius, rgb = center_button(state, center, "badge")
+    def badge_label():
+        cr.set_source_rgba(*rgb, 0.9 * alpha)
+        _txt(cr, cx, by + badge_h / 2, label, size=11, ha="center", va="mid")
+    _filled_button(cr, bx, by, badge_w, badge_h, radius, (*rgb, 0.14 * alpha), badge_label)
 
     _draw_crumbs(cr, state, cx, by + badge_h + 26, alpha)
 
     # Close affordance
-    crx, cry, crw, crh = center_close_rect(center)
-    ccx, ccy, cr_r = crx + crw / 2, cry + crh / 2, crw / 2
-    cr.set_source_rgba(*t.ink, 0.18 * alpha)
-    cr.arc(ccx, ccy, cr_r, 0, math.tau)
-    cr.fill()
-    cr.set_source_rgba(*t.ink, 0.7 * alpha)
-    cr.set_line_width(1.5)
-    for dx, dy in ((-4, -4), (4, 4)), ((-4, 4), (4, -4)):
-        cr.move_to(ccx + dx[0], ccy + dx[1])
-        cr.line_to(ccx + dy[0], ccy + dy[1])
-    cr.stroke()
+    crx, cry, crw, crh, cr_r, _rgb = center_button(state, center, "close")
+    ccx, ccy = crx + crw / 2, cry + crh / 2
+
+    def cross():
+        cr.set_source_rgba(*t.ink, 0.7 * alpha)
+        cr.set_line_width(1.5)
+        for dx, dy in ((-4, -4), (4, 4)), ((-4, 4), (4, -4)):
+            cr.move_to(ccx + dx[0], ccy + dx[1])
+            cr.line_to(ccx + dy[0], ccy + dy[1])
+        cr.stroke()
+    _filled_button(cr, crx, cry, crw, crh, cr_r, (*t.ink, 0.18 * alpha), cross)
 
     # Switch to the classic design — mirrors the close button on the left.
-    kx, ky, kw, kh = center_classic_rect(center)
-    cr.set_source_rgba(*t.ink, 0.12 * alpha)
-    _rrect(cr, kx, ky, kw, kh, kh / 2)
-    cr.fill()
-    cr.set_source_rgba(*t.ink, 0.7 * alpha)
-    _txt(cr, kx + kw / 2, ky + kh / 2, "Classic", size=10, ha="center", va="mid")
-
     # Start the theme mode (B-20) — beside the close button.
-    kx, ky, kw, kh = center_theme_rect(center)
-    cr.set_source_rgba(*t.ink, 0.12 * alpha)
-    _rrect(cr, kx, ky, kw, kh, kh / 2)
+    for name, text in (("classic", "Classic"), ("theme", "Theme")):
+        kx, ky, kw, kh, kr, _rgb = center_button(state, center, name)
+        def pill_label():
+            cr.set_source_rgba(*t.ink, 0.7 * alpha)
+            _txt(cr, kx + kw / 2, ky + kh / 2, text, size=10, ha="center", va="mid")
+        _filled_button(cr, kx, ky, kw, kh, kr, (*t.ink, 0.12 * alpha), pill_label)
+
+
+CENTER_BUTTONS = ("badge", "close", "classic", "theme")
+
+
+def center_button(state, center, name):
+    """(x, y, w, h, corner radius, rgb) of one of the centre's clickable
+    buttons (CENTER_BUTTONS) — for drawing it and its hover alike."""
+    t = theme.current()
+    if name == "badge":
+        paused = (state.get("context") or {}).get("paused", False)
+        return (*center_badge_rect(center), 7, t.status_paused if paused else t.status_active)
+    x, y, w, h = {"close": center_close_rect, "classic": center_classic_rect,
+                  "theme": center_theme_rect}[name](center)
+    return x, y, w, h, h / 2, t.ink
+
+
+def draw_center_hover(cr, state, center, name, k):
+    """A centre button's hover (B-04), drawn live over the cached column
+    and faded in by k: its fill made stronger and a thin outline, both in
+    the button's own colour — the classic badge's hover, kept to the
+    button's own shape so it still reads as one piece."""
+    x, y, w, h, r, rgb = center_button(state, center, name)
+    cr.set_source_rgba(*rgb, 0.16 * k)
+    _rrect(cr, x, y, w, h, r)
     cr.fill()
-    cr.set_source_rgba(*t.ink, 0.7 * alpha)
-    _txt(cr, kx + kw / 2, ky + kh / 2, "Theme", size=10, ha="center", va="mid")
+    cr.set_source_rgba(*rgb, 0.6 * k)
+    cr.set_line_width(1.0)
+    _rrect(cr, x + 0.5, y + 0.5, w - 1, h - 1, max(0.0, r - 0.5))
+    cr.stroke()
 
 
 def _draw_crumbs(cr, state, cx, y, alpha, names=None):

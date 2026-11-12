@@ -37,7 +37,8 @@ _LAYOUT_MODE = layout_choice.current()
 if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
-                                draw_gesture_connector_live, shadow_style, warm_all)
+                                draw_gesture_connector_live, shadow_style, warm_all,
+                                CENTER_BUTTONS, center_button, draw_center_hover)
     from shadow import bleed_transfer
     from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
                               center_theme_rect)
@@ -164,6 +165,9 @@ class Win(Gtk.ApplicationWindow):
         self._pause_anim     = HoverAnim(lambda: self._da.queue_draw())
         self._show_anim      = HoverAnim(lambda: self._da.queue_draw())
         self._change_anim    = HoverAnim(lambda: self._da.queue_draw())
+        # Split: the centre's buttons, by name (renderer_split.CENTER_BUTTONS).
+        self._hover          = ({n: HoverAnim(lambda: self._da.queue_draw()) for n in CENTER_BUTTONS}
+                                if _LAYOUT_MODE == "split" else {})
         self._last_tick      = None   # see _on_group_tick's timing instrumentation
         self._draw_s         = 0.0    # time spent drawing since the last tick
         self._tex_cache      = {}     # split mode: layer name -> (cairo surface, Gdk.Texture)
@@ -319,6 +323,10 @@ class Win(Gtk.ApplicationWindow):
 
     def _on_motion(self, _ctrl, x, y):
         if _LAYOUT_MODE == "split":
+            center = compute_layout(self._da.get_width(), self._da.get_height())[2]
+            for name, anim in self._hover.items():
+                bx, by, bw, bh, _r, _rgb = center_button(self._state, center, name)
+                anim.set(self._full and bx <= x <= bx + bw and by <= y <= by + bh)
             return
         bx, by, bw, bh = self._badge_screen_rect()
         self._pause_anim.set(bx <= x <= bx + bw and by <= y <= by + bh)
@@ -361,6 +369,8 @@ class Win(Gtk.ApplicationWindow):
             self.get_application().toggle_theme_mode()
 
     def _on_motion_leave(self, _ctrl):
+        for anim in self._hover.values():
+            anim.set(False)
         self._pause_anim.set(False)
         self._show_anim.set(False)
         self._change_anim.set(False)
@@ -400,6 +410,9 @@ class Win(Gtk.ApplicationWindow):
         changes its look crossfades (_snapshot_split)."""
         now = time.monotonic()
         self._full = any(w.cause == "full" for w in wants.values())
+        if not self._full:
+            for hover in self._hover.values():
+                hover.set(False)
         connector = True   # the gesture connector goes with the first pad to leave
         for g, anim in self._anims.items():
             w = wants.get(g)
@@ -960,6 +973,17 @@ class Win(Gtk.ApplicationWindow):
             snapshot.push_opacity(opacity["DPad"])
             self._draw_dpad_3d(snapshot, sw, sh, dx["DPad"], groups["DPad"].vms)
             snapshot.pop()
+
+        if self._full and "center" in groups:
+            center = compute_layout(sw, sh)[2]
+            for name, anim in self._hover.items():
+                if anim.value <= 0:
+                    continue
+                bx, by, bw, bh, _r, _rgb = center_button(self._state, center, name)
+                def hover():
+                    cr = snapshot.append_cairo(rect(bx - 2, by - 2, bw + 4, bh + 4))
+                    draw_center_hover(cr, self._state, center, name, anim.value)
+                placed("center", hover)
 
         if self._full and self._theme_panel is not None:
             cr = snapshot.append_cairo(rect(0, sh - 200, sw, 200))

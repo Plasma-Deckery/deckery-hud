@@ -38,12 +38,14 @@ class capture_text_boxes:
     (x, y, w, h), cap.texts with the matching strings, cap.colours with
     their (r, g, b) or None when it isn't a plain colour. Glass pills (see
     _glass_pill) go to cap.glass_boxes instead: they get a shadow of their
-    own (pill_shadow.py), not a legend plate."""
+    own (pill_shadow.py), not a legend plate. Filled buttons (_filled_button)
+    go to cap.shapes as (x, y, w, h, r): one shape, shadowed along its
+    outline like a part."""
 
     def __enter__(self):
         global _text_sink
-        self._prev, self.boxes, self.texts, self.colours, self.glass_boxes = \
-            _text_sink, [], [], [], []
+        self._prev, self.boxes, self.texts, self.colours, self.glass_boxes, self.shapes = \
+            _text_sink, [], [], [], [], []
         _text_sink = self
         return self
 
@@ -68,6 +70,36 @@ def _note_box(cr, x, y, w, h, text, glass=False, colour=None):
     _text_sink.boxes.append(box)
     _text_sink.texts.append(text)
     _text_sink.colours.append(tuple(colour[:3]) if colour else None)
+
+
+class _unnoted:
+    """with _unnoted(): ... — draws nothing into the text boxes, e.g. the
+    label of a filled button, whose shape casts the shadow."""
+
+    def __enter__(self):
+        global _text_sink
+        self._prev, _text_sink = _text_sink, None
+
+    def __exit__(self, *exc):
+        global _text_sink
+        _text_sink = self._prev
+
+
+def _filled_button(cr, x, y, w, h, r, fill, draw_label):
+    """A button drawn as a filled rounded rect with its label inside. For
+    the shadow it is one shape (cap.shapes), like a part: its label gets no
+    plate of its own, which on a fill reads as a second, shorter plate
+    cutting the button into pieces (B-04). draw_label() draws the label."""
+    cr.set_source_rgba(*fill)
+    _rrect(cr, x, y, w, h, r)
+    cr.fill()
+    if _text_sink is not None:
+        pts = [cr.user_to_device(x + dx, y + dy) for dx in (0, w) for dy in (0, h)]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        bw, bh = max(xs) - min(xs), max(ys) - min(ys)
+        _text_sink.shapes.append((min(xs), min(ys), bw, bh, r * bh / h if h else r))
+    with _unnoted():
+        draw_label()
 
 
 def _font(size, bold=False):
