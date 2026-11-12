@@ -27,6 +27,7 @@ from anim import HoverAnim
 from reveal import GROUPS, GroupAnim, RevealSettings, Crossfade, stall_skip
 from settings import dbg, debug_enabled
 import layout_choice
+import theme
 
 # Experimental split-screen layout (issue #21), opt-in only — the shipping
 # default stays the classic centred renderer. See docs/SPLIT_LAYOUT.md.
@@ -38,11 +39,20 @@ if _LAYOUT_MODE == "split":
     from renderer_split import (draw_hud_split, get_dpad_geometry, draw_dpad_live, _SCALE_ANIM_PARTS,
                                 group_layers, live_rect, draw_group_live, _side_slide_offset,
                                 draw_gesture_connector_live, shadow_style, warm_all,
-                                CENTER_BUTTONS, center_button, draw_center_hover)
+                                CENTER_BUTTONS, center_button, draw_center_hover,
+                                backdrop_stops, _BACKDROP_R)
     from shadow import bleed_transfer, border_transfer, plate_transfer
     from layout_split import (compute_layout, center_badge_rect, center_close_rect, center_classic_rect,
                               center_theme_rect)
     from renderer_split import theme_panel
+
+
+def _color_stop(offset, rgba):
+    # Gsk.ColorStop has no constructor taking its fields.
+    stop = Gsk.ColorStop()
+    stop.offset = offset
+    stop.color = Gdk.RGBA(red=rgba[0], green=rgba[1], blue=rgba[2], alpha=rgba[3])
+    return stop
 
 
 @dataclass
@@ -855,6 +865,8 @@ class Win(Gtk.ApplicationWindow):
         def rect(x, y, w, h):
             return Graphene.Rect().init(x, y, w, h)
 
+        self._snapshot_backdrop(snapshot, sw, sh, shown)
+
         def placed(g, append):
             snapshot.save()
             snapshot.translate(Graphene.Point().init(dx[g], 0))
@@ -1025,6 +1037,25 @@ class Win(Gtk.ApplicationWindow):
             vals = " ".join(f"{g}={opacity[g]:.2f}" for g in shown)
             dbg(f"snapshot_split: {(time.perf_counter() - t0) * 1000:.1f}ms "
                 f"({vals}, screen={sw}x{sh}@{scale:.3g})")
+
+    def _snapshot_backdrop(self, snapshot, sw, sh, shown):
+        """The theme's dim behind the full HUD (renderer_split.draw_backdrop
+        is its cairo twin), fading with the full HUD's own slide — not
+        behind elements a detector reveals."""
+        stops = backdrop_stops(theme.current())
+        if stops is None:
+            return
+        alpha = max((self._anims[g].value for g in shown if self._causes.get(g) == "full"),
+                    default=0.0)
+        if alpha <= 0:
+            return
+        (centre, edge), (r, g, b) = stops
+        snapshot.push_opacity(alpha)
+        snapshot.append_radial_gradient(
+            Graphene.Rect().init(0, 0, sw, sh), Graphene.Point().init(sw / 2, sh / 2),
+            sw / 2 * _BACKDROP_R, sh / 2 * _BACKDROP_R, 0.0, 1.0,
+            [_color_stop(0.0, (r, g, b, centre)), _color_stop(1.0, (r, g, b, edge))])
+        snapshot.pop()
 
     def _snapshot_plates(self, snapshot, ident, groups, shown, ghosts, opacity, dx, frame,
                          conn, conn_op, conn_frame):

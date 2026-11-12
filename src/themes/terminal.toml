@@ -70,3 +70,9 @@ style = "dashed"
 width = 1.5
 glow = 0.4
 glow_radius = 3
+
+# The screen dimmed behind the open HUD: a dark room for the green.
+[backdrop]
+color = "#000000"
+opacity = 0.4
+vignette = 0.4

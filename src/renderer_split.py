@@ -788,6 +788,39 @@ def _get_connector_layer(groups, pv, sw, sh, dev_scale):
     return layer
 
 
+def backdrop_stops(t):
+    """The theme's backdrop (Theme.backdrop_*) as an elliptical gradient over
+    the screen: ((centre alpha, edge alpha), rgb), or None for none. The
+    ellipse's rim, where the edge alpha is reached, lies at _BACKDROP_R of
+    the screen's half-size — the HUD's columns sit beyond it."""
+    if t.backdrop_opacity <= 0:
+        return None
+    v = min(max(t.backdrop_vignette, 0.0), 1.0)
+    return (t.backdrop_opacity * (1.0 - v), t.backdrop_opacity), tuple(t.backdrop_color)
+
+
+_BACKDROP_R = 1.15
+
+
+def draw_backdrop(cr, sw, sh, alpha):
+    """Cairo twin of win.py's backdrop: the theme's dim, at `alpha` (the full
+    HUD's open fade)."""
+    stops = backdrop_stops(theme.current())
+    if stops is None or alpha <= 0:
+        return
+    (centre, edge), rgb = stops
+    cr.save()
+    cr.translate(sw / 2, sh / 2)
+    cr.scale(sw / 2 * _BACKDROP_R, sh / 2 * _BACKDROP_R)
+    grad = cairo.RadialGradient(0, 0, 0, 0, 0, 1)
+    grad.add_color_stop_rgba(0, *rgb, centre * alpha)
+    grad.add_color_stop_rgba(1, *rgb, edge * alpha)
+    grad.set_extend(cairo.EXTEND_PAD)
+    cr.set_source(grad)
+    cr.paint()
+    cr.restore()
+
+
 def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=None,
                    draw_dpad=True, groups=None):
     """Pure-cairo path. The live HUD uses win.py's GPU path instead (same
@@ -806,6 +839,8 @@ def draw_hud_split(cr, front_svg, back_svg, state, sw, sh, open_t=1.0, press_t=N
         groups = {name: (open_t, _side_slide_offset(side_of(name), sw, open_t)
                          if side_of(name) else 0.0, FULL)
                   for name in ELEMENT_IDS}
+        # The full HUD only — a partial reveal leaves the screen as it is.
+        draw_backdrop(cr, sw, sh, open_t)
     t0 = time.perf_counter()
     layers = group_layers(state, sw, sh, {n: g[2] for n, g in groups.items()}, press_t)
     t1 = time.perf_counter()
@@ -1901,30 +1936,49 @@ def _draw_crumbs(cr, state, cx, y, alpha, names=None):
               sep_rgba=(*t.ink, 0.55 * alpha), ha="center", styles=styles)
 
 
+def _luma(rgb):
+    r, g, b = rgb[:3]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
 def theme_panel(cr, sw, sh, label, index, count):
     """The theme mode's panel (B-20): which theme is previewed, where it is
-    in the list, and how to leave. Drawn in the previewed theme itself.
-    Returns its rect, for the caller to clip a live layer to."""
+    in the list, and how to leave. Drawn in the previewed theme itself, as
+    one of its plates: its shadow colour under its text — a light card in
+    Paper, whose text is dark. Returns its rect, for the caller to clip a
+    live layer to."""
     t = theme.current()
+    style = shadow_style()
+    bg = tuple(style.shadow_rgb)
+    if abs(_luma(bg) - _luma(t.text)) < 0.45:
+        # No plate colour of its own that the text stands out on.
+        bg = (0.04, 0.04, 0.06) if _luma(t.text) > 0.5 else (0.98, 0.98, 0.99)
     name = f"‹   {label}   ›"
+    # Browsing applies at once; B is the way back.
+    hint = "‹ ›  switch   ·   A done   ·   B undo"
     tw, _th = _txt_size(cr, name, 18, bold=True)
-    x, y, w, h = theme_panel_rect(sw, sh, max(300, tw + 80))
-    cr.set_source_rgba(0.04, 0.04, 0.06, 0.82)
+    hw, _hh = _txt_size(cr, hint, 10)
+    x, y, w, h = theme_panel_rect(sw, sh, max(300, tw + 80, hw + 48))
+    cr.set_source_rgba(*bg, 0.9)
     _rrect(cr, x, y, w, h, 18)
     cr.fill_preserve()
-    cr.set_source_rgba(*t.ink, 0.18)
-    cr.set_line_width(1.0)
+    if style.plate_border[3] > 0:
+        cr.set_source_rgba(*style.plate_border)
+        cr.set_line_width(max(1.0, style.plate_border_width))
+    else:
+        cr.set_source_rgba(*t.text, 0.18)
+        cr.set_line_width(1.0)
     cr.stroke()
     cx = x + w / 2
-    cr.set_source_rgba(*t.ink, 0.55)
+    cr.set_source_rgba(*t.text, 0.55)
     _txt(cr, cx, y + 18, "THEME", size=9, bold=True, ha="center", va="mid")
-    cr.set_source_rgba(*t.ink, 1.0)
+    cr.set_source_rgba(*t.text, 1.0)
     _txt(cr, cx, y + 46, name, size=18, bold=True, ha="center", va="mid")
     gap = 14
     for i in range(count):
-        cr.set_source_rgba(*t.ink, 1.0 if i == index else 0.3)
+        cr.set_source_rgba(*t.text, 1.0 if i == index else 0.3)
         cr.arc(cx + (i - (count - 1) / 2) * gap, y + 72, 3.5 if i == index else 2.5, 0, math.tau)
         cr.fill()
-    cr.set_source_rgba(*t.ink, 0.6)
-    _txt(cr, cx, y + 93, "A übernehmen   ·   B abbrechen", size=10, ha="center", va="mid")
+    cr.set_source_rgba(*t.text, 0.6)
+    _txt(cr, cx, y + 93, hint, size=10, ha="center", va="mid")
     return x, y, w, h

@@ -7,9 +7,9 @@ and the L2/R2 clicks still fire), so these presses reach neither the app
 nor the game — no capture mode of its own is needed. The HUD reads them
 from makima's state like any other press:
 
-  d-pad ←/↑, left stick left   previous theme (live preview)
+  d-pad ←/↑, left stick left   previous theme, applied at once
   d-pad →/↓, left stick right  next theme
-  A                            keep it
+  A                            done (so is closing the HUD any other way)
   B                            back to the theme from before
 
 The list wraps around. A button already down when the mode starts (the

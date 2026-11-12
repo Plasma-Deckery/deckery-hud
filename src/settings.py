@@ -48,8 +48,8 @@ class LayoutSettings:
         'Welches Design: "split" (neu) oder "classic".',
         choices=("classic", "split")))
     theme: str = field(default="neon", metadata=_meta(
-        'Aussehen im Split-Design: "neon", "glas", "papier", "wireframe", "arcade", '
-        '"terminal", "kontrast" oder eigene aus ~/.config/deckery-hud/themes/.'))
+        'Aussehen im Split-Design: "neon", "glass", "paper", "wireframe", "arcade", '
+        '"terminal", "contrast" oder eigene aus ~/.config/deckery-hud/themes/.'))
 
 
 @dataclass(frozen=True)

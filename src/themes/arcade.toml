@@ -58,7 +58,7 @@ shadow_rgb = "#12052a"
 core_alpha = 0.86
 core_grow = 8
 core_soft = 1
-plate_radius = 0
+plate_radius = 6
 legend_padx = 10
 legend_pady = 5
 plate_lines = 0.35
@@ -79,3 +79,9 @@ width = 3
 glow = 1.0
 glow_radius = 8
 label_glow = true
+
+# The screen dimmed behind the open HUD: a deep violet dusk behind the neon.
+[backdrop]
+color = "#12052a"
+opacity = 0.35
+vignette = 0.5

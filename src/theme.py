@@ -35,6 +35,8 @@ became an amber power line with glow and shadow (B-12).
     [stick]                         # ring, cap, cap_border, width
     [callout]                       # width, alpha, dot
     [crumbs]                        # base = true: the base config's pill too
+    [backdrop]                      # the screen dimmed behind the full HUD:
+    opacity = 0.4                   # color, opacity, vignette (0 flat .. 1 centre clear)
     [connector]                     # the gesture line between both pads and its label:
     color = "#ffca33"               # color, alpha, width, style, glow, glow_radius,
     glow = 0.9                      # shadow = true/false, label_color, label_size,
@@ -72,6 +74,9 @@ from pathlib import Path
 
 
 DEFAULT = "neon"
+# Built-in themes that had German ids until 2.0.0~beta1: a setting or an
+# `extends` naming the old id still finds the theme (App rewrites the setting).
+RENAMED = {"glas": "glass", "papier": "paper", "kontrast": "contrast"}
 
 _BUILTIN_DIR = Path(__file__).resolve().parent / "themes"
 
@@ -135,6 +140,14 @@ class Theme:
     connector_label_color: tuple = None   # rgb; None = the line's colour
     connector_label_size: float = 13.0
     connector_label_glow: bool = False    # the halo around the label's letters too
+
+    # ── Backdrop: the screen dimmed behind the full HUD (not behind a
+    #    partial reveal), fading with it. vignette: how much lighter the
+    #    centre stays than the edges, where the HUD's columns are: 0 = flat,
+    #    1 = the centre not dimmed at all ──
+    backdrop_color: tuple = (0.0, 0.0, 0.0)
+    backdrop_opacity: float = 0.0
+    backdrop_vignette: float = 0.0
 
     # ── Breadcrumbs: the config stack's pills in the centre ──
     crumbs_base: bool = False             # show the base config ("Steam Deck Base") too
@@ -285,9 +298,18 @@ def _read(path):
         return None
 
 
+def resolve(name):
+    """`name`, or the id a renamed built-in has now (RENAMED) — unless a
+    theme file still goes by the old one."""
+    if name in RENAMED and name not in _files():
+        return RENAMED[name]
+    return name
+
+
 def load(name, _seen=()):
     """The Theme called `name`, or None if there is no such file or it does
     not parse. A bad value only costs its own key."""
+    name = resolve(name)
     if name == DEFAULT and DEFAULT not in _files():
         return Theme()
     path = _files().get(name)
@@ -343,6 +365,8 @@ _SECTIONS = {
                   "label_size": ("connector_label_size", "num"),
                   "label_glow": ("connector_label_glow", "bool")},
     "crumbs": {"base": ("crumbs_base", "bool")},
+    "backdrop": {"color": ("backdrop_color", "rgb"), "opacity": ("backdrop_opacity", "num"),
+                 "vignette": ("backdrop_vignette", "num")},
     "text": {"font": ("font", "str"), "weight": ("text_weight", "str"),
              "scale": ("text_scale", "num"), "bold": ("text_bold", "str"),
              "spacing": ("text_spacing", "num"), "dim": ("text_dim", "num"),

@@ -41,7 +41,7 @@ def test_default_is_the_old_constants():
 
 def test_builtins_in_order():
     names = theme.names()
-    assert names[:7] == ["neon", "glas", "papier", "wireframe", "arcade", "terminal", "kontrast"]
+    assert names[:7] == ["neon", "glass", "paper", "wireframe", "arcade", "terminal", "contrast"]
     for n in names:
         assert theme.load(n) is not None
 
@@ -69,9 +69,9 @@ def test_colours_and_modifiers(user_themes):
 
 
 def test_extends_and_user_override(user_themes):
-    (user_themes / "glas.toml").write_text('label = "Mein Glas"\n')
+    (user_themes / "glass.toml").write_text('label = "My Glass"\n')
     (user_themes / "kind.toml").write_text('extends = "arcade"\n[pill]\nsheen = 0\n')
-    assert theme.load("glas").label == "Mein Glas"
+    assert theme.load("glass").label == "My Glass"
     kind = theme.load("kind")
     base = theme.load("arcade")
     assert kind.pill_sheen == 0.0
@@ -110,15 +110,15 @@ def test_broken_file_and_cycle(user_themes):
 
 
 def test_activate(user_themes):
-    assert theme.activate("glas")
-    assert theme.current().name == "glas"
-    assert not theme.activate("glas")
+    assert theme.activate("glass")
+    assert theme.current().name == "glass"
+    assert not theme.activate("glass")
     theme.activate("gibtsnicht")
     assert theme.current().name == theme.DEFAULT
 
 
 def test_classic_draws_with_the_builtin_tokens():
-    theme.activate("glas")
+    theme.activate("glass")
     assert theme.activate(None)
     assert theme.current() == theme.Theme()
     theme.activate(theme.DEFAULT)
@@ -144,7 +144,7 @@ def test_osd_tokens(user_themes, capsys):
     assert t.osd_animation == "slide"
     assert t.toast_command == (0.0, 1.0, 0.0)
     assert "wackel" in capsys.readouterr().err
-    assert theme.load("glas").osd_animation == "bubble-soft"
+    assert theme.load("glass").osd_animation == "bubble-soft"
     theme.activate("o")
     assert toast.toast_label({"type": "command", "value": ["x"]})[1] == (0.0, 1.0, 0.0)
 
@@ -330,3 +330,38 @@ def test_pills_are_round_except_in_terminal():
     character cells are the deliberate exception."""
     for n in theme.names()[:7]:
         assert (theme.load(n).pill_radius < 0) is (n != "terminal"), n
+
+
+def test_renamed_builtins_load_by_their_old_ids():
+    """2.0.0~beta1 renamed glas/papier/kontrast; a saved old id still works."""
+    for old, new in theme.RENAMED.items():
+        assert theme.resolve(old) == new
+        assert theme.load(old).name == new
+    assert theme.resolve("neon") == "neon"
+
+
+def test_a_user_theme_keeps_an_old_id(user_themes):
+    (user_themes / "glas.toml").write_text('label = "Mine"\n')
+    assert theme.resolve("glas") == "glas"
+    assert theme.load("glas").label == "Mine"
+
+
+def test_backdrop_section(user_themes):
+    (user_themes / "dim.toml").write_text(
+        '[backdrop]\ncolor = "#102030"\nopacity = 0.4\nvignette = 0.5\n')
+    t = theme.load("dim")
+    assert t.backdrop_color == (0x10 / 255, 0x20 / 255, 0x30 / 255)
+    assert (t.backdrop_opacity, t.backdrop_vignette) == (0.4, 0.5)
+    assert theme.load("wireframe").backdrop_opacity > 0
+    assert theme.load("neon").backdrop_opacity == 0
+    assert theme.load("contrast").backdrop_opacity == 0
+
+
+def test_every_builtin_is_rounded_but_terminal():
+    """The design language is round; Terminal alone keeps hard corners."""
+    for name in theme.names()[:7]:
+        style = theme.load(name).shadow_style()
+        if name == "terminal":
+            continue
+        assert style.plate_shape == "round", name
+        assert style.plate_radius < 0 or style.plate_radius >= 6, name

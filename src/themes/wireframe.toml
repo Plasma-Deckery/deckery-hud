@@ -58,8 +58,7 @@ shadow_rgb = "#02080c"
 core_alpha = 0.72
 core_grow = 6
 core_soft = 1.5
-plate_shape = "chamfer"
-plate_radius = 5
+plate_radius = 7
 legend_padx = 12
 legend_pady = 4
 plate_border = "#00e5ff99"
@@ -77,3 +76,9 @@ color = "#00e5ff"
 width = 1.5
 glow = 0.8
 glow_radius = 5
+
+# The screen dimmed behind the open HUD: the lines alone are lost on a busy game.
+[backdrop]
+color = "#000814"
+opacity = 0.5
+vignette = 0.45

@@ -173,7 +173,7 @@ def test_theme_sets_the_pill_size():
     assert vals["osd_pill_size"] == 13.0
 
 
-@pytest.mark.parametrize("theme_name", ["neon", "glas", "kontrast"])
+@pytest.mark.parametrize("theme_name", ["neon", "glass", "contrast"])
 @pytest.mark.parametrize("size", [11, 15.4])
 def test_pill_symbol_and_text_share_one_centre_line(theme_name, size, monkeypatch):
     """⌃ comes from a fallback font with its own ascent; in the pill its ink
@@ -182,7 +182,7 @@ def test_pill_symbol_and_text_share_one_centre_line(theme_name, size, monkeypatc
     import numpy as np
     import osd_look
     import theme
-    # Without the pill's contour (kontrast has one), the glyphs stand alone,
+    # Without the pill's contour (contrast has one), the glyphs stand alone,
     # all in the text's colour.
     monkeypatch.setattr(theme, "_active", dataclasses.replace(
         theme.load(theme_name), pill_border=None, pill_icon=None))

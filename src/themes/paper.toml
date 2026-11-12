@@ -1,7 +1,7 @@
-# Papier: hell und flach — weiße Karten mit dunkler Schrift und einem
+# Paper: hell und flach — weiße Karten mit dunkler Schrift und einem
 # kleinen Schatten darunter, gedeckte Akzentfarben. Für helle Seiten und
 # wer es nüchtern mag.
-label = "Papier"
+label = "Paper"
 order = 20
 
 [colors]
@@ -68,3 +68,9 @@ edge_radius = 1.1
 color = "#1565c0"
 glow = 0
 width = 2
+
+# The screen dimmed behind the open HUD: a little, so the white cards stand off a busy game.
+[backdrop]
+color = "#0a1020"
+opacity = 0.2
+vignette = 0.6

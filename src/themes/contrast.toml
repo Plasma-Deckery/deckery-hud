@@ -1,7 +1,7 @@
-# Kontrast: maximale Lesbarkeit — schwarze, deckende Felder mit weißem
+# Contrast: maximale Lesbarkeit — schwarze, deckende Felder mit weißem
 # Rahmen, große, kräftige weiße Schrift, Gelb und Cyan als Signalfarben,
 # breite Linien. Keine Transparenz, keine Effekte.
-label = "Kontrast"
+label = "Contrast"
 order = 60
 
 [colors]

@@ -1,7 +1,7 @@
-# Glas: ruhig und weich wie eine Konsolen-Oberfläche — durchscheinende
+# Glass: ruhig und weich wie eine Konsolen-Oberfläche — durchscheinende
 # Schiefer-Kacheln mit feiner heller Glaskante und weichem Schatten darunter,
 # ein Akzent (Himmelblau), helle Lato-Schrift. Keine Leuchteffekte.
-label = "Glas"
+label = "Glass"
 order = 10
 
 [colors]
@@ -73,3 +73,9 @@ animation = "bubble-soft"
 color = "#ffd27a"
 glow = 0
 width = 2
+
+# The screen dimmed behind the open HUD: a console's dim behind its overlay.
+[backdrop]
+color = "#0b0f18"
+opacity = 0.3
+vignette = 0.6

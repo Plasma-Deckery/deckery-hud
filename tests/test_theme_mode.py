@@ -57,3 +57,22 @@ def test_unknown_current_and_bad_state():
     m = ThemeMode(NAMES, "gibtsnicht", {})
     assert m.name == "neon"
     assert m.feed({"sticks": {"lstick": {"x": None}}}) is None
+
+
+def test_panel_text_stands_out_in_every_builtin_theme():
+    """The panel is drawn in the previewed theme; Paper's dark text once sat
+    on the panel's fixed dark fill and vanished."""
+    import cairo
+    import numpy as np
+    import theme
+    from renderer_split import theme_panel
+    for name in theme.names()[:7]:
+        theme.activate(name)
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1280, 800)
+        x, y, w, h = theme_panel(cairo.Context(surf), 1280, 800, name, 0, 7)
+        surf.flush()
+        px = np.ndarray((800, surf.get_stride() // 4, 4), np.uint8, surf.get_data())[:, :1280]
+        title = px[int(y + 36):int(y + 56), int(x + 20):int(x + w - 20)]
+        luma = (title[..., :3].astype(float) @ (0.0722, 0.7152, 0.2126)) / 255
+        assert luma.max() - luma.min() > 0.5, name
+    theme.activate(theme.DEFAULT)

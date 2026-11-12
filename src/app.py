@@ -270,6 +270,12 @@ class App(Gtk.Application):
         """Make the theme from the settings current (B-20). Classic always
         draws with the built-in tokens — themes are a split-design thing."""
         name = self._settings.layout.theme if _split_mode() else None
+        if name is not None and theme.resolve(name) != name:
+            # A renamed built-in (glas -> glass): the file learns the new id.
+            name = theme.resolve(name)
+            self._settings = dataclasses.replace(
+                self._settings, layout=dataclasses.replace(self._settings.layout, theme=name))
+            settings.remember("layout.theme", name)
         if theme.activate(name) and redraw:
             # The renderers' caches key on the theme; a redraw rebuilds them.
             self._win.queue_draw_title()
@@ -278,11 +284,12 @@ class App(Gtk.Application):
     # ── Theme mode (B-20) ─────────────────────────────────────────────────
 
     def toggle_theme_mode(self):
-        """Start the theme mode, or cancel it if it runs. Split design only.
+        """Start the theme mode, or end it — keeping the theme on screen —
+        if it runs. Split design only.
         The full HUD opens for it (and makima is paused, which keeps the
         d-pad, A and B away from the app — see theme_mode.py)."""
         if self._theme_mode is not None:
-            self._theme_leave(apply=False)
+            self._theme_leave(apply=True)
             return
         if self._win is None or not _split_mode():
             return
@@ -369,8 +376,9 @@ class App(Gtk.Application):
         if self._win is None:
             return
         if self._theme_mode is not None:
-            # Closed from outside (L3, the X): same as B.
-            self._theme_leave(apply=False, close=False)
+            # Closed from outside (L3, the X): the theme on screen stays —
+            # browsing applies at once, only B goes back.
+            self._theme_leave(apply=True, close=False)
         self._full = False
         if _split_mode():
             # Groups a detector still wants stay; the rest slides out. The
