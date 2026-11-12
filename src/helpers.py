@@ -223,11 +223,54 @@ def _txt_size(cr, text, size=12, bold=False):
 # stand-in ("▦⮞ Next Desktop"); wherever _txt_icon draws it, the Breeze icon
 # takes its place, so desktop, activity and window read apart at a glance as
 # they do in System Settings. Anywhere else the stand-in still reads as a
-# symbol. Unthemed icons draw exactly as before.
+# symbol.
 THEMED_ICONS = {"▦": "virtual-desktops-symbolic",
                 "✣": "activities-symbolic",
                 "🗔": "window"}
 _THEMED_PAD = 1.5    # Breeze draws a 16 px motif on a 24 px canvas
+
+
+def _breeze_icon(cr, name, cx, cy, motif, rgba, text=None):
+    """A Breeze icon whose motif is `motif` px, centred on (cx, cy) —
+    noted as a text box (`text`, default its name) in its colour, so the
+    legend shadow plates it like a glyph. False (nothing drawn) if the icon
+    doesn't resolve."""
+    import icons    # Rsvg; only once an icon is actually drawn
+    if not icons.draw_icon(cr, name, cx, cy, motif * _THEMED_PAD, rgba):
+        return False
+    _note_box(cr, cx - motif / 2, cy - motif / 2, motif, motif, text or name, colour=rgba[:3])
+    return True
+
+
+def _layout(cr, text, size, bold=False):
+    lo = PangoCairo.create_layout(cr)
+    lo.set_font_description(_font(size, bold))
+    _set_text(lo, text)
+    return lo
+
+
+def _cap_mid(cr, y, text, size, va, bold=False):
+    """The y halfway up the capitals of `text` as _txt draws it at (y, va):
+    where a label icon centres, so it sits in the middle of the line the
+    eye reads rather than wherever its own font's metrics put it."""
+    lo = _layout(cr, text, size, bold)
+    ph = lo.get_pixel_size()[1]
+    ty = y - (ph if va == "bottom" else ph / 2 if va == "mid" else 0)
+    cap = _layout(cr, "H", size, bold).get_pixel_extents()[0].height
+    return ty + lo.get_baseline() / Pango.SCALE - cap / 2
+
+
+def _glyph(cr, cx, cy, glyph, size, bold=False):
+    """Draw `glyph` with its ink box centred on (cx, cy). A symbol from a
+    fallback font brings that font's ascent and line height along, so
+    centring its layout box (as _txt does) puts it high or low; its ink is
+    what the eye centres."""
+    lo = _layout(cr, glyph, size, bold)
+    ink = lo.get_pixel_extents()[0]
+    tx, ty = cx - ink.x - ink.width / 2, cy - ink.y - ink.height / 2
+    _note_box(cr, tx + ink.x, ty + ink.y, ink.width, ink.height, glyph)
+    cr.move_to(tx, ty)
+    PangoCairo.show_layout(cr, lo)
 
 
 def _icon_pieces(cr, icon, size):
@@ -253,25 +296,20 @@ def _icon_width(cr, icon, size):
     return sum(w for _p, w, _t in pieces) + gap * (len(pieces) - 1)
 
 
-def _draw_icon_head(cr, x, y, icon, size, va, bold=False):
-    """Draw `icon` with its left edge at x. Themed stand-ins become their
-    Breeze icon in the current source colour — noted as a text box, so the
-    legend shadow covers them like a glyph — the rest stay text."""
+def _draw_icon_head(cr, x, cy, icon, size, bold=False):
+    """Draw `icon` with its left edge at x, centred on cy. Themed stand-ins
+    become their Breeze icon in the current source colour, the rest stay
+    glyphs."""
     cut = _icon_pieces(cr, icon, size)
     if cut is None:
-        _txt(cr, x, y, icon, size, bold=bold, va=va)
+        _glyph(cr, x + _icon_width(cr, icon, size) / 2, cy, icon, size, bold)
         return
     pieces, gap = cut
-    h = _txt_size(cr, icon, size, bold)[1]
-    cy = y + h / 2 if va == "top" else y - h / 2 if va == "bottom" else y
     src = cr.get_source()
     rgba = src.get_rgba() if isinstance(src, cairo.SolidPattern) else (1, 1, 1, 1)
-    import icons    # Rsvg; only once a themed icon is actually drawn
     for piece, w, themed in pieces:
-        if themed and icons.draw_icon(cr, THEMED_ICONS[piece], x + w / 2, cy, w * _THEMED_PAD, rgba):
-            _note_box(cr, x, cy - w / 2, w, w, piece)
-        else:
-            _txt(cr, x + w / 2, y, piece, size, bold=bold, ha="center", va=va)
+        if not (themed and _breeze_icon(cr, THEMED_ICONS[piece], x + w / 2, cy, w, rgba, piece)):
+            _glyph(cr, x + w / 2, cy, piece, size, bold)
         x += w + gap
 
 
@@ -286,26 +324,25 @@ def _txt_icon(cr, x, y, text, size=12, ha="left", va="top", bold=False):
     B-17). The icon sits at the anchor end — the side x is on, which in the
     split renderer is always the button's side — centred in a fixed slot,
     the text after it. So the icon reads left of the text on the left half
-    and right of it on the right half, mirrored like the layout. Plain
-    labels draw exactly as _txt, and so does ha="center" unless the icon
-    has a themed stand-in (a toast): then icon and text centre as one."""
+    and right of it on the right half, mirrored like the layout. With
+    ha="center" (a toast) icon and text centre as one. Either way the icon
+    centres on the text's cap height (_cap_mid). Plain labels draw exactly
+    as _txt."""
     icon, rest = split_icon(text)
-    themed = icon is not None and _icon_pieces(cr, icon, size) is not None
-    if icon is None or (ha == "center" and not themed):
+    if icon is None:
         _txt(cr, x, y, text, size, bold=bold, ha=ha, va=va)
         return
+    cy = _cap_mid(cr, y, rest, size, va, bold)
+    w = _icon_width(cr, icon, size)
     if ha == "center":
-        w, gap = _icon_width(cr, icon, size), round(size * 0.4)
+        gap = round(size * 0.4)
         left = x - (w + gap + _txt_size(cr, rest, size, bold)[0]) / 2
-        _draw_icon_head(cr, left, y, icon, size, va, bold)
+        _draw_icon_head(cr, left, cy, icon, size, bold)
         _txt(cr, left + w + gap, y, rest, size, bold=bold, va=va)
         return
     slot, gap = _icon_slot(cr, icon, size)
     sign = 1 if ha == "left" else -1
-    if themed:
-        _draw_icon_head(cr, x + sign * slot / 2 - _icon_width(cr, icon, size) / 2, y, icon, size, va)
-    else:
-        _txt(cr, x + sign * slot / 2, y, icon, size, ha="center", va=va)
+    _draw_icon_head(cr, x + sign * slot / 2 - w / 2, cy, icon, size, bold)
     _txt(cr, x + sign * (slot + gap), y, rest, size, bold=bold, ha=ha, va=va)
 
 
