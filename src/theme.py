@@ -34,6 +34,7 @@ became an amber power line with glow and shadow (B-12).
 
     [stick]                         # ring, cap, cap_border, width
     [callout]                       # width, alpha, dot
+    [crumbs]                        # base = true: the base config's pill too
     [connector]                     # the gesture line between both pads and its label:
     color = "#ffca33"               # color, alpha, width, style, glow, glow_radius,
     glow = 0.9                      # shadow = true/false, label_color, label_size,
@@ -133,6 +134,9 @@ class Theme:
     connector_label_color: tuple = None   # rgb; None = the line's colour
     connector_label_size: float = 13.0
     connector_label_glow: bool = False    # the halo around the label's letters too
+
+    # ── Breadcrumbs: the config stack's pills in the centre ──
+    crumbs_base: bool = False             # show the base config ("Steam Deck Base") too
 
     # ── Text ──
     text_weight: str = ""                 # Pango weight for non-bold text: Light, Medium, …
@@ -322,6 +326,7 @@ _SECTIONS = {
                   "label_color": ("connector_label_color", "rgb"),
                   "label_size": ("connector_label_size", "num"),
                   "label_glow": ("connector_label_glow", "bool")},
+    "crumbs": {"base": ("crumbs_base", "bool")},
     "text": {"font": ("font", "str"), "weight": ("text_weight", "str"),
              "scale": ("text_scale", "num"), "bold": ("text_bold", "str"),
              "spacing": ("text_spacing", "num"), "dim": ("text_dim", "num"),

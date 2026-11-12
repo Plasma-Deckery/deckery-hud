@@ -5,7 +5,7 @@ import dataclasses
 
 import pytest
 
-from reveal import (Content, CRUMBS, FULL, GROUPS, Hold, Reveal, RevealSettings, Want, GroupAnim)
+from reveal import (Content, crumbs, FULL, GROUPS, Hold, Reveal, RevealSettings, Want, GroupAnim)
 
 # The logic tests below are written against these numbers, not whatever
 # the defaults are at the moment.
@@ -16,15 +16,19 @@ def _s(**changes):
     return dataclasses.replace(S, **changes)
 
 
+BASE, APP = "Steam Deck Base", "Claude Desktop"
+
+
 def _state(held=(), combos=(), avail=(), lpad=False, rpad=False, gesture=False, gaming=False,
-           pressed=(), action_ts=None):
-    entry = {"action": ["KEY_A"], "kind": "remap", "label": None, "origin": "Steam Deck",
+           pressed=(), action_ts=None, origins=None):
+    entry = {"action": ["KEY_A"], "kind": "remap", "label": None, "origin": BASE,
              "silent": False}
     return {
         "context": {"held_modifiers": list(held), "available_modifiers": {k: {} for k in avail},
-                    "gaming_mode": gaming, "active_buttons": list(held) + list(pressed)},
+                    "gaming_mode": gaming, "active_buttons": list(held) + list(pressed),
+                    "config_stack": [BASE, APP]},
         "last_action": None if action_ts is None else {"label": "Copy", "ts": action_ts},
-        "modifier_active": {k: dict(entry) for k in combos},
+        "modifier_active": {k: dict(entry, origin=(origins or {}).get(k, BASE)) for k in combos},
         "trackpads": {"left": {"touching": lpad}, "right": {"touching": rpad},
                       "gesture": {"touching": gesture}},
     }
@@ -518,28 +522,63 @@ def test_set_settings_updates_the_grace():
 
 
 # ── Live round 3: the breadcrumb row comes along with a partial reveal ────
+# Only what is relevant: the config layers that contribute a binding to what
+# is shown, and the held modifiers. "Steam Deck Base" is hidden by default
+# (theme crumbs.base).
 
-def test_a_partial_reveal_brings_the_breadcrumbs():
-    """Which application, and what the colours mean: the centre column's
-    breadcrumb row (not the whole column) shows with any single element."""
+@pytest.fixture
+def base_crumb(monkeypatch):
+    import theme
+    monkeypatch.setattr(theme, "_active", dataclasses.replace(theme.Theme(), crumbs_base=True))
+
+
+def test_modifier_reveal_shows_the_app_that_binds_the_combos():
+    """L1 in Claude Desktop: Claude defines Undo/Redo — its pill and L1."""
+    r = Reveal(_s(breadcrumbs=True))
+    st = _state(**L1, origins={"BTN_SOUTH": APP})
+    r.update(st, 0.0)
+    assert r.update(st, 1.5)["center"] == Want(crumbs({APP}), "detector")
+
+
+def test_modifier_reveal_without_app_combos_shows_only_the_modifiers():
+    """L1+R1 with no Claude command: no Claude pill, just the modifiers."""
+    r = Reveal(_s(breadcrumbs=True))
+    st = _state(held=["BTN_TL", "BTN_TR"], combos=["BTN_NORTH"])
+    r.update(st, 0.0)
+    assert r.update(st, 1.5)["center"] == Want(crumbs(()), "detector")
+
+
+def test_base_combos_show_the_base_when_it_is_shown(base_crumb):
+    r = Reveal(_s(breadcrumbs=True))
+    st = _state(held=["BTN_TL", "BTN_TR"], combos=["BTN_NORTH", "BTN_SOUTH"],
+                origins={"BTN_SOUTH": APP})
+    r.update(st, 0.0)
+    assert r.update(st, 1.5)["center"] == Want(crumbs({BASE, APP}), "detector")
+
+
+def test_pad_reveal_has_no_breadcrumbs_with_the_base_hidden():
+    """A pad's mode always comes from the base config (makima's trackpad
+    is device-level): with the base hidden, nothing is relevant."""
     r = Reveal(_s(breadcrumbs=True))
     r.update(_state(lpad=True), 0.0)
-    assert r.update(_state(lpad=True), 1.5) == {"LPad": Want(FULL, "detector"),
-                                                "center": Want(CRUMBS, "detector")}
+    assert r.update(_state(lpad=True), 1.5) == {"LPad": Want(FULL, "detector")}
 
 
-def test_breadcrumbs_with_the_modifier_layer_and_gesture():
+def test_pad_reveal_shows_the_base_when_it_is_shown(base_crumb):
     r = Reveal(_s(breadcrumbs=True))
-    r.update(_state(**L1), 0.0)
-    assert r.update(_state(**L1), 1.5)["center"] == Want(CRUMBS, "detector")
+    r.update(_state(lpad=True), 0.0)
+    assert r.update(_state(lpad=True), 1.5)["center"] == Want(crumbs({BASE}), "detector")
+
+
+def test_gesture_has_no_breadcrumbs(base_crumb):
     r = Reveal(_s(breadcrumbs=True))
     r.update(_makima_pads(True, True, True), 0.0)
-    assert r.update(_makima_pads(True, True, True), 1.5)["center"] == Want(CRUMBS, "detector")
+    assert "center" not in r.update(_makima_pads(True, True, True), 1.5)
 
 
 def test_no_breadcrumbs_without_a_reveal():
     r = Reveal(_s(breadcrumbs=True))
-    assert r.update(_state(lpad=True), 0.0) == {}
+    assert r.update(_state(**L1, origins={"BTN_SOUTH": APP}), 0.0) == {}
 
 
 def test_full_hud_shows_the_whole_centre():
@@ -551,8 +590,9 @@ def test_full_hud_shows_the_whole_centre():
 
 def test_breadcrumbs_can_be_switched_off():
     r = Reveal(_s(breadcrumbs=False))
-    r.update(_state(lpad=True), 0.0)
-    assert "center" not in r.update(_state(lpad=True), 1.5)
+    st = _state(**L1, origins={"BTN_SOUTH": APP})
+    r.update(st, 0.0)
+    assert "center" not in r.update(st, 1.5)
 
 
 # ── Live round 3: transitions crawled under CPU load ──────────────────────

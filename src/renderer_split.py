@@ -31,7 +31,7 @@ from parts import draw_part, part_bbox, clip_to_part, part_subpaths, stroke_outl
 from shadow import (GroupShadowSpec, group_shadow_layers, ink_colours, paint_bleed, paint_scaled,
                     style_from_env)
 import theme
-from reveal import FULL
+from reveal import FULL, crumb_names
 from elements import ELEMENTS, ELEMENT_IDS, side_of
 from settings import dbg, debug_enabled
 
@@ -484,18 +484,19 @@ _center_cache = []   # [(key, layer)], most recent first, like _group_cache
 
 
 def _get_center_layer(state, center, sw, sh, dev_scale=1.0, content=FULL):
-    """content: FULL, or reveal.CRUMBS for the breadcrumb row alone."""
+    """content: FULL, or reveal.crumbs(...) for the breadcrumb row alone."""
     ctx = state.get("context") or {}
-    crumbs_only = content != FULL
+    names = crumb_names(content)
+    crumbs_only = names is not None
     key = (sw, sh, dev_scale, theme.current(), tuple(ctx.get("config_stack") or ()),
            tuple(ctx.get("held_modifiers") or ()),
-           None if crumbs_only else bool(ctx.get("paused", False)), crumbs_only)
+           None if crumbs_only else bool(ctx.get("paused", False)), names)
     for i, (k, layer) in enumerate(_center_cache):
         if k == key:
             _center_cache.insert(0, _center_cache.pop(i))
             return layer
     with capture_text_boxes() as cap:
-        surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0, crumbs_only),
+        surf, rect = _render_cropped(lambda cr: _draw_center(cr, state, center, 1.0, names),
                                      sw, sh, dev_scale)
     shadow, bleed = _element_shadows(ELEMENTS["center"], None, cap, surf, rect, dev_scale)
     layer = GroupLayer(name="center", side=None, surface=surf, rect=rect, tx=None,
@@ -1743,7 +1744,9 @@ def _cluster_of(btn_key, cluster_name):
     return cluster_name if btn_key in CLUSTER_BUTTONS.get(cluster_name, ()) else None
 
 
-def _draw_center(cr, state, center, open_t, crumbs_only=False):
+def _draw_center(cr, state, center, open_t, crumbs=None):
+    """crumbs: None for the whole column, else the breadcrumb row alone
+    with only these config layers (see reveal.crumbs)."""
     x0, y0, x1, y1 = center
     cw = x1 - x0
     alpha = open_t
@@ -1754,8 +1757,8 @@ def _draw_center(cr, state, center, open_t, crumbs_only=False):
 
     cx = (x0 + x1) / 2
     bx, by, badge_w, badge_h = center_badge_rect(center)
-    if crumbs_only:
-        _draw_crumbs(cr, state, cx, by + badge_h + 26, alpha)
+    if crumbs is not None:
+        _draw_crumbs(cr, state, cx, by + badge_h + 26, alpha, crumbs)
         return
 
     # Title
@@ -1807,20 +1810,26 @@ def _draw_center(cr, state, center, open_t, crumbs_only=False):
     _txt(cr, kx + kw / 2, ky + kh / 2, "Theme", size=10, ha="center", va="mid")
 
 
-def _draw_crumbs(cr, state, cx, y, alpha):
+def _draw_crumbs(cr, state, cx, y, alpha, names=None):
     """The breadcrumb row: the config stack (base, then app layers in their
-    colour) and the held modifiers' pills in theirs."""
+    colour) and the held modifiers' pills in theirs. names: only these
+    config layers (None: all). The base is left out unless the theme shows
+    it (crumbs.base)."""
     ctx = state.get("context") or {}
-    stack = ctx.get("config_stack") or ["—"]
+    full = ctx.get("config_stack") or ["—"]
     held = ctx.get("held_modifiers", [])
     mods = [_btn_short(m) for m in held]
     t = theme.current()
+    base_style = ((*t.ink, 0.06 * alpha), (*t.ink, 0.80 * alpha))
+    app_style = ((*t.layer, alpha), (0, 0, 0, alpha))
+    shown = [(n, base_style if i == 0 else app_style) for i, n in enumerate(full)
+             if (names is None or n in names) and (i > 0 or t.crumbs_base)]
+    stack = [n for n, _s in shown]
     labels = stack + mods
-    styles = (
-        [((*t.ink, 0.06 * alpha), (*t.ink, 0.80 * alpha))]
-        + [((*t.layer, alpha), (0, 0, 0, alpha))] * max(0, len(stack) - 1)
-        + [((*t.mod_rgb((m,)), alpha), (0, 0, 0, alpha)) for m in held]
-    )
+    if not labels:
+        return
+    styles = [st for _n, st in shown] + [((*t.mod_rgb((m,)), alpha), (0, 0, 0, alpha))
+                                          for m in held]
     n_gaps = max(0, len(labels) - 1)
     seps = ["›" if i < len(stack) else "" for i in range(n_gaps)]
     _pill_row(cr, cx, y, labels, sep=seps, size=10,
