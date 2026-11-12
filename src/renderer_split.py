@@ -721,7 +721,7 @@ def _draw_gesture_connector(cr, l_tx, r_tx, pv, sw):
     text_col = (*t.connector_label_rgb(), 1.0)
     lw = t.connector_width or t.callout_width
     size = t.connector_label_size
-    label = pv.lpad_label     # == pv.rpad_label ("Gestures") while gesturing
+    label = pv.lpad_label     # == pv.rpad_label (viewmodel.gesture_label) while gesturing
 
     tw, _th = _txt_size(cr, label, size)
     gap = tw / 2 + 6   # stop the lines short of the text, same convention _callouts() uses

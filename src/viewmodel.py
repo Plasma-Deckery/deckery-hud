@@ -123,6 +123,21 @@ class PadLegendVM:
     gesture: bool
 
 
+# What two fingers do on makima's combined gesture pad: it hands libinput
+# two touch slots and libinput makes two-finger scroll and pinch-zoom of
+# them (makima gesture_pad.rs). Tap-to-click is off there by default, so
+# there is no two-finger right-click unless makima says otherwise.
+GESTURE_ACTIONS = ("scroll", "zoom")
+
+
+def gesture_label(gesture):
+    """The connector's label while both pads are touched: the gesture pad's
+    actions, from makima's trackpads.gesture.actions when it reports them,
+    else GESTURE_ACTIONS."""
+    actions = gesture.get("actions") or GESTURE_ACTIONS
+    return " · ".join(a.replace("-", " ").title() for a in actions)
+
+
 def pad_legend_vm(state):
     """Trackpad mode-label row — same source data the LPad/RPad legend
     entries have always come from, pulled out so both renderers compute it
@@ -130,9 +145,14 @@ def pad_legend_vm(state):
     pads = state.get("trackpads") or {}
     lpad = pads.get("left") or {}
     rpad = pads.get("right") or {}
-    gesture = (pads.get("gesture") or {}).get("touching", False)
+    gesture_state = pads.get("gesture") or {}
+    gesture = gesture_state.get("touching", False)
     lpad_mode = (lpad.get("mode") or "—").replace("-", " ").title()
     rpad_mode = (rpad.get("mode") or "—").replace("-", " ").title()
+    if gesture:
+        # makima reports both pads' mode as "gestures" then; say what the
+        # two fingers do instead.
+        lpad_mode = rpad_mode = gesture_label(gesture_state)
     lpad_touch = lpad.get("touching", False)
     rpad_touch = rpad.get("touching", False)
     # gesture → amber (active_mod) for both; individual touch → white (active)
