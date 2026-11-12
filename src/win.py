@@ -1093,10 +1093,17 @@ class Win(Gtk.ApplicationWindow):
                 surf, *r = groups[g].plate
                 frame[g]["plate"] = (self._texture("plate_" + g, surf), tuple(r))
             plates.append((g, opacity[g], frame[g]["plate"], dx[g]))
-        # Old plates per crossfading group; a few at once at most in practice.
+        # Old plates per crossfading group, dissolved by how far they are:
+        # a layer change starts every element's crossfade on one frame, so
+        # they share one level. Past three levels (never seen) the rest
+        # just shows the new plate.
         olds = {g: self._xfade[g].old.get("plate") for g in mix}
-        xf = [g for g in mix if olds[g] != frame[g]["plate"]][:3]
-        if not any(slot for _g, _o, slot, _s in plates) and not any(olds[g] for g in xf):
+        levels = {}
+        for g in mix:
+            if olds[g] != frame[g]["plate"]:
+                levels.setdefault(mix[g], set()).add(g)
+        xf = sorted(levels.items())[:3]
+        if not any(slot for _g, _o, slot, _s in plates) and not any(olds[g] for g in mix):
             return
         style = shadow_style()
         (ramp, curve), border = self._plate_transfer()
@@ -1141,8 +1148,9 @@ class Win(Gtk.ApplicationWindow):
             if i == len(xf):
                 passes(old_for)
                 return
-            snapshot.push_cross_fade(mix[xf[i]])
-            dissolve(i + 1, old_for | {xf[i]})
+            k, gs = xf[i]
+            snapshot.push_cross_fade(k)
+            dissolve(i + 1, old_for | gs)
             snapshot.pop()
             dissolve(i + 1, old_for)
             snapshot.pop()

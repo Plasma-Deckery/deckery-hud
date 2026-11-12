@@ -118,3 +118,33 @@ def test_gesture_start_dissolves_the_pad_with_its_plate(hud, name, monkeypatch):
     assert len(ys), "the right pad's row leaves no trace at rest"
     old, half, new = (f[ys, xs, 3].mean() for f in (rest, mid, end))
     assert new + 0.1 * (old - new) < half < old - 0.1 * (old - new)
+
+
+def test_full_hud_layer_change_dissolves_every_plate(hud, monkeypatch):
+    """L1 held in the full HUD rebinds many elements at once: every one of
+    them dissolves its plate, not only the first few — and over the
+    theme's backdrop (B-20), which stays as it is."""
+    import theme
+    from reveal import GROUPS
+    monkeypatch.setattr(theme, "_active", theme.current())
+    theme.activate("glass")
+    w, frame, tick = hud
+    full = {g: Want(FULL, "full") for g in GROUPS}
+    w.on_state(SAMPLES["base_only"])
+    w.set_wants(full)
+    tick(1.0)
+    frame()
+    rest = frame()
+    w.on_state(SAMPLES["held_modifier"])
+    w.set_wants(full)
+    first = frame()
+    plates = [g for g, x in w._xfade.items()
+              if x.old.get("plate") != w._frame[g]["plate"]]
+    assert len(plates) > 3, plates
+    diff = np.abs(rest - first).max(axis=2)
+    for g in w._frame:
+        if w._frame_ctx[1]["groups"][g].tx is None:
+            continue
+        lx, ly, lw, lh = (int(v) for v in live_rect(g, w._frame_ctx[1], SW, SH))
+        diff[max(0, ly - 2):ly + lh + 2, max(0, lx - 2):lx + lw + 2] = 0
+    assert diff.max() <= 8, int((diff > 8).sum())
