@@ -27,6 +27,8 @@ def test_base_is_the_old_constants():
     assert t == dataclasses.replace(theme.Theme(), label="Neon", order=5, shadow="aura",
                                     text=(1.0, 1.0, 1.0), text_dim=0.0,
                                     connector_glow=0.55, connector_glow_radius=5.0,
+                                    backdrop_color=t.backdrop_color, backdrop_opacity=0.25,
+                                    backdrop_vignette=0.55,
                                     shadow_tweaks=t.shadow_tweaks)
     assert t.modifier == helpers.C_MOD
     assert t.layer == helpers.C_LAYER
@@ -35,7 +37,8 @@ def test_base_is_the_old_constants():
     assert t.pill_fg == helpers.GLASS_PILL_FG
     assert t.shadow_style() == dataclasses.replace(
         shadow.PRESETS["aura"], tint=True, tint_value=0.12, tint_saturation=0.5,
-        glow_alpha=0.35, glow_radius=3.5)
+        glow_alpha=0.4, glow_radius=4, glow_neutral=0.5, glow_text=True,
+        glow_text_alpha=0.6)
     assert theme.Theme().shadow_style() == shadow.style_from_env()
 
 
@@ -139,10 +142,10 @@ def test_default_is_wireframe():
 
 
 def test_neon_is_calm():
-    # Neon glows only around coloured lines, faintly: no halo around text
-    # (it blurs small letters) or around white (it dazzles).
+    # Everything in Neon glows a little — coloured lines, white, text — but
+    # far weaker than the round that dazzled (0.75, white at full, text 0.9).
     st = theme.load("neon").shadow_style()
-    assert not st.glow_text and st.glow_neutral == 0
+    assert st.glow_text and 0 < st.glow_neutral <= 0.5 and st.glow_text_alpha <= 0.6
     assert st.glow_alpha <= 0.4 and st.glow_radius <= 4
     assert theme.load("neon").connector_glow < theme.Theme().connector_glow
 
@@ -368,7 +371,7 @@ def test_backdrop_section(user_themes):
     assert t.backdrop_color == (0x10 / 255, 0x20 / 255, 0x30 / 255)
     assert (t.backdrop_opacity, t.backdrop_vignette) == (0.4, 0.5)
     assert theme.load("wireframe").backdrop_opacity > 0
-    assert theme.load("neon").backdrop_opacity == 0
+    assert 0 < theme.load("neon").backdrop_opacity < theme.load("wireframe").backdrop_opacity
     assert theme.load("contrast").backdrop_opacity == 0
 
 

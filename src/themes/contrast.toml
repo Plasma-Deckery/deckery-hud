@@ -69,3 +69,7 @@ edge_radius = 2
 color = "#ffd600"
 width = 3
 glow = 0
+
+# No dim behind the open HUD: contrast comes from the plates, not the screen.
+[backdrop]
+opacity = 0
