@@ -111,7 +111,7 @@ def _centre_tint(paused, monkeypatch):
     state = copy.deepcopy(SAMPLES["base_only"])
     state.setdefault("context", {})["paused"] = paused
     rs.group_layers(state, SW, SH, {"center": FULL})
-    key, _layers = rs._shadow_layer_cache["center"]
+    key, _layers, _words = rs._shadow_layer_cache["center"]
     spec, texts = key[0], key[1]
     out = {}
     for want in ("Deckery HUD", "Steam Deck"):
